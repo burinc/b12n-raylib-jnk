@@ -40,14 +40,35 @@
 (defn- m2-jar? [rel]
   (fs/exists? (fs/path home ".m2" "repository" rel)))
 
+(def ^:private raylib-patch
+  "jank-raylib-sys/patches/macos-opengl43-forward-compat.patch")
+
+;; `git apply --reverse --check` succeeds iff the patch's changes are
+;; already present in the working tree — used to decide whether applying
+;; it would error (git apply fails on an already-applied patch).
+(defn- raylib-patch-applied? []
+  (zero? (:exit (p/shell {:dir "jank-raylib-sys/raylib" :continue true
+                          :out :string :err :string}
+                         "git" "apply" "--reverse" "--check"
+                         (str (fs/absolutize raylib-patch))))))
+
+;; The submodule-fetch guard (CMakeLists.txt existence) and the
+;; patch-application decision are deliberately independent: README's own
+;; `git clone --recurse-submodules` (or a manual `git submodule update
+;; --init --recursive`) populates raylib's working tree, CMakeLists.txt
+;; included, before any `bb` command ever runs — so a single guard shared
+;; between "fetch" and "patch" would skip the patch forever on that path.
+;; Checking patch-applied? separately means the patch lands regardless of
+;; which path fetched the submodule content, and stays idempotent (a
+;; no-op once already applied).
 (defn ensure-submodules! []
   (when-not (fs/exists? "jank-raylib-sys/raylib/CMakeLists.txt")
     (info "Fetching git submodule (raylib)…")
-    (p/shell "git" "submodule" "update" "--init" "--recursive")
+    (p/shell "git" "submodule" "update" "--init" "--recursive"))
+  (when-not (raylib-patch-applied?)
     (info "Applying macOS OpenGL 4.3 forward-compat patch to raylib…")
     (p/shell {:dir "jank-raylib-sys/raylib"}
-             "git" "apply"
-             (str (fs/absolutize "jank-raylib-sys/patches/macos-opengl43-forward-compat.patch")))))
+             "git" "apply" (str (fs/absolutize raylib-patch)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Library installation (idempotent — skips when the jar is already in ~/.m2)
@@ -353,7 +374,7 @@
   (ok "Removed all */target build dirs."))
 
 (defn print-examples []
-  (header "🎮 lein-jank-playground — raylib examples (jank)")
+  (header "🎮 b12n-raylib-jnk — raylib examples (jank)")
   (doseq [{:keys [profile desc controls]} examples]
     (println (str "  " (c :cyan (format "bb %-16s" profile)) " " desc))
     (when controls (println (str "  " (apply str (repeat 20 " ")) (c :magenta controls)))))
@@ -396,7 +417,7 @@
         (info-section (str "Examples: " title " (" (count rows) ")")
                       (map (juxt :profile :desc) rows)))))
   (info-section "Build"
-                [["install" "Install all local jank libraries into ~/.m2 (idempotent)"]
+                [["install" "Install jank-raylib-sys into ~/.m2 (idempotent)"]
                  ["clean" "Remove */target build dirs"]])
   (info-section "Meta"
                 [["examples" "Flat list of every example, with controls"]
