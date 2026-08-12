@@ -17,7 +17,7 @@
     indexing.
   - Uses jank's clojure.string (str/split-lines, str/split regex) and the
     seq API (into, peek, pop) - available beside the C++ :include (see
-    docs/guide/jank-interop-lessons.md). (str/replace is NOT ported in jank
+    docs/guide/jvm-surface-gaps.md). (str/replace is NOT ported in jank
     yet - a runtime TODO - so tabs are baked into the text as spaces.)
     Word/char wrap are two small greedy passes; like the C, a word wider
     than the container falls back to a mid-word character break, so text

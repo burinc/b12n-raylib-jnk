@@ -11,7 +11,7 @@
   jank-native notes:
   - GetMonitorName returns a native `const char *`; jank's `str` folds it
     straight into a jank string - `(str (cpp/GetMonitorName i))` (proven
-    here, see docs/guide/jank-interop-lessons.md).
+    here, see docs/guide/jvm-surface-gaps.md).
   - The C original caches monitors in a native `MonitorInfo[]` struct
     array. jank can't hold native values in a collection, so each
     monitor's Vector2 position + int fields are BOXED into a jank map the

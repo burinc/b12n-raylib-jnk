@@ -20,7 +20,7 @@
  * Santamaria (@raysan5), zlib/libpng license), only marked static.
  *
  * Also included: per-type scalar uniform setters (the staging pattern from
- * docs/guide/jank-interop-lessons.md, "prefer per-type scalar C setters"),
+ * docs/guide/cpp-interop-toolbox.md, "prefer per-type scalar C setters"),
  * so lighting examples need no per-file cpp/raw shim block.
  */
 

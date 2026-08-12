@@ -13,7 +13,7 @@
 
   jank-native: every pointer-taking Image* op forms its pointer with
   (cpp/& img) on a mutable let-local (see the pointer-interop section of
-  docs/guide/jank-interop-lessons.md). The source `cat` image is passed
+  docs/guide/cpp-interop-toolbox.md). The source `cat` image is passed
   by value to ImageDraw. All setup runs once before the loop; only the
   final texture is drawn each frame."
   (:include "raylib.h"))
