@@ -20,7 +20,6 @@ clone with nothing else needed beyond the requirements below.
 - A C++ compiler
 - CMake
 - [Babashka](https://babashka.org)
-- pkg-config
 
 Verified on macOS with jank `0.1-alpha` and `lein-jank 2026.06-1`.
 
@@ -78,8 +77,11 @@ models, audio). `bb info` gives you the same breakdown from the terminal.
   (Apple caps out at OpenGL 4.1; GLFW rejects a 4.3 context request
   unconditionally on macOS, regardless of any compatibility hint). To try
   `rlgl-compute` on a platform where OpenGL 4.3 is real (Linux, Windows),
-  change `OPENGL_VERSION` to `"4.3"` in `jank-raylib-sys/jank-build.bb`,
-  `bb clean`, and rebuild — it will not work on macOS regardless.
+  change `OPENGL_VERSION` to `"4.3"` in `jank-raylib-sys/jank-build.bb`, then
+  `bb install` (consumers resolve `jank-build.bb` from the `~/.m2` jar, not
+  the working tree — `bb clean` alone won't pick up the edit), then
+  `bb clean` (or delete `raylib-examples/target`) and rebuild. This will not
+  work on macOS regardless.
 
 ## Porting guides
 

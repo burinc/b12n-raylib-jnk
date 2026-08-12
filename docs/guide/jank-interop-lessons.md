@@ -322,6 +322,13 @@ Prerequisites and patterns:
   compute functions compile to no-ops. 4.3 is the same GL 3.3 feature
   set plus compute, so the GLSL-330 examples are unaffected (regression
   checked). Proof line: `GL: Compute shaders supported`.
+
+  > **Added in this repo:** this project's own default was later changed
+  > to `OPENGL_VERSION "3.3"` (macOS's native GL backend caps at 4.1, so a
+  > global 4.3 build broke window creation for every example on macOS).
+  > `rlgl-compute` now needs the manual `4.3` override described above,
+  > which will not work on macOS regardless of the override — see the root
+  > README's "Known limitations" section.
 - **SSBO ids are plain unsigned ints** — hold them as jank ints and the
   classic ping-pong buffer swap (`ssboA <-> ssboB`) is just `recur`
   with the loop vars exchanged. No native value crosses the loop.

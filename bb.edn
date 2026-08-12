@@ -246,7 +246,7 @@
            :task (h/run-all! (first *command-line-args*))}
 
   ;; --- build ---
-  install {:doc "Install all local jank libraries into ~/.m2 (idempotent)"
+  install {:doc "Install jank-raylib-sys into ~/.m2 (idempotent)"
            :task (h/install-all!)}
   clean   {:doc "Remove */target build dirs"
            :task (h/clean!)}}}
