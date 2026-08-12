@@ -43,7 +43,11 @@
 (defn ensure-submodules! []
   (when-not (fs/exists? "jank-raylib-sys/raylib/CMakeLists.txt")
     (info "Fetching git submodule (raylib)…")
-    (p/shell "git" "submodule" "update" "--init" "--recursive")))
+    (p/shell "git" "submodule" "update" "--init" "--recursive")
+    (info "Applying macOS OpenGL 4.3 forward-compat patch to raylib…")
+    (p/shell {:dir "jank-raylib-sys/raylib"}
+             "git" "apply"
+             (str (fs/absolutize "jank-raylib-sys/patches/macos-opengl43-forward-compat.patch")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Library installation (idempotent — skips when the jar is already in ~/.m2)
