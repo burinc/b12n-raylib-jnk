@@ -68,6 +68,19 @@ catalog** — every ported example with its official C source and what it
 shows, grouped by raylib category (shapes, core, text, textures, shaders,
 models, audio). `bb info` gives you the same breakdown from the terminal.
 
+## Known limitations
+
+- **`rlgl-compute` does not run out of the box.** It needs OpenGL 4.3
+  compute-shader support (`rlLoadShaderProgramCompute`, SSBOs,
+  `rlComputeShaderDispatch`). This repo builds `jank-raylib-sys` at
+  `OPENGL_VERSION "3.3"` by default — the version every other example
+  needs, and the version macOS's native GL backend actually supports
+  (Apple caps out at OpenGL 4.1; GLFW rejects a 4.3 context request
+  unconditionally on macOS, regardless of any compatibility hint). To try
+  `rlgl-compute` on a platform where OpenGL 4.3 is real (Linux, Windows),
+  change `OPENGL_VERSION` to `"4.3"` in `jank-raylib-sys/jank-build.bb`,
+  `bb clean`, and rebuild — it will not work on macOS regardless.
+
 ## Porting guides
 
 `docs/guide/` holds the guides written while porting these examples:
