@@ -1,0 +1,207 @@
+(ns raylib-examples.animation-blending
+  "raylib [models] example - animation blending, ported to jank.
+
+  Two robot animations cross-faded on demand: SPACE starts a 2-second
+  blend from the playing animation to the other one (both advance
+  during the fade). LEFT/RIGHT pick animation A, UP/DOWN animation B,
+  Z/X and N/M change their speeds, P pauses. Two timelines + a blend
+  progress bar at the bottom. Orbital camera. ESC quits.
+  Based on raylib/examples/models/models_animation_blending.c
+
+  jank-native notes:
+  - First UpdateModelAnimationEx: a shim taking both animation
+    indices, both (fractional) frames and the blend factor.
+  - The raygui dropdowns/sliders/progress bars become keyboard
+    controls + hand-drawn bars (the animation-timing pattern).
+  - The C's SUPPORT_GPU_SKINNING block is compiled out by default
+    (CPU skinning) - same here. The blend-direction progress-bar
+    styling is simplified to a single left-to-right bar."
+  (:require [clojure.string :as string])
+  (:include "raylib.h"))
+
+(cpp/raw "static ModelAnimation *jank_anims = NULL;
+static int jank_anims_count = 0;
+static int jank_load_anims(const char* path) {
+  jank_anims = LoadModelAnimations(path, &jank_anims_count);
+  return jank_anims_count;
+}
+static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
+static const char* jank_anim_name(int i) { return jank_anims[i].name; }
+static void jank_update_anim_f(Model m, int i, double frame) {
+  UpdateModelAnimation(m, jank_anims[i], (float)frame);
+}
+/* blend two animation poses: 0.0 = all first, 1.0 = all second */
+static void jank_update_anim_blend(Model m, int i0, double f0,
+                                   int i1, double f1, double blend) {
+  UpdateModelAnimationEx(m, jank_anims[i0], (float)f0,
+                         jank_anims[i1], (float)f1, (float)blend);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def BLEND-TIME 2.0)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn- fmt
+  "Trim a real to n digits past the dot."
+  [v n]
+  (let [s (str v)
+        dot (string/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot n 1))) s)))
+
+(defn- advance
+  "Advance a frame by speed, wrapping at the keyframe count."
+  [frame speed keyframes]
+  (let [f (+ frame speed)]
+    (if (>= f keyframes) 0.0 f)))
+
+(defn- draw-timeline
+  "One hand-drawn playback bar with keyframe ticks."
+  [{:keys [y label frame keyframes]}]
+  (let [bar-x 60
+        bar-w (- WIDTH 180)]
+    (cpp/DrawText label 10 (+ y 5) 10 cpp/DARKGRAY)
+    (cpp/DrawRectangle bar-x y bar-w 20 cpp/LIGHTGRAY)
+    (cpp/DrawRectangle bar-x y (int (* (/ frame keyframes) bar-w)) 20 cpp/SKYBLUE)
+    (cpp/DrawRectangleLines bar-x y bar-w 20 cpp/GRAY)
+    (loop [i 0]
+      (when (< i keyframes)
+        (cpp/DrawRectangle (+ bar-x (int (* (/ (+ 0.0 bar-w) keyframes) i))) y 1 20 cpp/BLUE)
+        (recur (inc i))))
+    (cpp/DrawText (str "FRAME: " (fmt frame 2) " / " keyframes)
+                  (+ bar-x bar-w 8) (+ y 5) 10 cpp/DARKGRAY)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - animation blending (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 6.0) (cpp/float 6.0) (cpp/float 6.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModel (str RES "models/gltf/robot.glb"))
+        anim-count (int (cpp/jank_load_anims (str RES "models/gltf/robot.glb")))]
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [playing(0|1) transition? idx0 idx1 frame0 frame1
+    ;;         speed0 speed1 blend-counter paused?]; the C's walking(10)
+    ;;         and running(6) defaults kept.
+    (loop [playing 0
+           transition? false
+           idx0 10
+           idx1 6
+           frame0 0.0
+           frame1 0.0
+           speed0 0.5
+           speed1 0.5
+           blend-counter 0.0
+           paused? false]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (let [paused? (if (cpp/IsKeyPressed cpp/KEY_P) (not paused?) paused?)
+              idx0 (cond (cpp/IsKeyPressed cpp/KEY_RIGHT) (int (mod (inc idx0) anim-count))
+                         (cpp/IsKeyPressed cpp/KEY_LEFT) (int (mod (+ idx0 (dec anim-count)) anim-count))
+                         :else idx0)
+              idx1 (cond (cpp/IsKeyPressed cpp/KEY_UP) (int (mod (inc idx1) anim-count))
+                         (cpp/IsKeyPressed cpp/KEY_DOWN) (int (mod (+ idx1 (dec anim-count)) anim-count))
+                         :else idx1)
+              speed0 (cond (cpp/IsKeyPressed cpp/KEY_X) (+ speed0 0.1)
+                           (cpp/IsKeyPressed cpp/KEY_Z) (- speed0 0.1)
+                           :else speed0)
+              speed0 (if (> speed0 2.0) 2.0 (if (< speed0 0.1) 0.1 speed0))
+              speed1 (cond (cpp/IsKeyPressed cpp/KEY_M) (+ speed1 0.1)
+                           (cpp/IsKeyPressed cpp/KEY_N) (- speed1 0.1)
+                           :else speed1)
+              speed1 (if (> speed1 2.0) 2.0 (if (< speed1 0.1) 0.1 speed1))
+              keyframes0 (int (cpp/jank_anim_keyframes (int idx0)))
+              keyframes1 (int (cpp/jank_anim_keyframes (int idx1)))
+
+              ;; SPACE starts a transition to the other animation
+              start? (and (not paused?)
+                          (not transition?)
+                          (if (cpp/IsKeyPressed cpp/KEY_SPACE) true false))
+              frame0 (if (and start? (= playing 1)) 0.0 frame0)
+              frame1 (if (and start? (= playing 0)) 0.0 frame1)
+              transition? (if start? true transition?)
+              blend-counter (if start? 0.0 blend-counter)
+              next-anim (- 1 playing)
+              blend (/ blend-counter BLEND-TIME)]
+
+          (when (not paused?)
+            (if transition?
+              ;; both animations advance while the blend factor rises
+              (let [f0 (advance frame0 speed0 keyframes0)
+                    f1 (advance frame1 speed1 keyframes1)]
+                (if (= next-anim 1)
+                  (cpp/jank_update_anim_blend model (int idx0) f0 (int idx1) f1 blend)
+                  (cpp/jank_update_anim_blend model (int idx1) f1 (int idx0) f0 blend)))
+              ;; only the current animation plays
+              (if (= playing 0)
+                (cpp/jank_update_anim_f model (int idx0) (advance frame0 speed0 keyframes0))
+                (cpp/jank_update_anim_f model (int idx1) (advance frame1 speed1 keyframes1)))))
+
+          ;; recompute the state the branches produced (pure jank mirror)
+          (let [frame0 (if paused?
+                         frame0
+                         (if (or transition? (= playing 0))
+                           (advance frame0 speed0 keyframes0)
+                           frame0))
+                frame1 (if paused?
+                         frame1
+                         (if (or transition? (= playing 1))
+                           (advance frame1 speed1 keyframes1)
+                           frame1))
+                blend-counter (if (and transition? (not paused?))
+                                (+ blend-counter (+ 0.0 (cpp/GetFrameTime)))
+                                blend-counter)
+                done? (and transition? (> blend 1.0))
+                frame0 (if (and done? (= playing 0)) 0.0 frame0)
+                frame1 (if (and done? (= playing 1)) 0.0 frame1)
+                playing (if done? next-anim playing)
+                transition? (if done? false transition?)
+                blend-counter (if done? 0.0 blend-counter)]
+
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/RAYWHITE)
+
+            (cpp/BeginMode3D camera)
+            (cpp/DrawModel model
+                           (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 1.0) cpp/WHITE)
+            (cpp/DrawGrid 10 (cpp/float 1.0))
+            (cpp/EndMode3D)
+
+            (when transition?
+              (cpp/DrawText "ANIM TRANSITION BLENDING!" 170 50 30 cpp/BLUE))
+
+            ;; the two selected animations + speeds (raygui, keyboardized)
+            (cpp/DrawText (str "A: " (cpp/jank_anim_name (int idx0))
+                               " x" (fmt speed0 1) "  (LEFT/RIGHT, Z/X)")
+                          10 10 10 (if (= playing 0) cpp/DARKGREEN cpp/GRAY))
+            (cpp/DrawText (str "B: " (cpp/jank_anim_name (int idx1))
+                               " x" (fmt speed1 1) "  (UP/DOWN, N/M)")
+                          (- WIDTH 260) 10 10 (if (= playing 1) cpp/DARKGREEN cpp/GRAY))
+
+            ;; blend progress bar
+            (cpp/DrawRectangle 180 24 440 12 cpp/LIGHTGRAY)
+            (cpp/DrawRectangle 180 24 (int (* (if (> blend 1.0) 1.0 blend) 440)) 12 cpp/SKYBLUE)
+            (cpp/DrawRectangleLines 180 24 440 12 cpp/GRAY)
+
+            (cpp/DrawText "PRESS SPACE to START BLENDING  ·  P pause"
+                          (int (quot (- WIDTH 250) 2)) (- HEIGHT 92) 10 cpp/DARKGRAY)
+
+            (draw-timeline {:y (- HEIGHT 60) :label "ANIM A"
+                            :frame frame0 :keyframes keyframes0})
+            (draw-timeline {:y (- HEIGHT 30) :label "ANIM B"
+                            :frame frame1 :keyframes keyframes1})
+
+            (cpp/EndDrawing)
+            (recur playing transition? idx0 idx1 frame0 frame1
+                   speed0 speed1 blend-counter paused?)))))
+
+    (cpp/UnloadModel model))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,91 @@
+(ns raylib-examples.gif-player
+  "raylib [textures] example - gif player, ported to jank.
+
+  An animated GIF loaded as one Image holding every frame back-to-back
+  in image.data; each frame is streamed to a single texture with
+  UpdateTexture by pointing at that frame's byte offset. RIGHT/LEFT
+  change the frame delay. Q quits. Scarfy sprite by Eiden Marsal.
+  Based on raylib/examples/textures/textures_gif_player.c
+
+  jank-native notes (this proves two new pointer techniques):
+  - LoadImageAnim writes the frame count through an `int *frames`
+    out-param. jank makes a native int (`(cpp/int 0)`), passes its
+    address with `(cpp/& frames)`, then boxes it back for the loop.
+  - The next frame's pixels live at `image.data + w*h*4*frame`. jank's
+    `cpp/cast` can't reinterpret `void*` -> `unsigned char*` (it uses
+    `convert`, not `reinterpret_cast`), so a tiny `cpp/raw` shim does the
+    C pointer cast + arithmetic and returns the frame pointer straight to
+    UpdateTexture - the documented cpp/raw escape hatch."
+  (:include "raylib.h"))
+
+;; jank's cpp/cast won't reinterpret void*->unsigned char*; do the pointer
+;; math in raw C++ (freely allowed there) and hand back a const void*.
+(cpp/raw "static const void* jank_gif_frame_ptr(void* data, int offset) {
+  return (const void*)(((unsigned char*)data) + offset);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+(def MAX-DELAY 20)
+(def MIN-DELAY 1)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - gif player (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [frames (cpp/int 0)
+        img (cpp/LoadImageAnim (str RES "scarfy_run.gif") (cpp/& frames))
+        tex (cpp/LoadTextureFromImage img)
+        nframes (int (+ 0.0 frames))                  ; box the out-param
+        iw (int (+ 0.0 (.-width img)))
+        ih (int (+ 0.0 (.-height img)))
+        tw (int (+ 0.0 (.-width tex)))]
+
+    ;; state: current frame, frame counter, frame delay.
+    (loop [cur 0 fc 0 delay 8]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [fc (+ fc 1)
+              tick? (>= fc delay)
+              cur (if tick? (int (mod (+ cur 1) nframes)) cur)  ; mod returns a real
+              fc (if tick? 0 fc)
+              offset (* iw ih 4 cur)]
+          ;; stream the current frame's slice of image.data to the texture
+          (when tick?
+            (cpp/UpdateTexture tex (cpp/jank_gif_frame_ptr (.-data img) offset)))
+
+          (let [delay (if (cpp/IsKeyPressed cpp/KEY_RIGHT) (+ delay 1) delay)
+                delay (if (cpp/IsKeyPressed cpp/KEY_LEFT) (- delay 1) delay)
+                delay (if (> delay MAX-DELAY) MAX-DELAY (if (< delay MIN-DELAY) MIN-DELAY delay))]
+
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/RAYWHITE)
+
+            (cpp/DrawText (str "TOTAL GIF FRAMES: " nframes) 50 30 20 cpp/LIGHTGRAY)
+            (cpp/DrawText (str "CURRENT FRAME: " cur) 50 60 20 cpp/GRAY)
+            (cpp/DrawText (str "IMAGE.DATA OFFSET: " offset) 50 90 20 cpp/GRAY)
+
+            (cpp/DrawText "FRAMES DELAY: " 100 305 10 cpp/DARKGRAY)
+            (cpp/DrawText (str delay " frames") 620 305 10 cpp/DARKGRAY)
+            (cpp/DrawText "PRESS RIGHT/LEFT KEYS to CHANGE SPEED! (Q quits)" 290 350 10 cpp/DARKGRAY)
+
+            (loop [i 0]
+              (when (< i MAX-DELAY)
+                (when (< i delay)
+                  (cpp/DrawRectangle (+ 190 (* 21 i)) 300 20 20 cpp/RED))
+                (cpp/DrawRectangleLines (+ 190 (* 21 i)) 300 20 20 cpp/MAROON)
+                (recur (inc i))))
+
+            (cpp/DrawTexture tex (- (int (/ WIDTH 2)) (int (/ tw 2))) 140 cpp/WHITE)
+            (cpp/DrawText "(c) Scarfy sprite by Eiden Marsal" (- WIDTH 200) (- HEIGHT 20) 10 cpp/GRAY)
+
+            (cpp/EndDrawing)
+
+            (when-not (cpp/IsKeyDown cpp/KEY_Q)
+              (recur cur fc delay))))))
+
+    (cpp/UnloadTexture tex)
+    (cpp/UnloadImage img))
+
+  (cpp/CloseWindow))

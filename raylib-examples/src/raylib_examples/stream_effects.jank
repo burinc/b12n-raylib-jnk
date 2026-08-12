@@ -1,0 +1,132 @@
+(ns raylib-examples.stream-effects
+  "raylib [audio] example - stream effects, ported to jank.
+
+  DSP effects attached to ONE music stream (not the whole mix): F
+  toggles a 70Hz lowpass filter, D a one-second delay - both can
+  stack. SPACE restarts the song, P pauses. ESC quits.
+  Based on raylib/examples/audio/audio_stream_effects.c
+
+  jank-native notes:
+  - Per-STREAM audio callbacks (AttachAudioStreamProcessor on
+    music.stream), the mixed-processor pattern: both effect callbacks
+    live verbatim in cpp/raw with their filter/ring-buffer statics,
+    and toggle wrappers attach/detach them; the delay's RL_CALLOC'd
+    ring buffer gets init/free wrappers.
+  - The Music struct passes into the toggle shims by value; the
+    stream field access happens in C."
+  (:include "raylib.h" "stdlib.h"))
+
+;; The two effect callbacks + their state, verbatim from the C.
+(cpp/raw "static float *jank_delay_buffer = NULL;
+static unsigned int jank_delay_buffer_size = 0;
+static unsigned int jank_delay_read_index = 2;
+static unsigned int jank_delay_write_index = 0;
+
+/* 70 Hz RC lowpass */
+static void jank_effect_lpf(void *buffer, unsigned int frames) {
+  static float low[2] = { 0.0f, 0.0f };
+  static const float cutoff = 70.0f/44100.0f;
+  const float k = cutoff/(cutoff + 0.1591549431f);
+  float *bufferData = (float *)buffer;
+  for (unsigned int i = 0; i < frames*2; i += 2) {
+    const float l = bufferData[i];
+    const float r = bufferData[i + 1];
+    low[0] += k*(l - low[0]);
+    low[1] += k*(r - low[1]);
+    bufferData[i] = low[0];
+    bufferData[i + 1] = low[1];
+  }
+}
+/* one-second feedback delay through a ring buffer */
+static void jank_effect_delay(void *buffer, unsigned int frames) {
+  for (unsigned int i = 0; i < frames*2; i += 2) {
+    float leftDelay = jank_delay_buffer[jank_delay_read_index++];
+    float rightDelay = jank_delay_buffer[jank_delay_read_index++];
+    if (jank_delay_read_index == jank_delay_buffer_size) jank_delay_read_index = 0;
+    ((float *)buffer)[i] = 0.5f*((float *)buffer)[i] + 0.5f*leftDelay;
+    ((float *)buffer)[i + 1] = 0.5f*((float *)buffer)[i + 1] + 0.5f*rightDelay;
+    jank_delay_buffer[jank_delay_write_index++] = ((float *)buffer)[i];
+    jank_delay_buffer[jank_delay_write_index++] = ((float *)buffer)[i + 1];
+    if (jank_delay_write_index == jank_delay_buffer_size) jank_delay_write_index = 0;
+  }
+}
+static void jank_init_delay(void) {
+  jank_delay_buffer_size = 48000*2; /* one second at device rate x channels */
+  jank_delay_buffer = (float *)RL_CALLOC(jank_delay_buffer_size, sizeof(float));
+}
+static void jank_free_delay(void) { RL_FREE(jank_delay_buffer); }
+static void jank_toggle_lpf(Music music, int enable) {
+  if (enable) AttachAudioStreamProcessor(music.stream, jank_effect_lpf);
+  else DetachAudioStreamProcessor(music.stream, jank_effect_lpf);
+}
+static void jank_toggle_delay(Music music, int enable) {
+  if (enable) AttachAudioStreamProcessor(music.stream, jank_effect_delay);
+  else DetachAudioStreamProcessor(music.stream, jank_effect_delay);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/audio/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - stream effects (jank)")
+
+  (cpp/InitAudioDevice)
+
+  (let [music (cpp/LoadMusicStream (str RES "country.mp3"))]
+    (cpp/jank_init_delay)
+    (cpp/PlayMusicStream music)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [paused? lpf? delay?].
+    (loop [paused? false
+           lpf? false
+           delay? false]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateMusicStream music)
+
+        (when (cpp/IsKeyPressed cpp/KEY_SPACE)
+          (cpp/StopMusicStream music)
+          (cpp/PlayMusicStream music))
+
+        (let [paused? (if (cpp/IsKeyPressed cpp/KEY_P) (not paused?) paused?)
+              _ (when (cpp/IsKeyPressed cpp/KEY_P)
+                  (if paused?
+                    (cpp/PauseMusicStream music)
+                    (cpp/ResumeMusicStream music)))
+              lpf? (if (cpp/IsKeyPressed cpp/KEY_F) (not lpf?) lpf?)
+              _ (when (cpp/IsKeyPressed cpp/KEY_F)
+                  (cpp/jank_toggle_lpf music (if lpf? 1 0)))
+              delay? (if (cpp/IsKeyPressed cpp/KEY_D) (not delay?) delay?)
+              _ (when (cpp/IsKeyPressed cpp/KEY_D)
+                  (cpp/jank_toggle_delay music (if delay? 1 0)))
+              time-played (/ (+ 0.0 (cpp/GetMusicTimePlayed music))
+                             (+ 0.0 (cpp/GetMusicTimeLength music)))
+              time-played (if (> time-played 1.0) 1.0 time-played)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawText "MUSIC SHOULD BE PLAYING!" 245 150 20 cpp/LIGHTGRAY)
+
+          (cpp/DrawRectangle 200 180 400 12 cpp/LIGHTGRAY)
+          (cpp/DrawRectangle 200 180 (int (* time-played 400.0)) 12 cpp/MAROON)
+          (cpp/DrawRectangleLines 200 180 400 12 cpp/GRAY)
+
+          (cpp/DrawText "PRESS SPACE TO RESTART MUSIC" 215 230 20 cpp/LIGHTGRAY)
+          (cpp/DrawText "PRESS P TO PAUSE/RESUME MUSIC" 208 260 20 cpp/LIGHTGRAY)
+          (cpp/DrawText (str "PRESS F TO TOGGLE LPF EFFECT: " (if lpf? "ON" "OFF"))
+                        200 320 20 cpp/GRAY)
+          (cpp/DrawText (str "PRESS D TO TOGGLE DELAY EFFECT: " (if delay? "ON" "OFF"))
+                        180 350 20 cpp/GRAY)
+
+          (cpp/EndDrawing)
+          (recur paused? lpf? delay?))))
+
+    (cpp/UnloadMusicStream music))
+
+  (cpp/CloseAudioDevice)
+  (cpp/jank_free_delay)
+  (cpp/CloseWindow))

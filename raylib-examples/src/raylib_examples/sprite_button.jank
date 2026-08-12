@@ -1,0 +1,74 @@
+(ns raylib-examples.sprite-button
+  "raylib [textures] example - sprite button, ported to jank.
+
+  A three-state sprite button (NORMAL / HOVER / PRESSED) drawn from a
+  vertically-stacked 3-frame sheet; releasing LEFT on it plays a
+  click sound. Q quits.
+  Based on raylib/examples/textures/textures_sprite_button.c
+  (jank-native: this is the repo's first audio use - InitAudioDevice,
+  LoadSound (native Sound in a let-local), PlaySound - all plain
+  raylib.h functions needing no wrapper changes. The hover test is
+  plain arithmetic on GetMouseX/GetMouseY instead of
+  CheckCollisionPointRec.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+(def NUM-FRAMES 3)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - sprite button (jank)")
+  (cpp/InitAudioDevice)
+  (cpp/SetTargetFPS 60)
+
+  (let [fx-button (cpp/LoadSound (str RES "buttonfx.wav"))
+        button (cpp/LoadTexture (str RES "button.png"))
+        bw (int (+ 0.0 (.-width button)))
+        bh (int (+ 0.0 (.-height button)))
+        fh (int (quot bh NUM-FRAMES))
+        bx (int (- (quot WIDTH 2) (quot bw 2)))
+        by (int (- (quot HEIGHT 2) (quot fh 2)))]
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mx (cpp/GetMouseX)
+              my (cpp/GetMouseY)
+              over? (and (>= mx bx) (<= mx (+ bx bw))
+                         (>= my by) (<= my (+ by fh)))
+              state (if over?
+                      (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT) 2 1)
+                      0)
+              action? (and over? (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT))
+              ;; nth boxes the offset: state/fh alone stay native and
+              ;; cpp/float cannot take an unboxed f64
+              sy (nth [0 fh (* 2 fh)] state)]
+
+          (when action?
+            (cpp/PlaySound fx-button))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; The sheet frame for the current state (frames stack vertically).
+          (cpp/DrawTextureRec button
+                              (cpp/Rectangle (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 sy))
+                                             (cpp/float (+ 0.0 bw))
+                                             (cpp/float (+ 0.0 fh)))
+                              (cpp/Vector2 (cpp/float (+ 0.0 bx)) (cpp/float (+ 0.0 by)))
+                              cpp/WHITE)
+
+          (cpp/DrawText "Click the button! (Q quits)" 10 10 20 cpp/GRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur)))))
+
+    (cpp/UnloadTexture button)
+    (cpp/UnloadSound fx-button))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

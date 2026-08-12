@@ -1,0 +1,117 @@
+(ns raylib-examples.camera-3d-split-screen
+  "raylib [core] example - 3d camera split screen, ported to jank.
+
+  Two players roam a plane of cube trees, each seeing the world from
+  their own camera in half the screen: player 1 moves with W/S (along
+  z), player 2 with UP/DOWN (along x); each is drawn as a colored cube
+  in both views. ESC quits.
+  Based on raylib/examples/core/core_3d_camera_split_screen.c
+
+  jank-native notes:
+  - The C nudges camera fields directly (position.z += ...); the port
+    threads the two moving coordinates as jank reals and rebuilds both
+    Camera3Ds inline each frame (the billboard-rendering pattern) - no
+    pointer shims needed at all.
+  - The C duplicates the whole scene block per view; the port factors
+    draw-scene, a helper taking only jank scalars (safe: no native
+    params, no cpp/raw statics).
+  - Both half-screen RenderTextures are create-once outer-let locals;
+    the y-flipped source rect is built inline at each DrawTextureRec."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def COUNT 5)                          ; tree grid: -COUNT..COUNT
+(def SPACING 4.0)
+
+(defn- draw-scene
+  "The shared world + player cubes, from the two players' moving
+  coordinates (p1 at z1 on the z axis, p2 at x2 on the x axis)."
+  [z1 x2]
+  (cpp/DrawPlane (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                 (cpp/Vector2 (cpp/float 50.0) (cpp/float 50.0)) cpp/BEIGE)
+  (loop [i (- 0 COUNT)]
+    (when (<= i COUNT)
+      (loop [j (- 0 COUNT)]
+        (when (<= j COUNT)
+          (let [x (* i SPACING)
+                z (* j SPACING)]
+            (cpp/DrawCube (cpp/Vector3 (cpp/float x) (cpp/float 1.5) (cpp/float z))
+                          (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0) cpp/LIME)
+            (cpp/DrawCube (cpp/Vector3 (cpp/float x) (cpp/float 0.5) (cpp/float z))
+                          (cpp/float 0.25) (cpp/float 1.0) (cpp/float 0.25) cpp/BROWN))
+          (recur (inc j))))
+      (recur (inc i))))
+  (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float z1))
+                (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0) cpp/RED)
+  (cpp/DrawCube (cpp/Vector3 (cpp/float x2) (cpp/float 3.0) (cpp/float 0.0))
+                (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0) cpp/BLUE)
+  nil)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - 3d camera split screen (jank)")
+
+  (let [screen1 (cpp/LoadRenderTexture 400 HEIGHT)
+        screen2 (cpp/LoadRenderTexture 400 HEIGHT)]
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [player1-z player2-x].
+    (loop [z1 -3.0 x2 -3.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [step (* 10.0 (+ 0.0 (cpp/GetFrameTime)))
+              z1 (cond (cpp/IsKeyDown cpp/KEY_W) (+ z1 step)
+                       (cpp/IsKeyDown cpp/KEY_S) (- z1 step)
+                       :else z1)
+              x2 (cond (cpp/IsKeyDown cpp/KEY_UP) (+ x2 step)
+                       (cpp/IsKeyDown cpp/KEY_DOWN) (- x2 step)
+                       :else x2)
+              cam1 (cpp/Camera3D (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float z1))
+                                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float (+ z1 3.0)))
+                                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                 (cpp/float 45.0) cpp/CAMERA_PERSPECTIVE)
+              cam2 (cpp/Camera3D (cpp/Vector3 (cpp/float x2) (cpp/float 3.0) (cpp/float 0.0))
+                                 (cpp/Vector3 (cpp/float (+ x2 3.0)) (cpp/float 3.0) (cpp/float 0.0))
+                                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                 (cpp/float 45.0) cpp/CAMERA_PERSPECTIVE)]
+
+          ;; player 1's view
+          (cpp/BeginTextureMode screen1)
+          (cpp/ClearBackground cpp/SKYBLUE)
+          (cpp/BeginMode3D cam1)
+          (draw-scene z1 x2)
+          (cpp/EndMode3D)
+          (cpp/DrawRectangle 0 0 400 40 (cpp/Fade cpp/RAYWHITE (cpp/float 0.8)))
+          (cpp/DrawText "PLAYER1: W/S to move" 10 10 20 cpp/MAROON)
+          (cpp/EndTextureMode)
+
+          ;; player 2's view
+          (cpp/BeginTextureMode screen2)
+          (cpp/ClearBackground cpp/SKYBLUE)
+          (cpp/BeginMode3D cam2)
+          (draw-scene z1 x2)
+          (cpp/EndMode3D)
+          (cpp/DrawRectangle 0 0 400 40 (cpp/Fade cpp/RAYWHITE (cpp/float 0.8)))
+          (cpp/DrawText "PLAYER2: UP/DOWN to move" 10 10 20 cpp/DARKBLUE)
+          (cpp/EndTextureMode)
+
+          ;; both views side by side (render textures y-flip)
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/BLACK)
+          (cpp/DrawTextureRec (.-texture screen1)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float 400.0) (cpp/float -450.0))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0)) cpp/WHITE)
+          (cpp/DrawTextureRec (.-texture screen2)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float 400.0) (cpp/float -450.0))
+                              (cpp/Vector2 (cpp/float 400.0) (cpp/float 0.0)) cpp/WHITE)
+          (cpp/DrawRectangle 398 0 4 HEIGHT cpp/LIGHTGRAY)
+          (cpp/EndDrawing)
+
+          (recur z1 x2))))
+
+    (cpp/UnloadRenderTexture screen1)
+    (cpp/UnloadRenderTexture screen2))
+
+  (cpp/CloseWindow))

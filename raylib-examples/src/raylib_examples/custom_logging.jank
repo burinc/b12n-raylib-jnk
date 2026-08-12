@@ -1,0 +1,75 @@
+(ns raylib-examples.custom-logging
+  "raylib [core] example - custom logging, ported to jank.
+
+  Installs a custom trace-log callback that prefixes every raylib log
+  line with a timestamp and a [INFO]/[ERROR]/[WARN]/[DEBUG] tag, then
+  opens a window whose only job is to point you at the console. Watch
+  stdout: the whole raylib init/shutdown log is reformatted by our
+  callback.
+  Based on raylib/examples/core/core_custom_logging.c (3/4 complexity).
+
+  jank-native notes:
+  - `SetTraceLogCallback` wants a C function pointer of type
+    `void (*)(int, const char*, va_list)` - a shape jank can't hand it
+    from jank code. So the callback (with its time()/strftime()/vprintf
+    va_list machinery) is defined verbatim in a cpp/raw block as
+    ordinary C, and a sibling C wrapper (jank_cl_set_logger) hands its
+    pointer to SetTraceLogCallback - the same define-in-cpp/raw,
+    attach-via-sibling-wrapper pattern the audio callback examples use.
+    It must run BEFORE InitWindow to capture the init logs, so jank
+    calls it first, then owns the window lifecycle, the frame loop and
+    the drawing."
+  (:include "raylib.h" "stdio.h" "time.h"))
+
+;; The custom trace-log callback + a sibling wrapper that installs it.
+(cpp/raw "
+/* Reformat every raylib trace-log line with a timestamp + level tag. */
+static void jank_CustomTraceLog(int msgType, const char *text, va_list args) {
+  char timeStr[64] = { 0 };
+  time_t now = time(NULL);
+  struct tm *tm_info = localtime(&now);
+
+  strftime(timeStr, sizeof(timeStr), \"%Y-%m-%d %H:%M:%S\", tm_info);
+  printf(\"[%s] \", timeStr);
+
+  switch (msgType) {
+    case LOG_INFO:    printf(\"[INFO] : \"); break;
+    case LOG_ERROR:   printf(\"[ERROR]: \"); break;
+    case LOG_WARNING: printf(\"[WARN] : \"); break;
+    case LOG_DEBUG:   printf(\"[DEBUG]: \"); break;
+    default: break;
+  }
+
+  vprintf(text, args);
+  printf(\"\\n\");
+  fflush(stdout); /* raylib's own TraceLog flushes; match it so lines aren't lost on kill */
+}
+
+/* Attach the callback's pointer (jank can't form this fn pointer). */
+static void jank_cl_set_logger(void) {
+  SetTraceLogCallback(jank_CustomTraceLog);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  ;; Install the custom logger BEFORE InitWindow so it reformats the
+  ;; init logs too (the C sets it before InitWindow for the same reason).
+  (cpp/jank_cl_set_logger)
+
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - custom logging (jank)")
+
+  (cpp/SetTargetFPS 60)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (cpp/BeginDrawing)
+      (cpp/ClearBackground cpp/RAYWHITE)
+      (cpp/DrawText "Check out the console output to see the custom logger in action!"
+                    60 200 20 cpp/LIGHTGRAY)
+      (cpp/EndDrawing)
+      (recur)))
+
+  (cpp/CloseWindow))

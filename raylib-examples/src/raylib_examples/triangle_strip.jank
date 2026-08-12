@@ -1,0 +1,90 @@
+(ns raylib-examples.triangle-strip
+  "raylib [shapes] example - triangle strip, ported to jank.
+
+  A rainbow fan of triangles between an inner and an outer radius.
+  Hold LEFT/RIGHT to change the segment count, O toggles the black
+  outline, Q quits.
+  Based on raylib/examples/shapes/shapes_triangle_strip.c
+  (jank-native: the C fills a Vector2 points[122] array then indexes
+  it; here each triangle's four corners are recomputed inline from the
+  same angle formulas - the i+1 wrap falls out of cos/sin periodicity.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def CX 275.0)                       ; WIDTH/2 - 125
+(def CY 225.0)
+(def DEG2RAD 0.017453292519943295)
+(def RAD2DEG 57.29577951308232)
+
+(defn adj
+  "Adjust v by step while dn/up are held, clamped to lo..hi."
+  [v dn up step lo hi]
+  (let [v (if dn (- v step) v)
+        v (if up (+ v step) v)]
+    (if (< v lo) lo (if (> v hi) hi v))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - triangle strip (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [segments inside-radius outside-radius outline?].
+  (loop [segs 6.0 ir 100.0 orr 150.0 outline? true]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [segs (adj segs (cpp/IsKeyDown cpp/KEY_LEFT) (cpp/IsKeyDown cpp/KEY_RIGHT) 0.5 6.0 60.0)
+            outline? (if (cpp/IsKeyPressed cpp/KEY_O) (not outline?) outline?)
+            n (int segs)
+            step (* (/ 360.0 n) DEG2RAD)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        ;; Each wedge i: a = inner(i), b = outer(i + 1/2), c = inner(i+1),
+        ;; d = outer(i + 3/2). Winding matches the C (c,b,a then d,b,c).
+        (loop [i 0]
+          (when (< i n)
+            (let [a1 (* i step)
+                  ah (+ a1 (/ step 2.0))
+                  a2 (+ a1 step)
+                  a2h (+ a2 (/ step 2.0))
+                  ax (+ CX (+ 0.0 (* (cpp/cos a1) ir)))  ay (+ CY (+ 0.0 (* (cpp/sin a1) ir)))
+                  bx (+ CX (+ 0.0 (* (cpp/cos ah) orr))) by (+ CY (+ 0.0 (* (cpp/sin ah) orr)))
+                  cx (+ CX (+ 0.0 (* (cpp/cos a2) ir)))  cy (+ CY (+ 0.0 (* (cpp/sin a2) ir)))
+                  dx (+ CX (+ 0.0 (* (cpp/cos a2h) orr))) dy (+ CY (+ 0.0 (* (cpp/sin a2h) orr)))]
+              (cpp/DrawTriangle (cpp/Vector2 (cpp/float cx) (cpp/float cy))
+                                (cpp/Vector2 (cpp/float bx) (cpp/float by))
+                                (cpp/Vector2 (cpp/float ax) (cpp/float ay))
+                                (cpp/ColorFromHSV (cpp/float (* a1 RAD2DEG)) (cpp/float 1.0) (cpp/float 1.0)))
+              (cpp/DrawTriangle (cpp/Vector2 (cpp/float dx) (cpp/float dy))
+                                (cpp/Vector2 (cpp/float bx) (cpp/float by))
+                                (cpp/Vector2 (cpp/float cx) (cpp/float cy))
+                                (cpp/ColorFromHSV (cpp/float (* ah RAD2DEG)) (cpp/float 1.0) (cpp/float 1.0)))
+              (when outline?
+                (cpp/DrawTriangleLines (cpp/Vector2 (cpp/float ax) (cpp/float ay))
+                                       (cpp/Vector2 (cpp/float bx) (cpp/float by))
+                                       (cpp/Vector2 (cpp/float cx) (cpp/float cy))
+                                       cpp/BLACK)
+                (cpp/DrawTriangleLines (cpp/Vector2 (cpp/float cx) (cpp/float cy))
+                                       (cpp/Vector2 (cpp/float bx) (cpp/float by))
+                                       (cpp/Vector2 (cpp/float dx) (cpp/float dy))
+                                       cpp/BLACK)))
+            (recur (inc i))))
+
+        ;; The control panel, as text.
+        (cpp/DrawLine 580 0 580 HEIGHT
+                      (cpp/GetColor (+ (* 218 16777216) (* 218 65536) (* 218 256) 255)))
+        (cpp/DrawRectangle 580 0 (- WIDTH 580) HEIGHT
+                           (cpp/GetColor (+ (* 232 16777216) (* 232 65536) (* 232 256) 255)))
+        (cpp/DrawText (str "Segments: " n "  (LEFT/RIGHT)") 600 40 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "[O] Outline: " (if outline? "ON" "OFF")) 600 70 10 cpp/DARKGRAY)
+        (cpp/DrawText "[Q] quit" 600 100 10 cpp/DARKGRAY)
+
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur segs ir orr outline?)))))
+
+  (cpp/CloseWindow))

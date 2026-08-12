@@ -1,0 +1,184 @@
+(ns raylib-examples.rlgl-color-wheel
+  "raylib [shapes] example - rlgl color wheel, ported to jank.
+
+  An HSV color wheel rendered with rlgl immediate mode. Click/drag to
+  pick a color (the handle clamps to the rim), mouse wheel changes the
+  triangle count, UP/DOWN scale the wheel, hold A/S to darken/brighten
+  the value, hold SPACE for wireframe, CTRL+C copies the hex code.
+  Q quits.
+  Based on raylib/examples/shapes/shapes_rlgl_color_wheel.c
+  (jank-native: raymath Vector2 ops are inline math; the picked Color
+  is read back from ColorLerp via .-r/.-g/.-b fields and stored as
+  jank ints; since the color is a pure function of handle position and
+  value it is recomputed every frame instead of only on interaction;
+  the raygui value slider becomes the A/S keys; %02X becomes a hex
+  table lookup.)"
+  (:include "raylib.h" "rlgl.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def CX 400.0)
+(def CY 225.0)
+(def PI2 6.283185307179586)
+(def HEXDIGITS "0123456789ABCDEF")
+
+(defn hex2
+  "A byte as two uppercase hex digits."
+  [n]
+  (let [hi (int (quot n 16)) lo (int (mod n 16))]
+    (str (subs HEXDIGITS hi (+ hi 1)) (subs HEXDIGITS lo (+ lo 1)))))
+
+(defn dist
+  "Euclidean distance."
+  [x1 y1 x2 y2]
+  (+ 0.0 (cpp/sqrt (+ (* (- x2 x1) (- x2 x1)) (* (- y2 y1) (- y2 y1))))))
+
+(defn wheel-angle
+  "The handle's hue fraction 0..1, from raymath Vector2Angle applied to
+  (0,-scale) vs (center - handle), as the C does."
+  [cpx cpy scale]
+  (let [v1x 0.0 v1y (- 0.0 scale)
+        v2x (- CX cpx) v2y (- CY cpy)
+        a (+ 0.0 (cpp/atan2 (- (* v1x v2y) (* v1y v2x))
+                            (+ (* v1x v2x) (* v1y v2y))))]
+    (/ (+ (/ a 3.141592653589793) 1.0) 2.0)))
+
+(defn clamp-to-rim
+  "Handle position snapped to the wheel rim at its current angle."
+  [cpx cpy scale]
+  (let [a (wheel-angle cpx cpy scale)]
+    [(+ CX (* (+ 0.0 (cpp/sin (* a PI2))) scale))
+     (- CY (* (+ 0.0 (cpp/cos (* a PI2))) scale))]))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - rlgl color wheel (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [triangle-count wheel-scale value handle-x handle-y setting?].
+  (loop [tcount 64 scale 150.0 value 1.0 cpx CX cpy CY setting? false]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [tcount (let [t (+ tcount (int (+ 0.0 (cpp/GetMouseWheelMove))))]
+                     (if (< t 3) 3 (if (> t 256) 256 t)))
+            value (let [v (if (cpp/IsKeyDown cpp/KEY_A) (- value 0.02) value)
+                        v (if (cpp/IsKeyDown cpp/KEY_S) (+ v 0.02) v)]
+                    (if (< v 0.0) 0.0 (if (> v 1.0) 1.0 v)))
+
+            ;; Scale the wheel, dragging the handle with it (the C keeps
+            ;; the handle put when the size limit is hit).
+            [scale cpx cpy]
+            (if (cpp/IsKeyDown cpp/KEY_UP)
+              (let [s (* scale 1.025)]
+                (if (> s 225.0)
+                  [225.0 cpx cpy]
+                  [s (+ (* (- cpx CX) 1.025) CX) (+ (* (- cpy CY) 1.025) CY)]))
+              [scale cpx cpy])
+            [scale cpx cpy]
+            (if (cpp/IsKeyDown cpp/KEY_DOWN)
+              (let [s (* scale 0.975)
+                    [s cpx cpy] (if (< s 32.0)
+                                  [32.0 cpx cpy]
+                                  [s (+ (* (- cpx CX) 0.975) CX) (+ (* (- cpy CY) 0.975) CY)])
+                    [cpx cpy] (if (> (/ (dist CX CY cpx cpy) s) 1.0)
+                                (clamp-to-rim cpx cpy s)
+                                [cpx cpy])]
+                [s cpx cpy])
+              [scale cpx cpy])
+
+            mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+            setting? (if (and (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+                              (<= (dist mx my CX CY) (+ scale 10.0)))
+                       true setting?)
+            setting? (if (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT) false setting?)
+            [cpx cpy] (if setting? [mx my] [cpx cpy])
+            [cpx cpy] (if (and setting? (> (/ (dist CX CY cpx cpy) scale) 1.0))
+                        (clamp-to-rim cpx cpy scale)
+                        [cpx cpy])
+
+            ;; The picked color: lerp(gray(value), HSV(angle, sat, 1), sat).
+            d (let [d (/ (dist CX CY cpx cpy) scale)] (if (> d 1.0) 1.0 d))
+            a360 (* (wheel-angle cpx cpy scale) 360.0)
+            gv (int (* value 255.0))
+            col (cpp/ColorLerp (cpp/GetColor (+ (* gv 16777216) (* gv 65536) (* gv 256) 255))
+                               (cpp/ColorFromHSV (cpp/float a360) (cpp/float d) (cpp/float 1.0))
+                               (cpp/float d))
+            r (int (+ 0.0 (.-r col)))
+            g (int (+ 0.0 (.-g col)))
+            b (int (+ 0.0 (.-b col)))
+
+            lines? (cpp/IsKeyDown cpp/KEY_SPACE)
+            copying? (and (cpp/IsKeyDown cpp/KEY_LEFT_CONTROL) (cpp/IsKeyDown cpp/KEY_C))]
+
+        (when (and copying? (cpp/IsKeyPressed cpp/KEY_C))
+          (cpp/SetClipboardText (str "#" (hex2 r) (hex2 g) (hex2 b))))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        ;; The wheel: one triangle (or three wire lines) per segment.
+        (if lines? (cpp/rlBegin cpp/RL_LINES) (cpp/rlBegin cpp/RL_TRIANGLES))
+        (loop [i 0]
+          (when (< i tcount)
+            (let [step (/ PI2 tcount)
+                  a1 (* step i)
+                  a2 (* step (+ i 1))
+                  x1 (+ CX (* (+ 0.0 (cpp/sin a1)) scale))
+                  y1 (- CY (* (+ 0.0 (cpp/cos a1)) scale))
+                  x2 (+ CX (* (+ 0.0 (cpp/sin a2)) scale))
+                  y2 (- CY (* (+ 0.0 (cpp/cos a2)) scale))
+                  c1 (cpp/ColorFromHSV (cpp/float (* (/ a1 PI2) 360.0)) (cpp/float 1.0) (cpp/float 1.0))
+                  c2 (cpp/ColorFromHSV (cpp/float (* (/ a2 PI2) 360.0)) (cpp/float 1.0) (cpp/float 1.0))]
+              (if lines?
+                (do
+                  (cpp/rlColor4ub (.-r c1) (.-g c1) (.-b c1) (.-a c1))
+                  (cpp/rlVertex2f (cpp/float x1) (cpp/float y1))
+                  (cpp/rlColor4ub 255 255 255 255)
+                  (cpp/rlVertex2f (cpp/float CX) (cpp/float CY))
+                  (cpp/rlVertex2f (cpp/float CX) (cpp/float CY))
+                  (cpp/rlColor4ub (.-r c2) (.-g c2) (.-b c2) (.-a c2))
+                  (cpp/rlVertex2f (cpp/float x2) (cpp/float y2))
+                  (cpp/rlVertex2f (cpp/float x2) (cpp/float y2))
+                  (cpp/rlColor4ub (.-r c1) (.-g c1) (.-b c1) (.-a c1))
+                  (cpp/rlVertex2f (cpp/float x1) (cpp/float y1)))
+                (do
+                  (cpp/rlColor4ub (.-r c1) (.-g c1) (.-b c1) (.-a c1))
+                  (cpp/rlVertex2f (cpp/float x1) (cpp/float y1))
+                  (cpp/rlColor4f (cpp/float value) (cpp/float value) (cpp/float value) (cpp/float 1.0))
+                  (cpp/rlVertex2f (cpp/float CX) (cpp/float CY))
+                  (cpp/rlColor4ub (.-r c2) (.-g c2) (.-b c2) (.-a c2))
+                  (cpp/rlVertex2f (cpp/float x2) (cpp/float y2)))))
+            (recur (inc i))))
+        (cpp/rlEnd)
+
+        ;; The handle (lighter over dark centers).
+        (cpp/DrawCircleLinesV (cpp/Vector2 (cpp/float cpx) (cpp/float cpy))
+                              (cpp/float 4.0)
+                              (if (and (<= (/ (dist CX CY cpx cpy) scale) 0.5) (<= value 0.5))
+                                cpp/DARKGRAY cpp/BLACK))
+
+        ;; Color preview + darkened outline + readouts.
+        (cpp/DrawRectangle 8 8 64 64 (cpp/GetColor (+ (* r 16777216) (* g 65536) (* b 256) 255)))
+        (cpp/DrawRectangleLinesEx (cpp/Rectangle (cpp/float 8.0) (cpp/float 8.0)
+                                                 (cpp/float 64.0) (cpp/float 64.0))
+                                  (cpp/float 2.0)
+                                  (cpp/ColorLerp (cpp/GetColor (+ (* r 16777216) (* g 65536) (* b 256) 255))
+                                                 cpp/BLACK (cpp/float 0.5)))
+        (cpp/DrawText (str "#" (hex2 r) (hex2 g) (hex2 b) "\n(" r ", " g ", " b ")")
+                      8 80 20 cpp/DARKGRAY)
+        (cpp/DrawText (str "value: " (int (* value 100.0)) "%  (A/S)") 8 125 10 cpp/DARKGRAY)
+
+        (cpp/DrawText "press ctrl+c to copy!" 8 (if copying? 421 425) 20
+                      (if copying? cpp/DARKGREEN cpp/DARKGRAY))
+        (cpp/DrawText (str "triangle count: " tcount " (wheel)  UP/DOWN size  SPACE wires  Q quit")
+                      8 395 20 cpp/DARKGRAY)
+
+        (cpp/DrawFPS 80 8)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur tcount scale value cpx cpy setting?)))))
+
+  (cpp/CloseWindow))

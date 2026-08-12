@@ -1,0 +1,112 @@
+(ns raylib-examples.color-correction
+  "raylib [shaders] example - color correction, ported to jank.
+
+  A post-process fragment shader adjusts contrast, saturation and
+  brightness of a picture in real time. Press 1-4 to switch picture;
+  hold Q/W contrast, A/S saturation, Z/X brightness; R resets; ESC
+  quits. The original's raygui sliders become held-key adjustments
+  (docs/guide/raygui-to-keyboard.md).
+  Based on raylib/examples/shaders/shaders_color_correction.c
+
+  jank-native notes:
+  - The postprocess class (a shader wrapped around a plain DrawTexture)
+    - the natural next step after the fullscreen-rect shaders. Three
+    FLOAT uniforms (contrast/saturation/brightness) ship via the same
+    scalar C setter as rounded-rectangle-shader; the shader divides each
+    by 100 internally, so the -100..100 slider range is passed raw.
+  - Four native Texture2D pictures are held as outer-let locals (native
+    values can't live in a jank vector). Rather than select a native
+    value through an if (and to keep the centering int-math in C), the
+    per-index DrawTexture happens inside a cond branch, each calling a
+    jank_draw_centered shim that reads .width/.height and centers."
+  (:include "raylib.h"))
+
+;; FLOAT uniform setter, a centered DrawTexture (int math/field reads in
+;; C), and a gray builder (Color's unsigned-char ctor rejects jank ints).
+(cpp/raw "static void jank_set_float(Shader s, int loc, double a) {
+  float v = (float)a;
+  SetShaderValue(s, loc, &v, SHADER_UNIFORM_FLOAT);
+}
+static void jank_draw_centered(Texture2D t, int cx, int cy) {
+  DrawTexture(t, cx - t.width/2, cy - t.height/2, WHITE);
+}
+static Color jank_rgb(int r, int g, int b) {
+  return (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn adj
+  "Adjust v by step while dn/up are held, clamped to lo..hi."
+  [v dn up step lo hi]
+  (let [v (if dn (- v step) v)
+        v (if up (+ v step) v)]
+    (if (< v lo) lo (if (> v hi) hi v))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - color correction (jank)")
+
+  (let [parrots (cpp/LoadTexture (str RES "parrots.png"))
+        cat (cpp/LoadTexture (str RES "cat.png"))
+        mandrill (cpp/LoadTexture (str RES "mandrill.png"))
+        fudesumi (cpp/LoadTexture (str RES "fudesumi.png"))
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/color_correction.fs"))
+        contrast-loc (int (cpp/GetShaderLocation shader "contrast"))
+        saturation-loc (int (cpp/GetShaderLocation shader "saturation"))
+        brightness-loc (int (cpp/GetShaderLocation shader "brightness"))]
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [picture-index contrast saturation brightness]; the picture
+    ;; is centered in the left 580px column (cx 290, cy 225).
+    (loop [idx 0 contrast 0.0 saturation 0.0 brightness 0.0]
+      (if (cpp/! (cpp/WindowShouldClose))
+        (let [idx (cond (cpp/IsKeyPressed cpp/KEY_ONE) 0
+                        (cpp/IsKeyPressed cpp/KEY_TWO) 1
+                        (cpp/IsKeyPressed cpp/KEY_THREE) 2
+                        (cpp/IsKeyPressed cpp/KEY_FOUR) 3
+                        :else idx)
+              reset? (cpp/IsKeyPressed cpp/KEY_R)
+              contrast (if reset? 0.0
+                         (adj contrast (cpp/IsKeyDown cpp/KEY_Q) (cpp/IsKeyDown cpp/KEY_W) 1.5 -100.0 100.0))
+              saturation (if reset? 0.0
+                           (adj saturation (cpp/IsKeyDown cpp/KEY_A) (cpp/IsKeyDown cpp/KEY_S) 1.5 -100.0 100.0))
+              brightness (if reset? 0.0
+                           (adj brightness (cpp/IsKeyDown cpp/KEY_Z) (cpp/IsKeyDown cpp/KEY_X) 1.5 -100.0 100.0))]
+          (cpp/jank_set_float shader contrast-loc contrast)
+          (cpp/jank_set_float shader saturation-loc saturation)
+          (cpp/jank_set_float shader brightness-loc brightness)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginShaderMode shader)
+          (cond (= idx 0) (cpp/jank_draw_centered parrots 290 225)
+                (= idx 1) (cpp/jank_draw_centered cat 290 225)
+                (= idx 2) (cpp/jank_draw_centered mandrill 290 225)
+                :else (cpp/jank_draw_centered fudesumi 290 225))
+          (cpp/EndShaderMode)
+
+          (cpp/DrawLine 580 0 580 HEIGHT (cpp/jank_rgb 218 218 218))
+          (cpp/DrawRectangle 580 0 (- WIDTH 580) HEIGHT (cpp/jank_rgb 232 232 232))
+
+          (cpp/DrawText "Color Correction" 585 40 20 cpp/GRAY)
+          (cpp/DrawText "Press [1] - [4] to change picture" 588 75 8 cpp/GRAY)
+          (cpp/DrawText (str "Contrast [Q/W]:   " (int contrast)) 588 110 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "Saturation [A/S]: " (int saturation)) 588 135 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "Brightness [Z/X]: " (int brightness)) 588 160 10 cpp/DARKGRAY)
+          (cpp/DrawText "Press [R] to reset values" 588 195 8 cpp/GRAY)
+
+          (cpp/EndDrawing)
+
+          (recur idx contrast saturation brightness))
+        (do
+          (cpp/UnloadShader shader)
+          (cpp/UnloadTexture parrots)
+          (cpp/UnloadTexture cat)
+          (cpp/UnloadTexture mandrill)
+          (cpp/UnloadTexture fudesumi)))))
+
+  (cpp/CloseWindow))

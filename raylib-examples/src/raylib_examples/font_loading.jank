@@ -1,0 +1,62 @@
+(ns raylib-examples.font-loading
+  "raylib [text] example - font loading, ported to jank.
+
+  Two custom fonts loaded and drawn with DrawTextEx: a BMFont
+  (AngelCode .fnt + .png atlas) via LoadFont, and a TTF rasterized at
+  load via LoadFontEx. Hold SPACE to switch to the TTF font, Q quits.
+  Based on raylib/examples/text/text_font_loading.c
+  (jank-native: Font is a native struct held as an outer-let local
+  like a Texture2D; .baseSize is read via .-baseSize (nth-boxed for
+  the cpp/float size arg). The C's message includes a Latin-1 upper
+  block; this port uses an ASCII-only sample so the jank lexer stays
+  happy - the font machinery is exercised identically.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/text/resources/")
+(def MSG (str "!#$%&'()*+,-./0123456789:;<=>?@\n"
+              "ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`\n"
+              "abcdefghijklmnopqrstuvwxyz{|}~"))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - font loading (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [font-bm (cpp/LoadFont (str RES "pixantiqua.fnt"))
+        font-ttf (cpp/LoadFontEx (str RES "pixantiqua.ttf") 32 cpp/nullptr 250)
+        bm-size (nth [(+ 0.0 (.-baseSize font-bm))] 0)
+        ttf-size (nth [(+ 0.0 (.-baseSize font-ttf))] 0)]
+    (cpp/SetTextLineSpacing 16)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [use-ttf (cpp/IsKeyDown cpp/KEY_SPACE)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawText "Hold SPACE to use TTF generated font (Q quits)" 20 20 20 cpp/LIGHTGRAY)
+
+          (if use-ttf
+            (do
+              (cpp/DrawTextEx font-ttf MSG
+                              (cpp/Vector2 (cpp/float 20.0) (cpp/float 100.0))
+                              (cpp/float ttf-size) (cpp/float 2.0) cpp/LIME)
+              (cpp/DrawText "Using TTF font generated" 20 (- HEIGHT 30) 20 cpp/GRAY))
+            (do
+              (cpp/DrawTextEx font-bm MSG
+                              (cpp/Vector2 (cpp/float 20.0) (cpp/float 100.0))
+                              (cpp/float bm-size) (cpp/float 2.0) cpp/MAROON)
+              (cpp/DrawText "Using BMFont (Angelcode) imported" 20 (- HEIGHT 30) 20 cpp/GRAY)))
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur)))))
+
+    (cpp/UnloadFont font-bm)
+    (cpp/UnloadFont font-ttf))
+
+  (cpp/CloseWindow))

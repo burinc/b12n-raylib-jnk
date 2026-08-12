@@ -1,0 +1,56 @@
+(ns raylib-examples.delta-time
+  "raylib [core] example - delta time, ported to jank.
+
+  Two circles race: the red one moves with delta time (frame-rate
+  independent), the blue one moves a fixed amount per frame. Change the
+  FPS target with the mouse wheel to see the difference; R resets, Q quits.
+  Based on raylib/examples/core/core_delta_time.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RADIUS 32.0)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - delta time (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [dy (/ HEIGHT 3.0)
+        fy (* HEIGHT (/ 2.0 3.0))]
+    ;; Thread [fps-target delta-circle-x frame-circle-x].
+    (loop [fps 60 dx 0.0 fx 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mw  (int (+ 0.0 (cpp/GetMouseWheelMove)))
+              fps (if (not (= mw 0))
+                    (let [f (+ fps mw) f (if (< f 0) 0 f)]
+                      (cpp/SetTargetFPS f) f)
+                    fps)
+              ft  (+ 0.0 (cpp/GetFrameTime))
+              ;; delta-based: distance scales with frame time; frame-based: fixed step.
+              dx  (+ dx (* ft 60.0))
+              fx  (+ fx 1.0)
+              dx  (if (> dx WIDTH) 0.0 dx)
+              fx  (if (> fx WIDTH) 0.0 fx)
+              reset? (cpp/IsKeyPressed cpp/KEY_R)
+              dx  (if reset? 0.0 dx)
+              fx  (if reset? 0.0 fx)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawCircle (int dx) (int dy) (cpp/float RADIUS) cpp/RED)
+          (cpp/DrawCircle (int fx) (int fy) (cpp/float RADIUS) cpp/BLUE)
+
+          (cpp/DrawText (str "FPS: " (int (cpp/GetFPS)) "  (target: " fps ")") 10 10 20 cpp/DARKGRAY)
+          (cpp/DrawText (str "Frame time: " (* ft 1000.0) " ms") 10 30 20 cpp/DARKGRAY)
+          (cpp/DrawText "Scroll wheel changes the FPS limit, R resets, Q quits" 10 50 20 cpp/DARKGRAY)
+          (cpp/DrawText "x += GetFrameTime()*speed" 10 90 20 cpp/RED)
+          (cpp/DrawText "x += speed" 10 240 20 cpp/BLUE)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur fps dx fx))))))
+
+  (cpp/CloseWindow))

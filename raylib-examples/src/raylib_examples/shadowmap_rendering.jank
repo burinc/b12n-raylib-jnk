@@ -1,0 +1,201 @@
+(ns raylib-examples.shadowmap-rendering
+  "raylib [shaders] example - shadowmap rendering, ported to jank.
+
+  Real shadows via the textbook shadowmapping algorithm: pass 1
+  renders the scene's DEPTH from the light's orthographic camera into
+  a depth-only framebuffer, pass 2 renders from the player camera
+  with the shadow shader comparing each fragment against that depth
+  map. An animated robot walks among cubes; ARROW keys steer the
+  light, F takes a screenshot. ESC quits.
+  Based on raylib/examples/shaders/shaders_shadowmap_rendering.c
+
+  jank-native notes:
+  - FIRST MODEL ANIMATIONS: LoadModelAnimations' ModelAnimation* +
+    int* out-param stay behind C-side statics; jank drives
+    UpdateModelAnimation by index + frame number each frame.
+  - The depth-ONLY framebuffer (no color attachment) is the
+    depth-writing shim minus the color texture, verbatim.
+  - DrawScene draws two Models - a jank helper cannot take them
+    (rule 2), so the scene stays a C shim called from both passes.
+  - The light direction threads as three jank reals, hand-normalized;
+    the light's orthographic Camera3D is rebuilt inline each frame
+    from them (the per-frame-camera pattern).
+  - Pass-boundary matrices (rlGetMatrixModelview/Projection,
+    MatrixMultiply) are frame-local native let-locals handed to
+    SetShaderValueMatrix by value."
+  (:include "raylib.h" "rlgl.h" "raymath.h" "math.h" "jank_rlights.h"))
+
+;; Depth-only shadowmap FBO + scene + model/animation helpers.
+(cpp/raw "static RenderTexture2D jank_load_shadowmap_rt(int width, int height) {
+  RenderTexture2D target = { 0 };
+  target.id = rlLoadFramebuffer();
+  target.texture.width = width;
+  target.texture.height = height;
+  if (target.id > 0) {
+    rlEnableFramebuffer(target.id);
+    target.depth.id = rlLoadTextureDepth(width, height, false);
+    target.depth.width = width;
+    target.depth.height = height;
+    target.depth.format = 19; /* DEPTH_COMPONENT_24BIT */
+    target.depth.mipmaps = 1;
+    rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+    if (rlFramebufferComplete(target.id)) TraceLog(LOG_INFO, \"FBO: [ID %i] Framebuffer object created successfully\", target.id);
+    rlDisableFramebuffer();
+  } else TraceLog(LOG_WARNING, \"FBO: Framebuffer object can not be created\");
+  return target;
+}
+static void jank_unload_shadowmap_rt(RenderTexture2D target) {
+  if (target.id > 0) rlUnloadFramebuffer(target.id);
+}
+static void jank_model_set_shader_all(Model* m, Shader s) {
+  for (int i = 0; i < m->materialCount; i++) m->materials[i].shader = s;
+}
+static ModelAnimation *jank_anims = NULL;
+static int jank_anims_count = 0;
+static int jank_load_anims(const char* path) {
+  jank_anims = LoadModelAnimations(path, &jank_anims_count);
+  return jank_anims_count;
+}
+static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
+static void jank_update_anim(Model m, int i, int frame) {
+  UpdateModelAnimation(m, jank_anims[i], frame);
+}
+/* the scene, drawn identically into both passes */
+static void jank_draw_scene(Model cube, Model robot) {
+  DrawModelEx(cube, Vector3Zero(), (Vector3){ 0.0f, 1.0f, 0.0f }, 0.0f,
+              (Vector3){ 10.0f, 1.0f, 10.0f }, BLUE);
+  DrawModelEx(cube, (Vector3){ 1.5f, 1.0f, -1.5f }, (Vector3){ 0.0f, 1.0f, 0.0f }, 0.0f,
+              Vector3One(), WHITE);
+  DrawModelEx(robot, (Vector3){ 0.0f, 0.5f, 0.0f }, (Vector3){ 0.0f, 1.0f, 0.0f }, 0.0f,
+              (Vector3){ 1.0f, 1.0f, 1.0f }, RED);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SHADOWMAP-RES 1024)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - shadowmap rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 10.0) (cpp/float 10.0) (cpp/float 10.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        shadow-shader (cpp/LoadShader (str RES "shaders/glsl330/shadowmap.vs")
+                                      (str RES "shaders/glsl330/shadowmap.fs"))
+        view-loc (int (cpp/GetShaderLocation shadow-shader "viewPos"))
+        light-dir-loc (int (cpp/GetShaderLocation shadow-shader "lightDir"))
+        light-col-loc (int (cpp/GetShaderLocation shadow-shader "lightColor"))
+        ambient-loc (int (cpp/GetShaderLocation shadow-shader "ambient"))
+        light-vp-loc (int (cpp/GetShaderLocation shadow-shader "lightVP"))
+        shadow-map-loc (int (cpp/GetShaderLocation shadow-shader "shadowMap"))
+        res-loc (int (cpp/GetShaderLocation shadow-shader "shadowMapResolution"))
+        cube (cpp/LoadModelFromMesh (cpp/GenMeshCube (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0)))
+        robot (cpp/LoadModel (str RES "models/robot.glb"))
+        anim-count (int (cpp/jank_load_anims (str RES "models/robot.glb")))
+        keyframes (int (cpp/jank_anim_keyframes 0))
+        shadow-map (cpp/jank_load_shadowmap_rt SHADOWMAP-RES SHADOWMAP-RES)
+        ;; initial light dir = normalize(0.35, -1, -0.35)
+        len0 (+ 0.0 (cpp/sqrt (+ (* 0.35 0.35) 1.0 (* 0.35 0.35))))
+        lx0 (/ 0.35 len0)
+        ly0 (/ -1.0 len0)
+        lz0 (/ -0.35 len0)]
+
+    (cpp/jank_rl_shader_set_loc (cpp/& shadow-shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (cpp/jank_rl_set_vec3 shadow-shader light-dir-loc lx0 ly0 lz0)
+    (cpp/jank_rl_set_vec4 shadow-shader light-col-loc 1.0 1.0 1.0 1.0)
+    (cpp/jank_rl_set_vec4 shadow-shader ambient-loc 0.1 0.1 0.1 1.0)
+    (cpp/jank_rl_set_int shadow-shader res-loc SHADOWMAP-RES)
+
+    (cpp/jank_model_set_shader_all (cpp/& cube) shadow-shader)
+    (cpp/jank_model_set_shader_all (cpp/& robot) shadow-shader)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [frame-counter light-dir-x light-dir-y light-dir-z].
+    (loop [fc 0
+           lx lx0
+           ly ly0
+           lz lz0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [dt (+ 0.0 (cpp/GetFrameTime))]
+          ;; view pos from the PRE-update camera position, matching the C
+          (cpp/jank_rl_push_view_pos shadow-shader view-loc (cpp/& camera))
+          (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+          (let [fc (int (mod (inc fc) keyframes))
+                _ (cpp/jank_update_anim robot 0 fc)
+                step (* 0.05 60.0 dt)
+                ;; box the native key states before they feed and-logic
+                left? (if (cpp/IsKeyDown cpp/KEY_LEFT) true false)
+                right? (if (cpp/IsKeyDown cpp/KEY_RIGHT) true false)
+                up? (if (cpp/IsKeyDown cpp/KEY_UP) true false)
+                down? (if (cpp/IsKeyDown cpp/KEY_DOWN) true false)
+                lx (cond (and left? (< lx 0.6)) (+ lx step)
+                         (and right? (> lx -0.6)) (- lx step)
+                         :else lx)
+                lz (cond (and up? (< lz 0.6)) (+ lz step)
+                         (and down? (> lz -0.6)) (- lz step)
+                         :else lz)
+                len (+ 0.0 (cpp/sqrt (+ (* lx lx) (* ly ly) (* lz lz))))
+                lx (/ lx len)
+                ly (/ ly len)
+                lz (/ lz len)
+                ;; the light's orthographic camera, rebuilt from the dir
+                light-camera (cpp/Camera3D (cpp/Vector3 (cpp/float (* lx -15.0))
+                                                        (cpp/float (* ly -15.0))
+                                                        (cpp/float (* lz -15.0)))
+                                           (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                                           (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                           (cpp/float 20.0)
+                                           cpp/CAMERA_ORTHOGRAPHIC)]
+
+            (cpp/jank_rl_set_vec3 shadow-shader light-dir-loc lx ly lz)
+
+            ;; PASS 1: depth from the light's point of view
+            (cpp/BeginTextureMode shadow-map)
+            (cpp/ClearBackground cpp/WHITE)
+            (cpp/BeginMode3D light-camera)
+            (let [light-view (cpp/rlGetMatrixModelview)
+                  light-proj (cpp/rlGetMatrixProjection)]
+              (cpp/jank_draw_scene cube robot)
+              (cpp/EndMode3D)
+              (cpp/EndTextureMode)
+
+              ;; PASS 2: the player view, sampling the shadowmap depth
+              (cpp/BeginDrawing)
+              (cpp/ClearBackground cpp/RAYWHITE)
+
+              (cpp/SetShaderValueMatrix shadow-shader light-vp-loc
+                                        (cpp/MatrixMultiply light-view light-proj))
+              (cpp/rlEnableShader (.-id shadow-shader))
+              (cpp/rlActiveTextureSlot 10)
+              (let [depth-tex (.-depth shadow-map)]
+                (cpp/rlEnableTexture (.-id depth-tex)))
+              (cpp/jank_rl_set_int shadow-shader shadow-map-loc 10)
+
+              (cpp/BeginMode3D camera)
+              (cpp/jank_draw_scene cube robot)
+              (cpp/EndMode3D)
+
+              (cpp/DrawText "Use the arrow keys to rotate the light!" 10 10 30 cpp/RED)
+              (cpp/DrawText "Shadows in raylib using the shadowmapping algorithm!"
+                            (- WIDTH 280) (- HEIGHT 20) 10 cpp/GRAY)
+
+              (cpp/EndDrawing)
+
+              (when (cpp/IsKeyPressed cpp/KEY_F)
+                (cpp/TakeScreenshot "shaders_shadowmap.png"))
+
+              (recur fc lx ly lz))))))
+
+    (cpp/UnloadShader shadow-shader)
+    (cpp/UnloadModel cube)
+    (cpp/UnloadModel robot)
+    (cpp/jank_unload_shadowmap_rt shadow-map))
+
+  (cpp/CloseWindow))

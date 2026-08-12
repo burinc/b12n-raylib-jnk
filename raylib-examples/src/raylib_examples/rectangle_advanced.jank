@@ -1,0 +1,120 @@
+(ns raylib-examples.rectangle-advanced
+  "raylib [shapes] example - rectangle advanced, ported to jank.
+
+  Five stacked rounded rectangles with horizontal gradients and
+  per-side roundness, built triangle by triangle in rlgl immediate
+  mode (the gradient falls out of OpenGL vertex-color interpolation).
+  Q quits.
+  Based on raylib/examples/shapes/shapes_rectangle_advanced.c
+  (jank-native: ports the RL_TRIANGLES branch of
+  DrawRectangleRoundedGradientH; colors pass as ids resolved to
+  literal rlColor4ub calls so no Color struct crosses a fn boundary;
+  the 12-point corner diagram becomes a destructured vector of
+  [x y] pairs. The both-sides-square early-out is omitted - no call
+  in the example reaches it.)"
+  (:include "raylib.h" "rlgl.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def DEG2RAD 0.017453292519943295)
+
+(defn rl-col
+  "rlColor4ub for a color id: 0 BLUE, 1 RED, 2 PINK, 3 BLACK."
+  [cid]
+  (if (= cid 0) (cpp/rlColor4ub 0 121 241 255)
+    (if (= cid 1) (cpp/rlColor4ub 230 41 55 255)
+      (if (= cid 2) (cpp/rlColor4ub 255 109 194 255)
+        (cpp/rlColor4ub 0 0 0 255))))
+  nil)
+
+(defn rl-v
+  "rlVertex2f at an [x y] pair."
+  [p]
+  (cpp/rlVertex2f (cpp/float (nth p 0)) (cpp/float (nth p 1)))
+  nil)
+
+(defn draw-rounded-gradient-h
+  "DrawRectangleRoundedGradientH: rounded left/right corners with a
+  left-to-right gradient, as triangles."
+  [rx ry rw rh rndl rndr segs cidl cidr]
+  (let [rndl (if (> rndl 1.0) 1.0 rndl)
+        rndr (if (> rndr 1.0) 1.0 rndr)
+        rsize (if (> rw rh) rh rw)
+        radl (let [r (/ (* rsize rndl) 2.0)] (if (< r 0.0) 0.0 r))
+        radr (let [r (/ (* rsize rndr) 2.0)] (if (< r 0.0) 0.0 r))
+        step (/ 90.0 segs)
+        pts [[(+ rx radl) ry] [(- (+ rx rw) radr) ry] [(+ rx rw) (+ ry radr)]
+             [(+ rx rw) (- (+ ry rh) radr)] [(- (+ rx rw) radr) (+ ry rh)]
+             [(+ rx radl) (+ ry rh)] [rx (- (+ ry rh) radl)] [rx (+ ry radl)]
+             [(+ rx radl) (+ ry radl)] [(- (+ rx rw) radr) (+ ry radr)]
+             [(- (+ rx rw) radr) (- (+ ry rh) radr)] [(+ rx radl) (- (+ ry rh) radl)]]
+        [p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11] pts
+        angles [180.0 270.0 0.0 90.0]]
+    (cpp/rlBegin cpp/RL_TRIANGLES)
+
+    ;; The four corner fans (left corners take the left color/radius).
+    (loop [k 0]
+      (when (< k 4)
+        (let [cid (if (or (= k 0) (= k 3)) cidl cidr)
+              rad (if (or (= k 0) (= k 3)) radl radr)
+              c (nth pts (+ 8 k))
+              cx (nth c 0) cy (nth c 1)]
+          (loop [i 0 ang (nth angles k)]
+            (when (< i segs)
+              (rl-col cid)
+              (rl-v [cx cy])
+              (rl-v [(+ cx (* (+ 0.0 (cpp/cos (* DEG2RAD (+ ang step)))) rad))
+                     (+ cy (* (+ 0.0 (cpp/sin (* DEG2RAD (+ ang step)))) rad))])
+              (rl-v [(+ cx (* (+ 0.0 (cpp/cos (* DEG2RAD ang))) rad))
+                     (+ cy (* (+ 0.0 (cpp/sin (* DEG2RAD ang))) rad))])
+              (recur (inc i) (+ ang step)))))
+        (recur (inc k))))
+
+    ;; Upper rectangle.
+    (rl-col cidl) (rl-v p0) (rl-v p8)
+    (rl-col cidr) (rl-v p9) (rl-v p1)
+    (rl-col cidl) (rl-v p0)
+    (rl-col cidr) (rl-v p9)
+    ;; Right rectangle.
+    (rl-col cidr) (rl-v p9) (rl-v p10) (rl-v p3) (rl-v p2) (rl-v p9) (rl-v p3)
+    ;; Bottom rectangle.
+    (rl-col cidl) (rl-v p11) (rl-v p5)
+    (rl-col cidr) (rl-v p4) (rl-v p10)
+    (rl-col cidl) (rl-v p11)
+    (rl-col cidr) (rl-v p4)
+    ;; Left rectangle.
+    (rl-col cidl) (rl-v p7) (rl-v p6) (rl-v p11) (rl-v p8) (rl-v p7) (rl-v p11)
+    ;; Middle rectangle.
+    (rl-col cidl) (rl-v p8) (rl-v p11)
+    (rl-col cidr) (rl-v p10) (rl-v p9)
+    (rl-col cidl) (rl-v p8)
+    (rl-col cidr) (rl-v p10)
+
+    (cpp/rlEnd)
+    nil))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - rectangle advanced (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; rec: 400x75, x 200, stacked from y 37.5 with 1px gaps.
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (cpp/BeginDrawing)
+      (cpp/ClearBackground cpp/RAYWHITE)
+
+      (draw-rounded-gradient-h 200.0 37.5 400.0 75.0 0.8 0.8 36 0 1)
+      (draw-rounded-gradient-h 200.0 113.5 400.0 75.0 0.5 1.0 36 1 2)
+      (draw-rounded-gradient-h 200.0 189.5 400.0 75.0 1.0 0.5 36 1 0)
+      (draw-rounded-gradient-h 200.0 265.5 400.0 75.0 0.0 1.0 36 0 3)
+      (draw-rounded-gradient-h 200.0 341.5 400.0 75.0 1.0 0.0 36 0 2)
+
+      (cpp/DrawText "rounded gradients via rlgl triangles - Q quits" 10 10 10 cpp/DARKGRAY)
+
+      (cpp/EndDrawing)
+
+      (when-not (cpp/IsKeyDown cpp/KEY_Q)
+        (recur))))
+
+  (cpp/CloseWindow))

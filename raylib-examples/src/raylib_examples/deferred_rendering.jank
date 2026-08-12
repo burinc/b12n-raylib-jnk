@@ -1,0 +1,271 @@
+(ns raylib-examples.deferred-rendering
+  "raylib [shaders] example - deferred rendering, ported to jank.
+
+  A deferred pipeline: the scene renders once into a three-target
+  G-buffer (world position, normal, albedo+specular), then a
+  full-screen quad shades every pixel from those textures under four
+  toggleable point lights (Y/R/G/B). Keys 1/2/3/4 show the raw
+  position / normal / albedo textures / the final shading. Orbital
+  camera. ESC quits.
+  Based on raylib/examples/shaders/shaders_deferred_rendering.c
+
+  jank-native notes:
+  - First MULTI-RENDER-TARGET framebuffer: the G-buffer (3 color
+    textures + depth renderbuffer, rlActiveDrawBuffers 3) builds into
+    C statics behind id accessors; the depth blit to the default
+    framebuffer and the sampler-unit init (rlGetLocationUniform +
+    SAMPLER2D uniforms) are shims, the rest is direct rlgl.
+  - The debug views draw a compound-literal Texture2D built from a
+    raw GL id - a one-line C shim.
+  - Lights ride jank_rlights.h against the deferred shader; the 30
+    random cubes are a jank vector of maps drawn with DrawModelEx."
+  (:include "raylib.h" "rlgl.h" "jank_rlights.h"))
+
+;; G-buffer (MRT framebuffer) + deferred-shader helpers.
+(cpp/raw "static unsigned int jank_gb_fbo = 0;
+static unsigned int jank_gb_position = 0;
+static unsigned int jank_gb_normal = 0;
+static unsigned int jank_gb_albedo = 0;
+static unsigned int jank_gb_depth = 0;
+
+static void jank_gbuffer_init(int width, int height) {
+  jank_gb_fbo = rlLoadFramebuffer();
+  if (jank_gb_fbo == 0) TraceLog(LOG_WARNING, \"Failed to create framebuffer\");
+  rlEnableFramebuffer(jank_gb_fbo);
+  /* 16-bit position + normal targets, 8-bit albedo+specular */
+  jank_gb_position = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16, 1);
+  jank_gb_normal = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16, 1);
+  jank_gb_albedo = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
+  rlActiveDrawBuffers(3);
+  rlFramebufferAttach(jank_gb_fbo, jank_gb_position, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
+  rlFramebufferAttach(jank_gb_fbo, jank_gb_normal, RL_ATTACHMENT_COLOR_CHANNEL1, RL_ATTACHMENT_TEXTURE2D, 0);
+  rlFramebufferAttach(jank_gb_fbo, jank_gb_albedo, RL_ATTACHMENT_COLOR_CHANNEL2, RL_ATTACHMENT_TEXTURE2D, 0);
+  jank_gb_depth = rlLoadTextureDepth(width, height, true);
+  rlFramebufferAttach(jank_gb_fbo, jank_gb_depth, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_RENDERBUFFER, 0);
+  if (!rlFramebufferComplete(jank_gb_fbo)) TraceLog(LOG_WARNING, \"Framebuffer is not complete\");
+}
+static int jank_gb_get_fbo(void) { return (int)jank_gb_fbo; }
+static int jank_gb_get_position(void) { return (int)jank_gb_position; }
+static int jank_gb_get_normal(void) { return (int)jank_gb_normal; }
+static int jank_gb_get_albedo(void) { return (int)jank_gb_albedo; }
+static void jank_gbuffer_unload(void) {
+  rlUnloadFramebuffer(jank_gb_fbo);
+  rlUnloadTexture(jank_gb_position);
+  rlUnloadTexture(jank_gb_normal);
+  rlUnloadTexture(jank_gb_albedo);
+  rlUnloadTexture(jank_gb_depth);
+}
+/* point the deferred shader's sampler2D uniforms at texture units 0/1/2 */
+static void jank_deferred_init_samplers(Shader s) {
+  rlEnableShader(s.id);
+  int unit0 = 0, unit1 = 1, unit2 = 2;
+  SetShaderValue(s, rlGetLocationUniform(s.id, \"gPosition\"), &unit0, RL_SHADER_UNIFORM_SAMPLER2D);
+  SetShaderValue(s, rlGetLocationUniform(s.id, \"gNormal\"), &unit1, RL_SHADER_UNIFORM_SAMPLER2D);
+  SetShaderValue(s, rlGetLocationUniform(s.id, \"gAlbedoSpec\"), &unit2, RL_SHADER_UNIFORM_SAMPLER2D);
+  rlDisableShader();
+}
+/* draw a raw G-buffer texture id full-screen, y-flipped (debug views) */
+static void jank_draw_gbuffer_tex(int id, int width, int height) {
+  Texture2D tex = { 0 };
+  tex.id = (unsigned int)id;
+  tex.width = width;
+  tex.height = height;
+  DrawTextureRec(tex, (Rectangle){ 0, 0, (float)width, (float)-height },
+                 (Vector2){ 0, 0 }, RAYWHITE);
+}
+/* copy the G-buffer's depth over to the default framebuffer */
+static void jank_blit_depth(int width, int height) {
+  rlBindFramebuffer(RL_READ_FRAMEBUFFER, jank_gb_fbo);
+  rlBindFramebuffer(RL_DRAW_FRAMEBUFFER, 0);
+  rlBlitFramebuffer(0, 0, width, height, 0, 0, width, height, 0x00000100); /* GL_DEPTH_BUFFER_BIT */
+  rlDisableFramebuffer();
+}
+static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader = s; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-CUBES 30)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+;; The four lights (YELLOW / RED / GREEN / BLUE), as jank data for the
+;; marker spheres.
+(def LIGHTS [{:x -2.0 :y 1.0 :z -2.0 :r 253 :g 249 :b 0}
+             {:x 2.0 :y 1.0 :z 2.0 :r 230 :g 41 :b 55}
+             {:x -2.0 :y 1.0 :z 2.0 :r 0 :g 228 :b 48}
+             {:x 2.0 :y 1.0 :z -2.0 :r 0 :g 121 :b 241}])
+
+(defn- light-color
+  "The light's Color as a packed-RGBA GetColor int."
+  [{:keys [r g b]}]
+  (+ (* r 16777216) (* g 65536) (* b 256) 255))
+
+;; Deferred debug modes (the C's enum): 0 position, 1 normal, 2 albedo,
+;; 3 the final shading.
+(def MODE-SHADING 3)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - deferred rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 5.0) (cpp/float 4.0) (cpp/float 5.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 60.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModelFromMesh (cpp/GenMeshPlane (cpp/float 10.0) (cpp/float 10.0) 3 3))
+        cube (cpp/LoadModelFromMesh (cpp/GenMeshCube (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0)))
+        gbuffer-shader (cpp/LoadShader (str RES "shaders/glsl330/gbuffer.vs")
+                                       (str RES "shaders/glsl330/gbuffer.fs"))
+        deferred-shader (cpp/LoadShader (str RES "shaders/glsl330/deferred_shading.vs")
+                                        (str RES "shaders/glsl330/deferred_shading.fs"))
+        view-loc (int (cpp/GetShaderLocation deferred-shader "viewPosition"))
+        ;; 30 random tumbling cubes, as jank data
+        cubes (loop [i 0 acc []]
+                (if (< i MAX-CUBES)
+                  (recur (inc i)
+                         (conj acc {:x (+ 0.0 (int (cpp/GetRandomValue -5 4)))
+                                    :y (+ 0.0 (int (cpp/GetRandomValue 0 4)))
+                                    :z (+ 0.0 (int (cpp/GetRandomValue -5 4)))
+                                    :rot (+ 0.0 (int (cpp/GetRandomValue 0 359)))}))
+                  acc))]
+
+    (cpp/jank_rl_shader_set_loc (cpp/& deferred-shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+
+    (cpp/jank_gbuffer_init WIDTH HEIGHT)
+    (cpp/jank_deferred_init_samplers deferred-shader)
+
+    (cpp/jank_model_set_shader (cpp/& model) gbuffer-shader)
+    (cpp/jank_model_set_shader (cpp/& cube) gbuffer-shader)
+
+    ;; the four point lights live on the DEFERRED shader
+    (loop [i 0]
+      (when (< i 4)
+        (let [{:keys [x y z r g b]} (nth LIGHTS i)]
+          (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_POINT)
+                                    x y z 0.0 0.0 0.0
+                                    (int r) (int g) (int b) 255
+                                    deferred-shader))
+        (recur (inc i))))
+
+    (cpp/rlEnableDepthTest)
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [debug-mode].
+    (loop [mode MODE-SHADING]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+        (cpp/jank_rl_push_view_pos deferred-shader view-loc (cpp/& camera))
+
+        (when (cpp/IsKeyPressed cpp/KEY_Y) (cpp/jank_rl_toggle_light 0))
+        (when (cpp/IsKeyPressed cpp/KEY_R) (cpp/jank_rl_toggle_light 1))
+        (when (cpp/IsKeyPressed cpp/KEY_G) (cpp/jank_rl_toggle_light 2))
+        (when (cpp/IsKeyPressed cpp/KEY_B) (cpp/jank_rl_toggle_light 3))
+
+        (let [mode (cond (cpp/IsKeyPressed cpp/KEY_ONE) 0
+                         (cpp/IsKeyPressed cpp/KEY_TWO) 1
+                         (cpp/IsKeyPressed cpp/KEY_THREE) 2
+                         (cpp/IsKeyPressed cpp/KEY_FOUR) 3
+                         :else mode)]
+
+          (loop [i 0]
+            (when (< i 4)
+              (cpp/jank_rl_update_light deferred-shader (int i))
+              (recur (inc i))))
+
+          (cpp/BeginDrawing)
+
+          ;; geometry pass: the scene into the three G-buffer targets
+          (cpp/rlEnableFramebuffer (cpp/jank_gb_get_fbo))
+          (cpp/rlClearColor 0 0 0 0)
+          (cpp/rlClearScreenBuffers)
+          (cpp/rlDisableColorBlend)
+
+          (cpp/BeginMode3D camera)
+          ;; BeginShaderMode won't load the program in time - raw enable
+          (cpp/rlEnableShader (.-id gbuffer-shader))
+          (cpp/DrawModel model
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/DrawModel cube
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (loop [i 0]
+            (when (< i MAX-CUBES)
+              (let [{:keys [x y z rot]} (nth cubes i)]
+                (cpp/DrawModelEx cube
+                                 (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                                 (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                                 (cpp/float rot)
+                                 (cpp/Vector3 (cpp/float 0.25) (cpp/float 0.25) (cpp/float 0.25))
+                                 cpp/WHITE))
+              (recur (inc i))))
+          (cpp/rlDisableShader)
+          (cpp/EndMode3D)
+
+          (cpp/rlEnableColorBlend)
+
+          ;; back to the default framebuffer
+          (cpp/rlDisableFramebuffer)
+          (cpp/rlClearScreenBuffers)
+
+          (if (= mode MODE-SHADING)
+            (do
+              ;; lighting pass: full-screen quad shaded from the G-buffer
+              (cpp/BeginMode3D camera)
+              (cpp/rlDisableColorBlend)
+              (cpp/rlEnableShader (.-id deferred-shader))
+              (cpp/rlActiveTextureSlot 0)
+              (cpp/rlEnableTexture (cpp/jank_gb_get_position))
+              (cpp/rlActiveTextureSlot 1)
+              (cpp/rlEnableTexture (cpp/jank_gb_get_normal))
+              (cpp/rlActiveTextureSlot 2)
+              (cpp/rlEnableTexture (cpp/jank_gb_get_albedo))
+              (cpp/rlLoadDrawQuad)
+              (cpp/rlDisableShader)
+              (cpp/rlEnableColorBlend)
+              (cpp/EndMode3D)
+
+              ;; carry the G-buffer depth over, then forward-draw the markers
+              (cpp/jank_blit_depth WIDTH HEIGHT)
+
+              (cpp/BeginMode3D camera)
+              (cpp/rlEnableShader (cpp/rlGetShaderIdDefault))
+              (loop [i 0]
+                (when (< i 4)
+                  (let [{:keys [x y z] :as light} (nth LIGHTS i)]
+                    (if (= 1 (int (cpp/jank_rl_light_enabled (int i))))
+                      (cpp/DrawSphereEx (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                                        (cpp/float 0.2) 8 8
+                                        (cpp/GetColor (light-color light)))
+                      (cpp/DrawSphereWires (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                                           (cpp/float 0.2) 8 8
+                                           (cpp/ColorAlpha (cpp/GetColor (light-color light))
+                                                           (cpp/float 0.3)))))
+                  (recur (inc i))))
+              (cpp/rlDisableShader)
+              (cpp/EndMode3D)
+
+              (cpp/DrawText "FINAL RESULT" 10 (- HEIGHT 30) 20 cpp/DARKGREEN))
+            (do
+              ;; raw G-buffer texture debug views
+              (cond (= mode 0) (cpp/jank_draw_gbuffer_tex (cpp/jank_gb_get_position) WIDTH HEIGHT)
+                    (= mode 1) (cpp/jank_draw_gbuffer_tex (cpp/jank_gb_get_normal) WIDTH HEIGHT)
+                    :else (cpp/jank_draw_gbuffer_tex (cpp/jank_gb_get_albedo) WIDTH HEIGHT))
+              (cond (= mode 0) (cpp/DrawText "POSITION TEXTURE" 10 (- HEIGHT 30) 20 cpp/DARKGREEN)
+                    (= mode 1) (cpp/DrawText "NORMAL TEXTURE" 10 (- HEIGHT 30) 20 cpp/DARKGREEN)
+                    :else (cpp/DrawText "ALBEDO TEXTURE" 10 (- HEIGHT 30) 20 cpp/DARKGREEN))))
+
+          (cpp/DrawText "Toggle lights keys: [Y][R][G][B]" 10 40 20 cpp/DARKGRAY)
+          (cpp/DrawText "Switch G-buffer textures: [1][2][3][4]" 10 70 20 cpp/DARKGRAY)
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+          (recur mode))))
+
+    (cpp/UnloadModel model)
+    (cpp/UnloadModel cube)
+    (cpp/UnloadShader deferred-shader)
+    (cpp/UnloadShader gbuffer-shader)
+    (cpp/jank_gbuffer_unload))
+
+  (cpp/CloseWindow))

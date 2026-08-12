@@ -1,0 +1,137 @@
+(ns raylib-examples.fog-rendering
+  "raylib [shaders] example - fog rendering, ported to jank.
+
+  A spinning torus, a cube and a sphere (plus a receding row of
+  toruses) in exponential-squared fog under one point light; UP/DOWN
+  change the fog density. Orbital camera. ESC quits.
+  Based on raylib/examples/shaders/shaders_fog_rendering.c
+
+  jank-native notes:
+  - Second consumer of the wrapper-shipped jank_rlights.h: light
+    creation, viewPos push, shader.locs writes and all uniforms come
+    from the header. The only per-file shims are the model helpers:
+    material texture/shader writes plus the torus's per-frame
+    transform spin (MatrixMultiply/MatrixRotate via raymath.h).
+  - ColorNormalize(GRAY) reduces to (/ 130.0 255.0) components sent
+    with jank_rl_set_vec4; fog density threads through recur as a
+    jank real, clamped in jank."
+  (:require [clojure.string :as string])
+  (:include "raylib.h" "raymath.h" "jank_rlights.h"))
+
+;; Model helpers: material field writes + the torus spin.
+(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}
+static void jank_model_set_shader(Model* m, Shader s) {
+  m->materials[0].shader = s;
+}
+static void jank_model_spin(Model* m, double rx, double rz) {
+  m->transform = MatrixMultiply(m->transform, MatrixRotateX((float)rx));
+  m->transform = MatrixMultiply(m->transform, MatrixRotateZ((float)rz));
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn- fmt2
+  "The C's %.2f, via trimming str two digits past the dot."
+  [v]
+  (let [s (str v)
+        dot (string/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - fog rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 2.0) (cpp/float 2.0) (cpp/float 6.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model-a (cpp/LoadModelFromMesh (cpp/GenMeshTorus (cpp/float 0.4) (cpp/float 1.0) 16 32))
+        model-b (cpp/LoadModelFromMesh (cpp/GenMeshCube (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0)))
+        model-c (cpp/LoadModelFromMesh (cpp/GenMeshSphere (cpp/float 0.5) 32 32))
+        texture (cpp/LoadTexture (str RES "texel_checker.png"))
+        shader (cpp/LoadShader (str RES "shaders/glsl330/lighting.vs")
+                               (str RES "shaders/glsl330/fog.fs"))
+        view-loc (int (cpp/GetShaderLocation shader "viewPos"))
+        ambient-loc (int (cpp/GetShaderLocation shader "ambient"))
+        fog-color-loc (int (cpp/GetShaderLocation shader "fogColor"))
+        fog-density-loc (int (cpp/GetShaderLocation shader "fogDensity"))]
+
+    (cpp/jank_model_set_texture (cpp/& model-a) texture)
+    (cpp/jank_model_set_texture (cpp/& model-b) texture)
+    (cpp/jank_model_set_texture (cpp/& model-c) texture)
+
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MATRIX_MODEL
+                                (int (cpp/GetShaderLocation shader "matModel")))
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+
+    (cpp/jank_rl_set_vec4 shader ambient-loc 0.2 0.2 0.2 1.0)
+    ;; ColorNormalize(GRAY) = 130/255 per channel
+    (let [g (/ 130.0 255.0)]
+      (cpp/jank_rl_set_vec4 shader fog-color-loc g g g 1.0))
+
+    (cpp/jank_model_set_shader (cpp/& model-a) shader)
+    (cpp/jank_model_set_shader (cpp/& model-b) shader)
+    (cpp/jank_model_set_shader (cpp/& model-c) shader)
+
+    ;; one white point light
+    (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_POINT)
+                              0.0 2.0 6.0 0.0 0.0 0.0
+                              255 255 255 255 shader)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [fog-density].
+    (loop [fog-density 0.15]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (let [fog-density (cond (cpp/IsKeyDown cpp/KEY_UP) (+ fog-density 0.001)
+                                (cpp/IsKeyDown cpp/KEY_DOWN) (- fog-density 0.001)
+                                :else fog-density)
+              fog-density (if (> fog-density 1.0) 1.0 (if (< fog-density 0.0) 0.0 fog-density))]
+
+          (cpp/jank_rl_set_float shader fog-density-loc fog-density)
+          (cpp/jank_model_spin (cpp/& model-a) -0.025 0.012)
+          (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/GRAY)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawModel model-a
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/DrawModel model-b
+                         (cpp/Vector3 (cpp/float -2.6) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/DrawModel model-c
+                         (cpp/Vector3 (cpp/float 2.6) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          ;; a receding row of toruses into the fog
+          (loop [i -20]
+            (when (< i 20)
+              (cpp/DrawModel model-a
+                             (cpp/Vector3 (cpp/float (+ 0.0 i)) (cpp/float 0.0) (cpp/float 2.0))
+                             (cpp/float 1.0) cpp/WHITE)
+              (recur (+ i 2))))
+          (cpp/EndMode3D)
+
+          (cpp/DrawText (str "Use KEY_UP/KEY_DOWN to change fog density [" (fmt2 fog-density) "]")
+                        10 10 20 cpp/RAYWHITE)
+
+          (cpp/EndDrawing)
+          (recur fog-density))))
+
+    (cpp/UnloadModel model-a)
+    (cpp/UnloadModel model-b)
+    (cpp/UnloadModel model-c)
+    (cpp/UnloadTexture texture)
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

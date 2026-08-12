@@ -1,0 +1,253 @@
+(ns raylib-examples.input-gestures-testbed
+  "raylib [core] example - input gestures testbed, ported to jank.
+
+  A gesture dashboard: a scrolling log of detected gestures (two buttons
+  toggle hiding repeats / holds), a 'last gesture' indicator panel, a
+  protractor showing the current drag/pinch angle, and circles at the
+  touch/mouse points. Works with the mouse on desktop (tap / double tap /
+  hold / drag / swipes); pinch needs a touch screen. ESC quits.
+  Based on raylib/examples/core/core_input_gestures_testbed.c
+
+  jank-native notes:
+  - GetGestureColor returned a Color from a switch - a jank fn can't
+    return a native Color (rule 2), so gestures map to packed 0xRRGGBBAA
+    ints resolved inline with (cpp/GetColor rgba) at each draw site (the
+    random-sequence packing trick). GetGestureName becomes a jank map too.
+  - The C's char log[20][12] inverted ring buffer becomes a jank vector +
+    index threaded through loop/recur; the drawing walk mods the index
+    into range (the C reads log[20] out of bounds on its first frame -
+    benign in C, an exception in jank).
+  - The angle readout trims TextFormat %f to two decimals; jank does the
+    same with str + str/index-of + subs.
+  - GetTouchPosition returns a Vector2, bound per-iteration as a
+    let-local (never crossing a fn boundary); sinf/cosf come from
+    (:include \"math.h\") as cpp/sin + cpp/cos."
+  (:require [clojure.string :as str])
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def LOG-SIZE 20)
+(def PROT-X 266.0)                     ; protractor center
+(def PROT-Y 315.0)
+(def ANGLE-LEN 90.0)
+(def LAST-X 165)                       ; last-gesture panel origin
+(def LAST-Y 130)
+
+(defn- rgba
+  "Pack r,g,b (a=255) into the 0xRRGGBBAA int GetColor wants."
+  [r g b]
+  (+ (* r 16777216) (* g 65536) (* b 256) 255))
+
+;; The C's GetGestureName / GetGestureColor switches as jank maps.
+(def GESTURE-NAMES
+  {1 "Tap" 2 "Double Tap" 4 "Hold" 8 "Drag" 16 "Swipe Right"
+   32 "Swipe Left" 64 "Swipe Up" 128 "Swipe Down" 256 "Pinch In"
+   512 "Pinch Out"})
+
+(def GESTURE-RGBA
+  {1 (rgba 0 121 241)                  ; Tap        BLUE
+   2 (rgba 102 191 255)                ; Double Tap SKYBLUE
+   4 (rgba 0 0 0)                      ; Hold       BLACK
+   8 (rgba 0 158 47)                   ; Drag       LIME
+   16 (rgba 230 41 55)                 ; Swipes     RED
+   32 (rgba 230 41 55)
+   64 (rgba 230 41 55)
+   128 (rgba 230 41 55)
+   256 (rgba 135 60 190)               ; Pinch In   VIOLET
+   512 (rgba 255 161 0)})              ; Pinch Out  ORANGE
+
+(defn- angle-text
+  "The C's TextFormat %f trimmed two digits past the dot."
+  [a]
+  (let [s (str a)
+        dot (str/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - input gestures testbed (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [last-gesture previous-gesture log-vector log-index log-mode
+  ;;         gesture-rgba angle-degrees]. log-mode: 0 show all, 1 hide
+  ;; repeats, 2 hide holds, 3 hide both (the C's semantics).
+  (loop [last-g 0 prev-g 0 log (into [] (repeat LOG-SIZE "")) log-idx LOG-SIZE
+         mode 1 grgba (rgba 0 0 0) angle 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [g (int (cpp/GetGestureDetected))
+            drag-deg (+ 0.0 (cpp/GetGestureDragAngle))
+            pinch-deg (+ 0.0 (cpp/GetGesturePinchAngle))
+            touches (int (cpp/GetTouchPointCount))
+            mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+
+            ;; last meaningful gesture (not none, not hold, not a repeat)
+            last-g (if (and (not= g 0) (not= g 4) (not= g prev-g)) g last-g)
+
+            ;; log-mode buttons
+            released? (if (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT) true false)
+            mouse (cpp/Vector2 (cpp/float mx) (cpp/float my))
+            over-b1? (if (cpp/CheckCollisionPointRec
+                          mouse (cpp/Rectangle (cpp/float 53.0) (cpp/float 7.0)
+                                               (cpp/float 48.0) (cpp/float 26.0)))
+                       true false)
+            over-b2? (if (cpp/CheckCollisionPointRec
+                          mouse (cpp/Rectangle (cpp/float 108.0) (cpp/float 7.0)
+                                               (cpp/float 36.0) (cpp/float 26.0)))
+                       true false)
+            mode (cond (and released? over-b1?)
+                       (cond (= mode 3) 2 (= mode 2) 3 (= mode 1) 0 :else 1)
+                       (and released? over-b2?)
+                       (cond (= mode 3) 1 (= mode 2) 0 (= mode 1) 3 :else 2)
+                       :else mode)
+
+            ;; gate for filling the log this frame
+            fill? (and (not= g 0)
+                       (cond (= mode 3) (or (and (not= g 4) (not= g prev-g)) (< g 3))
+                             (= mode 2) (not= g 4)
+                             (= mode 1) (not= g prev-g)
+                             :else true))
+            prev-g (if fill? g prev-g)
+            grgba (if fill? (get GESTURE-RGBA g (rgba 0 0 0)) grgba)
+            log-idx (if fill?
+                      (dec (if (<= log-idx 0) LOG-SIZE log-idx))
+                      log-idx)
+            log (if fill?
+                  (assoc log log-idx (get GESTURE-NAMES g "Unknown"))
+                  log)
+
+            ;; protractor angle: pinches > 255, swipes/drag > 15, taps 0
+            angle (cond (> g 255) pinch-deg
+                        (> g 15) drag-deg
+                        (> g 0) 0.0
+                        :else angle)
+            rad (/ (* (+ angle 90.0) 3.14159265358979) 180.0)
+            fx (+ (* ANGLE-LEN (cpp/sin rad)) PROT-X)
+            fy (+ (* ANGLE-LEN (cpp/cos rad)) PROT-Y)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        ;; usage notes
+        (cpp/DrawText "*" 165 12 10 cpp/BLACK)
+        (cpp/DrawText "Example optimized for Web/HTML5\non Smartphones with Touch Screen."
+                      175 12 10 cpp/BLACK)
+        (cpp/DrawText "*" 165 42 10 cpp/BLACK)
+        (cpp/DrawText "While running on Desktop Web Browsers,\ninspect and turn on Touch Emulation."
+                      175 42 10 cpp/BLACK)
+
+        ;; last-gesture panel
+        (cpp/DrawText "Last gesture" (+ LAST-X 33) (- LAST-Y 47) 20 cpp/BLACK)
+        (cpp/DrawText "Swipe         Tap       Pinch  Touch" (+ LAST-X 17) (- LAST-Y 18) 10 cpp/BLACK)
+        (cpp/DrawRectangle (+ LAST-X 20) LAST-Y 20 20 (if (= last-g 64) cpp/RED cpp/LIGHTGRAY))
+        (cpp/DrawRectangle LAST-X (+ LAST-Y 20) 20 20 (if (= last-g 32) cpp/RED cpp/LIGHTGRAY))
+        (cpp/DrawRectangle (+ LAST-X 40) (+ LAST-Y 20) 20 20 (if (= last-g 16) cpp/RED cpp/LIGHTGRAY))
+        (cpp/DrawRectangle (+ LAST-X 20) (+ LAST-Y 40) 20 20 (if (= last-g 128) cpp/RED cpp/LIGHTGRAY))
+        (cpp/DrawCircle (+ LAST-X 80) (+ LAST-Y 16) (cpp/float 10.0) (if (= last-g 1) cpp/BLUE cpp/LIGHTGRAY))
+        (cpp/DrawRing (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 103)) (cpp/float (+ 0.0 LAST-Y 16)))
+                      (cpp/float 6.0) (cpp/float 11.0) (cpp/float 0.0) (cpp/float 360.0) 0
+                      (if (= last-g 8) cpp/LIME cpp/LIGHTGRAY))
+        (cpp/DrawCircle (+ LAST-X 80) (+ LAST-Y 43) (cpp/float 10.0) (if (= last-g 2) cpp/SKYBLUE cpp/LIGHTGRAY))
+        (cpp/DrawCircle (+ LAST-X 103) (+ LAST-Y 43) (cpp/float 10.0) (if (= last-g 2) cpp/SKYBLUE cpp/LIGHTGRAY))
+        (cpp/DrawTriangle (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 122)) (cpp/float (+ 0.0 LAST-Y 16)))
+                          (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 137)) (cpp/float (+ 0.0 LAST-Y 26)))
+                          (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 137)) (cpp/float (+ 0.0 LAST-Y 6)))
+                          (if (= last-g 512) cpp/ORANGE cpp/LIGHTGRAY))
+        (cpp/DrawTriangle (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 147)) (cpp/float (+ 0.0 LAST-Y 6)))
+                          (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 147)) (cpp/float (+ 0.0 LAST-Y 26)))
+                          (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 162)) (cpp/float (+ 0.0 LAST-Y 16)))
+                          (if (= last-g 512) cpp/ORANGE cpp/LIGHTGRAY))
+        (cpp/DrawTriangle (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 125)) (cpp/float (+ 0.0 LAST-Y 33)))
+                          (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 125)) (cpp/float (+ 0.0 LAST-Y 53)))
+                          (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 140)) (cpp/float (+ 0.0 LAST-Y 43)))
+                          (if (= last-g 256) cpp/VIOLET cpp/LIGHTGRAY))
+        (cpp/DrawTriangle (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 144)) (cpp/float (+ 0.0 LAST-Y 43)))
+                          (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 159)) (cpp/float (+ 0.0 LAST-Y 53)))
+                          (cpp/Vector2 (cpp/float (+ 0.0 LAST-X 159)) (cpp/float (+ 0.0 LAST-Y 33)))
+                          (if (= last-g 256) cpp/VIOLET cpp/LIGHTGRAY))
+        (loop [i 0]
+          (when (< i 4)
+            (cpp/DrawCircle (+ LAST-X 180) (+ LAST-Y 7 (* i 15)) (cpp/float 5.0)
+                            (if (<= touches i) cpp/LIGHTGRAY (cpp/GetColor grgba)))
+            (recur (inc i))))
+
+        ;; gesture log (inverted ring; index modded into range - the C
+        ;; reads log[20] on its first frame, out of bounds)
+        (cpp/DrawText "Log" 10 10 20 cpp/BLACK)
+        (loop [i 0]
+          (when (< i LOG-SIZE)
+            (let [ii (int (mod (+ log-idx i) LOG-SIZE))]
+              (cpp/DrawText (nth log ii) 10 (+ 420 (* i -20)) 20
+                            (if (= i 0) (cpp/GetColor grgba) cpp/LIGHTGRAY)))
+            (recur (inc i))))
+
+        ;; log-mode buttons
+        (cpp/DrawRectangle 53 7 48 26 (if (or (= mode 3) (= mode 1)) cpp/MAROON cpp/GRAY))
+        (cpp/DrawText "Hide" 60 10 10 cpp/WHITE)
+        (cpp/DrawText "Repeat" 60 20 10 cpp/WHITE)
+        (cpp/DrawRectangle 108 7 36 26 (if (or (= mode 3) (= mode 2)) cpp/MAROON cpp/GRAY))
+        (cpp/DrawText "Hide" 115 10 10 cpp/WHITE)
+        (cpp/DrawText "Hold" 115 20 10 cpp/WHITE)
+
+        ;; protractor
+        (cpp/DrawText "Angle" (int (+ PROT-X 55)) (int (+ PROT-Y 76)) 10 cpp/BLACK)
+        (cpp/DrawText (angle-text angle) (int (+ PROT-X 55)) (int (+ PROT-Y 92)) 20 (cpp/GetColor grgba))
+        (cpp/DrawCircleV (cpp/Vector2 (cpp/float PROT-X) (cpp/float PROT-Y)) (cpp/float 80.0) cpp/WHITE)
+        (cpp/DrawLineEx (cpp/Vector2 (cpp/float (- PROT-X 90.0)) (cpp/float PROT-Y))
+                        (cpp/Vector2 (cpp/float (+ PROT-X 90.0)) (cpp/float PROT-Y))
+                        (cpp/float 3.0) cpp/LIGHTGRAY)
+        (cpp/DrawLineEx (cpp/Vector2 (cpp/float PROT-X) (cpp/float (- PROT-Y 90.0)))
+                        (cpp/Vector2 (cpp/float PROT-X) (cpp/float (+ PROT-Y 90.0)))
+                        (cpp/float 3.0) cpp/LIGHTGRAY)
+        (cpp/DrawLineEx (cpp/Vector2 (cpp/float (- PROT-X 80.0)) (cpp/float (- PROT-Y 45.0)))
+                        (cpp/Vector2 (cpp/float (+ PROT-X 80.0)) (cpp/float (+ PROT-Y 45.0)))
+                        (cpp/float 3.0) cpp/GREEN)
+        (cpp/DrawLineEx (cpp/Vector2 (cpp/float (- PROT-X 80.0)) (cpp/float (+ PROT-Y 45.0)))
+                        (cpp/Vector2 (cpp/float (+ PROT-X 80.0)) (cpp/float (- PROT-Y 45.0)))
+                        (cpp/float 3.0) cpp/GREEN)
+        (cpp/DrawText "0" (int (+ PROT-X 96)) (int (- PROT-Y 9)) 20 cpp/BLACK)
+        (cpp/DrawText "30" (int (+ PROT-X 74)) (int (- PROT-Y 68)) 20 cpp/BLACK)
+        (cpp/DrawText "90" (int (- PROT-X 11)) (int (- PROT-Y 110)) 20 cpp/BLACK)
+        (cpp/DrawText "150" (int (- PROT-X 100)) (int (- PROT-Y 68)) 20 cpp/BLACK)
+        (cpp/DrawText "180" (int (- PROT-X 124)) (int (- PROT-Y 9)) 20 cpp/BLACK)
+        (cpp/DrawText "210" (int (- PROT-X 100)) (int (+ PROT-Y 50)) 20 cpp/BLACK)
+        (cpp/DrawText "270" (int (- PROT-X 18)) (int (+ PROT-Y 92)) 20 cpp/BLACK)
+        (cpp/DrawText "330" (int (+ PROT-X 72)) (int (+ PROT-Y 50)) 20 cpp/BLACK)
+        (when (not= angle 0.0)
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float PROT-X) (cpp/float PROT-Y))
+                          (cpp/Vector2 (cpp/float fx) (cpp/float fy))
+                          (cpp/float 3.0) (cpp/GetColor grgba)))
+
+        ;; touch / mouse pointer points
+        (when (not= g 0)
+          (if (> touches 0)
+            (do
+              (loop [i 0]
+                (when (< i touches)
+                  (let [tp (cpp/GetTouchPosition i)
+                        tx (+ 0.0 (.-x tp))
+                        ty (+ 0.0 (.-y tp))]
+                    (cpp/DrawCircleV (cpp/Vector2 (cpp/float tx) (cpp/float ty))
+                                     (cpp/float 50.0) (cpp/Fade (cpp/GetColor grgba) (cpp/float 0.5)))
+                    (cpp/DrawCircleV (cpp/Vector2 (cpp/float tx) (cpp/float ty))
+                                     (cpp/float 5.0) (cpp/GetColor grgba)))
+                  (recur (inc i))))
+              (when (= touches 2)
+                (let [t0 (cpp/GetTouchPosition 0)
+                      t1 (cpp/GetTouchPosition 1)]
+                  (cpp/DrawLineEx (cpp/Vector2 (cpp/float (+ 0.0 (.-x t0))) (cpp/float (+ 0.0 (.-y t0))))
+                                  (cpp/Vector2 (cpp/float (+ 0.0 (.-x t1))) (cpp/float (+ 0.0 (.-y t1))))
+                                  (cpp/float (nth [12.0 8.0] (if (= g 512) 1 0)))
+                                  (cpp/GetColor grgba)))))
+            (do
+              (cpp/DrawCircleV (cpp/Vector2 (cpp/float mx) (cpp/float my))
+                               (cpp/float 35.0) (cpp/Fade (cpp/GetColor grgba) (cpp/float 0.5)))
+              (cpp/DrawCircleV (cpp/Vector2 (cpp/float mx) (cpp/float my))
+                               (cpp/float 5.0) (cpp/GetColor grgba)))))
+
+        (cpp/EndDrawing)
+
+        (recur last-g prev-g log log-idx mode grgba angle))))
+
+  (cpp/CloseWindow))

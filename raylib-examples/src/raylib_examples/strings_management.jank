@@ -1,0 +1,267 @@
+(ns raylib-examples.strings-management
+  "raylib [text] example - strings management, ported to jank.
+
+  An interactive text-particle physics toy that showcases raylib's C
+  string API. A phrase starts as one draggable, bouncing text box;
+  grab/throw it with the left mouse, slice it in half with the right
+  mouse, shatter it into single chars with Shift+right, glue two
+  particles by dragging with Left-Ctrl, or (when only one remains) slice
+  it on a typed char. Keys 1-6 reset the phrase through
+  TextToUpper/Lower/Pascal/Snake/Camel. Middle mouse shakes them all.
+  Based on raylib/examples/text/text_strings_management.c (3/4).
+
+  jank-native notes:
+  - Everything is native: a TextParticle struct (char[] + Rectangle +
+    Vector2 + Color), a TextParticle[100] pool, a grabbed-particle
+    pointer, and the string ops themselves (TextCopy / TextSubtext /
+    TextSplit / TextTo{Upper,Lower,Pascal,Snake,Camel} return C strings,
+    not jank strings). None of that crosses the jank<->C boundary, so
+    the pool, the seven particle helpers, the grab/slice/shatter/glue
+    state machine, the bounce physics and the draw all live verbatim in
+    one cpp/raw shim; jank owns the window lifecycle, the frame loop and
+    the frame boundaries. The port proves raylib's whole TextX API is
+    reachable from jank even though jank has its own string fns."
+  (:include "raylib.h" "stdlib.h"))
+
+;; The text-particle pool + physics + raylib-string-API state machine.
+(cpp/raw "
+#define JANK_TSM_MAX_TEXT_LENGTH    100
+#define JANK_TSM_MAX_PARTICLES      100
+#define JANK_TSM_FONT_SIZE           30
+#define JANK_TSM_SW                 800
+#define JANK_TSM_SH                 450
+
+typedef struct {
+  char text[JANK_TSM_MAX_TEXT_LENGTH];
+  Rectangle rect;
+  Vector2 vel;
+  Vector2 ppos;
+  float padding;
+  float borderWidth;
+  float friction;
+  float elasticity;
+  Color color;
+  bool grabbed;
+} JankTsmParticle;
+
+static JankTsmParticle jank_tsm_particles[JANK_TSM_MAX_PARTICLES] = { 0 };
+static int jank_tsm_count = 0;
+static JankTsmParticle *jank_tsm_grabbed = NULL;
+static Vector2 jank_tsm_pressOffset = { 0 };
+
+static JankTsmParticle jank_tsm_create(const char *text, float x, float y, Color color) {
+  JankTsmParticle tp = {
+    .text = \"\",
+    .rect = { x, y, 30, 30 },
+    .vel = { (float)GetRandomValue(-200, 200), (float)GetRandomValue(-200, 200) },
+    .ppos = { 0 },
+    .padding = 5.0f,
+    .borderWidth = 5.0f,
+    .friction = 0.99f,
+    .elasticity = 0.9f,
+    .color = color,
+    .grabbed = false
+  };
+  TextCopy(tp.text, text);
+  tp.rect.width = MeasureText(tp.text, JANK_TSM_FONT_SIZE)+tp.padding*2;
+  tp.rect.height = JANK_TSM_FONT_SIZE+tp.padding*2;
+  return tp;
+}
+
+static void jank_tsm_prepare_first(const char *text, JankTsmParticle *tps, int *particleCount) {
+  tps[0] = jank_tsm_create(text, GetScreenWidth()/2.0f, GetScreenHeight()/2.0f, RAYWHITE);
+  *particleCount = 1;
+}
+
+static void jank_tsm_realocate(JankTsmParticle *tps, int particlePos, int *particleCount) {
+  for (int i = particlePos+1; i < *particleCount; i++) tps[i-1] = tps[i];
+  (*particleCount)--;
+}
+
+static void jank_tsm_slice(JankTsmParticle *tp, int particlePos, int sliceLength, JankTsmParticle *tps, int *particleCount) {
+  int length = TextLength(tp->text);
+  if ((length > 1) && ((*particleCount+length) < JANK_TSM_MAX_PARTICLES)) {
+    for (int i = 0; i < length; i += sliceLength) {
+      const char *text = sliceLength == 1 ? TextFormat(\"%c\", tp->text[i]) : TextSubtext(tp->text, i, sliceLength);
+      tps[(*particleCount)++] = jank_tsm_create(text, tp->rect.x + i * tp->rect.width/length, tp->rect.y,
+        (Color){ GetRandomValue(0, 255), GetRandomValue(0, 255), GetRandomValue(0, 255), 255 });
+    }
+    jank_tsm_realocate(tps, particlePos, particleCount);
+  }
+}
+
+static void jank_tsm_slice_by_char(JankTsmParticle *tp, char charToSlice, JankTsmParticle *tps, int *particleCount) {
+  int tokenCount = 0;
+  char **tokens = TextSplit(tp->text, charToSlice, &tokenCount);
+  if (tokenCount > 1) {
+    int textLength = TextLength(tp->text);
+    for (int i = 0; i < textLength; i++) {
+      if (tp->text[i] == charToSlice) {
+        tps[(*particleCount)++] = jank_tsm_create(TextFormat(\"%c\", charToSlice), tp->rect.x, tp->rect.y,
+          (Color){ GetRandomValue(0, 255), GetRandomValue(0, 255), GetRandomValue(0, 255), 255 });
+      }
+    }
+    for (int i = 0; i < tokenCount; i++) {
+      int tokenLength = TextLength(tokens[i]);
+      tps[(*particleCount)++] = jank_tsm_create(TextFormat(\"%s\", tokens[i]), tp->rect.x + i * tp->rect.width/tokenLength, tp->rect.y,
+        (Color){ GetRandomValue(0, 255), GetRandomValue(0, 255), GetRandomValue(0, 255), 255 });
+    }
+    if (tokenCount) jank_tsm_realocate(tps, 0, particleCount);
+  }
+}
+
+static void jank_tsm_shatter(JankTsmParticle *tp, int particlePos, JankTsmParticle *tps, int *particleCount) {
+  jank_tsm_slice(tp, particlePos, 1, tps, particleCount);
+}
+
+static void jank_tsm_glue(JankTsmParticle *grabbed, JankTsmParticle *target, JankTsmParticle *tps, int *particleCount) {
+  int p1 = -1, p2 = -1;
+  for (int i = 0; i < *particleCount; i++) {
+    if (&tps[i] == grabbed) p1 = i;
+    if (&tps[i] == target) p2 = i;
+  }
+  if ((p1 != -1) && (p2 != -1)) {
+    JankTsmParticle tp = jank_tsm_create(TextFormat(\"%s%s\", grabbed->text, target->text), grabbed->rect.x, grabbed->rect.y, RAYWHITE);
+    tp.grabbed = true;
+    tps[(*particleCount)++] = tp;
+    grabbed->grabbed = false;
+    if (p1 < p2) { jank_tsm_realocate(tps, p2, particleCount); jank_tsm_realocate(tps, p1, particleCount); }
+    else { jank_tsm_realocate(tps, p1, particleCount); jank_tsm_realocate(tps, p2, particleCount); }
+  }
+}
+
+/* ---- jank-callable entry points ---- */
+
+static void jank_tsm_init(void) {
+  jank_tsm_prepare_first(\"raylib => fun videogames programming!\", jank_tsm_particles, &jank_tsm_count);
+  SetTargetFPS(60);
+}
+
+static void jank_tsm_update(void) {
+  float delta = GetFrameTime();
+  Vector2 mousePos = GetMousePosition();
+
+  /* Grab a text particle */
+  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    for (int i = jank_tsm_count - 1; i >= 0; i--) {
+      JankTsmParticle *tp = &jank_tsm_particles[i];
+      jank_tsm_pressOffset.x = mousePos.x - tp->rect.x;
+      jank_tsm_pressOffset.y = mousePos.y - tp->rect.y;
+      if (CheckCollisionPointRec(mousePos, tp->rect)) { tp->grabbed = true; jank_tsm_grabbed = tp; break; }
+    }
+  }
+
+  /* Release a grabbed particle */
+  if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+    if (jank_tsm_grabbed != NULL) { jank_tsm_grabbed->grabbed = false; jank_tsm_grabbed = NULL; }
+  }
+
+  /* Slice or shatter */
+  if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+    for (int i = jank_tsm_count - 1; i >= 0; i--) {
+      JankTsmParticle *tp = &jank_tsm_particles[i];
+      if (CheckCollisionPointRec(mousePos, tp->rect)) {
+        if (IsKeyDown(KEY_LEFT_SHIFT)) jank_tsm_shatter(tp, i, jank_tsm_particles, &jank_tsm_count);
+        else jank_tsm_slice(tp, i, TextLength(tp->text)/2, jank_tsm_particles, &jank_tsm_count);
+        break;
+      }
+    }
+  }
+
+  /* Shake all */
+  if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)) {
+    for (int i = 0; i < jank_tsm_count; i++) {
+      if (!jank_tsm_particles[i].grabbed) jank_tsm_particles[i].vel = (Vector2){ (float)GetRandomValue(-2000, 2000), (float)GetRandomValue(-2000, 2000) };
+    }
+  }
+
+  /* Reset via the TextTo* functions */
+  if (IsKeyPressed(KEY_ONE)) jank_tsm_prepare_first(\"raylib => fun videogames programming!\", jank_tsm_particles, &jank_tsm_count);
+  if (IsKeyPressed(KEY_TWO)) jank_tsm_prepare_first(TextToUpper(\"raylib => fun videogames programming!\"), jank_tsm_particles, &jank_tsm_count);
+  if (IsKeyPressed(KEY_THREE)) jank_tsm_prepare_first(TextToLower(\"raylib => fun videogames programming!\"), jank_tsm_particles, &jank_tsm_count);
+  if (IsKeyPressed(KEY_FOUR)) jank_tsm_prepare_first(TextToPascal(\"raylib_fun_videogames_programming\"), jank_tsm_particles, &jank_tsm_count);
+  if (IsKeyPressed(KEY_FIVE)) jank_tsm_prepare_first(TextToSnake(\"RaylibFunVideogamesProgramming\"), jank_tsm_particles, &jank_tsm_count);
+  if (IsKeyPressed(KEY_SIX)) jank_tsm_prepare_first(TextToCamel(\"raylib_fun_videogames_programming\"), jank_tsm_particles, &jank_tsm_count);
+
+  /* Slice by typed char when only one particle remains */
+  char charPressed = GetCharPressed();
+  if ((charPressed >= 'A') && (charPressed <= 'z') && (jank_tsm_count == 1)) {
+    jank_tsm_slice_by_char(&jank_tsm_particles[0], charPressed, jank_tsm_particles, &jank_tsm_count);
+  }
+
+  /* Physics per particle */
+  for (int i = 0; i < jank_tsm_count; i++) {
+    JankTsmParticle *tp = &jank_tsm_particles[i];
+    if (!tp->grabbed) {
+      tp->rect.x += tp->vel.x * delta;
+      tp->rect.y += tp->vel.y * delta;
+
+      if ((tp->rect.x + tp->rect.width) >= JANK_TSM_SW) { tp->rect.x = JANK_TSM_SW - tp->rect.width; tp->vel.x = -tp->vel.x*tp->elasticity; }
+      else if (tp->rect.x <= 0) { tp->rect.x = 0.0f; tp->vel.x = -tp->vel.x*tp->elasticity; }
+
+      if ((tp->rect.y + tp->rect.height) >= JANK_TSM_SH) { tp->rect.y = JANK_TSM_SH - tp->rect.height; tp->vel.y = -tp->vel.y*tp->elasticity; }
+      else if (tp->rect.y <= 0) { tp->rect.y = 0.0f; tp->vel.y = -tp->vel.y*tp->elasticity; }
+
+      tp->vel.x = tp->vel.x*tp->friction;
+      tp->vel.y = tp->vel.y*tp->friction;
+    } else {
+      tp->rect.x = mousePos.x - jank_tsm_pressOffset.x;
+      tp->rect.y = mousePos.y - jank_tsm_pressOffset.y;
+      tp->vel.x = (tp->rect.x - tp->ppos.x)/delta;
+      tp->vel.y = (tp->rect.y - tp->ppos.y)/delta;
+      tp->ppos.x = tp->rect.x;
+      tp->ppos.y = tp->rect.y;
+
+      /* Glue on drag + Left-Ctrl */
+      if (IsKeyDown(KEY_LEFT_CONTROL)) {
+        for (int j = 0; j < jank_tsm_count; j++) {
+          if (&jank_tsm_particles[j] != jank_tsm_grabbed && jank_tsm_grabbed->grabbed) {
+            if (CheckCollisionRecs(jank_tsm_grabbed->rect, jank_tsm_particles[j].rect)) {
+              jank_tsm_glue(jank_tsm_grabbed, &jank_tsm_particles[j], jank_tsm_particles, &jank_tsm_count);
+              jank_tsm_grabbed = &jank_tsm_particles[jank_tsm_count-1];
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+static void jank_tsm_draw(void) {
+  ClearBackground(RAYWHITE);
+
+  for (int i = 0; i < jank_tsm_count; i++) {
+    JankTsmParticle *tp = &jank_tsm_particles[i];
+    DrawRectangleRec((Rectangle){ tp->rect.x - tp->borderWidth, tp->rect.y - tp->borderWidth, tp->rect.width + tp->borderWidth * 2, tp->rect.height + tp->borderWidth * 2 }, BLACK);
+    DrawRectangleRec(tp->rect, tp->color);
+    DrawText(tp->text, (int)(tp->rect.x+tp->padding), (int)(tp->rect.y+tp->padding), JANK_TSM_FONT_SIZE, BLACK);
+  }
+
+  DrawText(\"grab a text particle by pressing with the mouse and throw it by releasing\", 10, 10, 10, DARKGRAY);
+  DrawText(\"slice a text particle by pressing it with the mouse right button\", 10, 30, 10, DARKGRAY);
+  DrawText(\"shatter a text particle keeping left shift pressed and pressing it with the mouse right button\", 10, 50, 10, DARKGRAY);
+  DrawText(\"glue text particles by grabbing than and keeping left control pressed\", 10, 70, 10, DARKGRAY);
+  DrawText(\"1 to 6 to reset\", 10, 90, 10, DARKGRAY);
+  DrawText(\"when you have only one text particle, you can slice it by pressing a char\", 10, 110, 10, DARKGRAY);
+  DrawText(TextFormat(\"TEXT PARTICLE COUNT: %d\", jank_tsm_count), 10, GetScreenHeight() - 30, 20, BLACK);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - strings management (jank)")
+
+  (cpp/jank_tsm_init)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (cpp/jank_tsm_update)
+
+      (cpp/BeginDrawing)
+      (cpp/jank_tsm_draw)
+      (cpp/EndDrawing)
+      (recur)))
+
+  (cpp/CloseWindow))

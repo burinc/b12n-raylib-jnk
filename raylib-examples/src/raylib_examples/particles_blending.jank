@@ -1,0 +1,107 @@
+(ns raylib-examples.particles-blending
+  "raylib [textures] example - particles blending, ported to jank.
+
+  A pool of 200 spark particles trails the mouse: one activates per
+  frame at the cursor, falls under gravity, spins, and fades out over
+  ~3 seconds, then is recycled. SPACE toggles ALPHA vs ADDITIVE
+  blending, Q quits.
+  Based on raylib/examples/textures/textures_particles_blending.c
+  (jank-native: particles are jank maps in a vector; each particle's
+  random color is stored as r/g/b ints and resolved per draw with
+  Fade over GetColor, both inline as native call arguments.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SPARK "../jank-raylib-sys/raylib/examples/textures/resources/spark_flame.png")
+(def MAX-PARTICLES 200)
+(def GRAVITY 3.0)
+
+(defn fresh-particle []
+  {:x 0.0 :y 0.0
+   :r (cpp/GetRandomValue 0 255)
+   :g (cpp/GetRandomValue 0 255)
+   :b (cpp/GetRandomValue 0 255)
+   :alpha 1.0
+   :size (/ (+ 0.0 (cpp/GetRandomValue 1 30)) 20.0)
+   :rot (+ 0.0 (cpp/GetRandomValue 0 360))
+   :active false})
+
+(defn activate-first-inactive [particles mx my]
+  (loop [i 0]
+    (if (>= i MAX-PARTICLES)
+      particles
+      (if (:active (nth particles i))
+        (recur (inc i))
+        (assoc particles i
+               (assoc (nth particles i)
+                      :active true :alpha 1.0
+                      :x (+ 0.0 mx) :y (+ 0.0 my)))))))
+
+(defn update-particle [p]
+  (if (:active p)
+    (let [alpha (- (:alpha p) 0.005)]
+      (if (<= alpha 0.0)
+        (assoc p :active false)
+        (assoc p
+               :y (+ (:y p) (/ GRAVITY 2.0))
+               :alpha alpha
+               :rot (+ (:rot p) 2.0))))
+    p))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - particles blending (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Textures must load after InitWindow (needs the OpenGL context).
+  (let [smoke (cpp/LoadTexture SPARK)
+        sw (int (+ 0.0 (.-width smoke)))
+        sh (int (+ 0.0 (.-height smoke)))]
+
+    ;; Thread the particle pool and the blend mode (0 ALPHA, 1 ADDITIVE).
+    (loop [particles (vec (repeatedly MAX-PARTICLES fresh-particle))
+           blending 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [particles (activate-first-inactive particles
+                                                 (cpp/GetMouseX) (cpp/GetMouseY))
+              particles (mapv update-particle particles)
+              blending (if (cpp/IsKeyPressed cpp/KEY_SPACE)
+                         (if (= blending 0) 1 0)
+                         blending)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/DARKGRAY)
+
+          (cpp/BeginBlendMode blending)
+          (doseq [p particles]
+            (when (:active p)
+              (cpp/DrawTexturePro smoke
+                                  (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                                 (cpp/float (+ 0.0 sw)) (cpp/float (+ 0.0 sh)))
+                                  (cpp/Rectangle (cpp/float (:x p)) (cpp/float (:y p))
+                                                 (cpp/float (* sw (:size p)))
+                                                 (cpp/float (* sh (:size p))))
+                                  (cpp/Vector2 (cpp/float (/ (* sw (:size p)) 2.0))
+                                               (cpp/float (/ (* sh (:size p)) 2.0)))
+                                  (cpp/float (:rot p))
+                                  (cpp/Fade (cpp/GetColor (+ (* (:r p) 16777216)
+                                                             (* (:g p) 65536)
+                                                             (* (:b p) 256)
+                                                             255))
+                                            (cpp/float (:alpha p))))))
+          (cpp/EndBlendMode)
+
+          (cpp/DrawText "PRESS SPACE to CHANGE BLENDING MODE (Q quits)" 150 20 20 cpp/BLACK)
+          (if (= blending 0)
+            (cpp/DrawText "ALPHA BLENDING" 290 (- HEIGHT 40) 20 cpp/BLACK)
+            (cpp/DrawText "ADDITIVE BLENDING" 280 (- HEIGHT 40) 20 cpp/RAYWHITE))
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur particles blending)))))
+
+    (cpp/UnloadTexture smoke))
+
+  (cpp/CloseWindow))

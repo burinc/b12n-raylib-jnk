@@ -1,0 +1,41 @@
+(ns raylib-examples.writing-anim
+  "raylib [text] example - writing anim, ported to jank.
+
+  A message types itself out one character per 10 frames. Hold SPACE to
+  speed up, ENTER restarts, Q quits.
+  Based on raylib/examples/text/text_writing_anim.c
+  (jank-native: TextSubtext becomes subs with the end index clamped to
+  the message length.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MESSAGE "This sample illustrates a text writing\nanimation effect! Check it out! ;)")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - writing anim (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [frames-counter].
+  (loop [fc 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [fc (if (cpp/IsKeyDown cpp/KEY_SPACE) (+ fc 8) (+ fc 1))
+            fc (if (cpp/IsKeyPressed cpp/KEY_ENTER) 0 fc)
+            shown (min (count MESSAGE) (int (quot fc 10)))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText (subs MESSAGE 0 shown) 210 160 20 cpp/MAROON)
+
+        (cpp/DrawText "PRESS [ENTER] to RESTART!" 240 260 20 cpp/LIGHTGRAY)
+        (cpp/DrawText "HOLD [SPACE] to SPEED UP!" 239 300 20 cpp/LIGHTGRAY)
+        (cpp/DrawText "Q quits" 240 340 20 cpp/LIGHTGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur fc)))))
+
+  (cpp/CloseWindow))

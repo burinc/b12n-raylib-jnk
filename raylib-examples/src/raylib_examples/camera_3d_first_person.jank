@@ -1,0 +1,188 @@
+(ns raylib-examples.camera-3d-first-person
+  "raylib [core] example - 3d camera first person, ported to jank.
+
+  Walk a walled yard of random columns in first person: WASD moves,
+  mouse looks, keys 1-4 switch camera mode (FREE / FIRST_PERSON /
+  THIRD_PERSON / ORBITAL), P toggles an isometric orthographic view.
+  A status box tracks mode, projection and camera vectors. ESC quits
+  (the cursor is captured).
+  Based on raylib/examples/core/core_3d_camera_first_person.c
+
+  jank-native notes:
+  - Second UpdateCamera((cpp/& camera) mode) example; the mode enum is
+    threaded as a boxed (cpp/int cpp/CAMERA_*) jank int and passed back
+    through UpdateCamera's int param (the keyboard-testbed enum trick).
+  - The C's camera field writes (up resets on mode keys, the whole
+    isometric/perspective switch incl. CameraYaw/CameraPitch from
+    rcamera.h) become three pointer shims - struct field writes have no
+    jank syntax.
+  - The 20 random columns are jank maps ({:h :x :z :rgba}) with packed
+    colors resolved via GetColor at draw; camera.target passes straight
+    from the field read into DrawCube.
+  - The C's %06.3f status readout becomes a plain 3-decimal trim (no
+    zero padding)."
+  (:require [clojure.string :as str])
+  (:include "raylib.h" "rcamera.h"))
+
+;; Struct field writes need C: reset roll, and the C's P-key isometric /
+;; perspective camera reconfigurations (CameraYaw/CameraPitch from
+;; rcamera.h, compiled into libraylib).
+(cpp/raw "static void jank_cam_reset_up(Camera3D* c) { c->up = (Vector3){ 0.0f, 1.0f, 0.0f }; }
+static void jank_cam_iso(Camera3D* c) {
+  c->position = (Vector3){ 0.0f, 2.0f, -100.0f };
+  c->target = (Vector3){ 0.0f, 2.0f, 0.0f };
+  c->up = (Vector3){ 0.0f, 1.0f, 0.0f };
+  c->projection = CAMERA_ORTHOGRAPHIC;
+  c->fovy = 20.0f;
+  CameraYaw(c, -135*DEG2RAD, true);
+  CameraPitch(c, -45*DEG2RAD, true, true, false);
+}
+static void jank_cam_persp(Camera3D* c) {
+  c->position = (Vector3){ 0.0f, 2.0f, 10.0f };
+  c->target = (Vector3){ 0.0f, 2.0f, 0.0f };
+  c->up = (Vector3){ 0.0f, 1.0f, 0.0f };
+  c->projection = CAMERA_PERSPECTIVE;
+  c->fovy = 60.0f;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def COLUMNS 20)
+
+;; camera modes as boxed jank ints (enum constants need the cpp/int cast)
+(def MODE-FREE (cpp/int cpp/CAMERA_FREE))
+(def MODE-FIRST (cpp/int cpp/CAMERA_FIRST_PERSON))
+(def MODE-THIRD (cpp/int cpp/CAMERA_THIRD_PERSON))
+(def MODE-ORBITAL (cpp/int cpp/CAMERA_ORBITAL))
+(def PROJ-PERSPECTIVE (cpp/int cpp/CAMERA_PERSPECTIVE))
+
+(defn- rgba
+  "Pack r,g,b (a=255) into the 0xRRGGBBAA int GetColor wants."
+  [r g b]
+  (+ (* r 16777216) (* g 65536) (* b 256) 255))
+
+(defn- gen-columns
+  "The C's random column arrays as a vector of {:h :x :z :rgba} maps."
+  []
+  (loop [i 0 acc []]
+    (if (< i COLUMNS)
+      (recur (inc i)
+             (conj acc {:h (+ 0.0 (cpp/GetRandomValue 1 12))
+                        :x (+ 0.0 (cpp/GetRandomValue -15 15))
+                        :z (+ 0.0 (cpp/GetRandomValue -15 15))
+                        :rgba (rgba (int (cpp/GetRandomValue 20 255))
+                                    (int (cpp/GetRandomValue 10 55)) 30)}))
+      acc)))
+
+(defn- fmt3
+  "Three decimals of a real (the C's %06.3f without the zero padding)."
+  [v]
+  (let [s (str v)
+        dot (str/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 4))) s)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - 3d camera first person (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float 4.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 60.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        columns (gen-columns)]
+    (cpp/DisableCursor)
+    (cpp/SetTargetFPS 60)
+
+
+    ;; Thread [camera-mode].
+    (loop [mode MODE-FIRST]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [pick (cond (cpp/IsKeyPressed cpp/KEY_ONE) MODE-FREE
+                         (cpp/IsKeyPressed cpp/KEY_TWO) MODE-FIRST
+                         (cpp/IsKeyPressed cpp/KEY_THREE) MODE-THIRD
+                         (cpp/IsKeyPressed cpp/KEY_FOUR) MODE-ORBITAL
+                         :else nil)
+              mode (or pick mode)
+              _ (when pick (cpp/jank_cam_reset_up (cpp/& camera)))
+              persp? (= (int (+ 0.0 (.-projection camera))) PROJ-PERSPECTIVE)
+              mode (if (cpp/IsKeyPressed cpp/KEY_P)
+                     (do (if persp?
+                           (cpp/jank_cam_iso (cpp/& camera))
+                           (cpp/jank_cam_persp (cpp/& camera)))
+                         MODE-THIRD)
+                     mode)]
+
+          (cpp/UpdateCamera (cpp/& camera) mode)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawPlane (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/Vector2 (cpp/float 32.0) (cpp/float 32.0)) cpp/LIGHTGRAY)
+          (cpp/DrawCube (cpp/Vector3 (cpp/float -16.0) (cpp/float 2.5) (cpp/float 0.0))
+                        (cpp/float 1.0) (cpp/float 5.0) (cpp/float 32.0) cpp/BLUE)
+          (cpp/DrawCube (cpp/Vector3 (cpp/float 16.0) (cpp/float 2.5) (cpp/float 0.0))
+                        (cpp/float 1.0) (cpp/float 5.0) (cpp/float 32.0) cpp/LIME)
+          (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.5) (cpp/float 16.0))
+                        (cpp/float 32.0) (cpp/float 5.0) (cpp/float 1.0) cpp/GOLD)
+
+          (loop [i 0]
+            (when (< i COLUMNS)
+              (let [c (nth columns i)]
+                (cpp/DrawCube (cpp/Vector3 (cpp/float (:x c)) (cpp/float (/ (:h c) 2.0)) (cpp/float (:z c)))
+                              (cpp/float 2.0) (cpp/float (:h c)) (cpp/float 2.0)
+                              (cpp/GetColor (:rgba c)))
+                (cpp/DrawCubeWires (cpp/Vector3 (cpp/float (:x c)) (cpp/float (/ (:h c) 2.0)) (cpp/float (:z c)))
+                                   (cpp/float 2.0) (cpp/float (:h c)) (cpp/float 2.0) cpp/MAROON))
+              (recur (inc i))))
+
+          (when (= mode MODE-THIRD)
+            (cpp/DrawCube (.-target camera) (cpp/float 0.5) (cpp/float 0.5) (cpp/float 0.5) cpp/PURPLE)
+            (cpp/DrawCubeWires (.-target camera) (cpp/float 0.5) (cpp/float 0.5) (cpp/float 0.5) cpp/DARKPURPLE))
+
+          (cpp/EndMode3D)
+
+          ;; controls box
+          (cpp/DrawRectangle 5 5 330 100 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+          (cpp/DrawRectangleLines 5 5 330 100 cpp/BLUE)
+          (cpp/DrawText "Camera controls:" 15 15 10 cpp/BLACK)
+          (cpp/DrawText "- Move keys: W, A, S, D, Space, Left-Ctrl" 15 30 10 cpp/BLACK)
+          (cpp/DrawText "- Look around: arrow keys or mouse" 15 45 10 cpp/BLACK)
+          (cpp/DrawText "- Camera mode keys: 1, 2, 3, 4" 15 60 10 cpp/BLACK)
+          (cpp/DrawText "- Zoom keys: num-plus, num-minus or mouse scroll" 15 75 10 cpp/BLACK)
+          (cpp/DrawText "- Camera projection key: P" 15 90 10 cpp/BLACK)
+
+          ;; status box
+          (cpp/DrawRectangle 600 5 195 100 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+          (cpp/DrawRectangleLines 600 5 195 100 cpp/BLUE)
+          (cpp/DrawText "Camera status:" 610 15 10 cpp/BLACK)
+          (cpp/DrawText (str "- Mode: " (cond (= mode MODE-FREE) "FREE"
+                                              (= mode MODE-FIRST) "FIRST_PERSON"
+                                              (= mode MODE-THIRD) "THIRD_PERSON"
+                                              (= mode MODE-ORBITAL) "ORBITAL"
+                                              :else "CUSTOM"))
+                        610 30 10 cpp/BLACK)
+          (cpp/DrawText (str "- Projection: "
+                             (if (= (int (+ 0.0 (.-projection camera))) PROJ-PERSPECTIVE)
+                               "PERSPECTIVE" "ORTHOGRAPHIC"))
+                        610 45 10 cpp/BLACK)
+          (cpp/DrawText (str "- Position: (" (fmt3 (+ 0.0 (.-x (.-position camera))))
+                             ", " (fmt3 (+ 0.0 (.-y (.-position camera))))
+                             ", " (fmt3 (+ 0.0 (.-z (.-position camera)))) ")")
+                        610 60 10 cpp/BLACK)
+          (cpp/DrawText (str "- Target: (" (fmt3 (+ 0.0 (.-x (.-target camera))))
+                             ", " (fmt3 (+ 0.0 (.-y (.-target camera))))
+                             ", " (fmt3 (+ 0.0 (.-z (.-target camera)))) ")")
+                        610 75 10 cpp/BLACK)
+          (cpp/DrawText (str "- Up: (" (fmt3 (+ 0.0 (.-x (.-up camera))))
+                             ", " (fmt3 (+ 0.0 (.-y (.-up camera))))
+                             ", " (fmt3 (+ 0.0 (.-z (.-up camera)))) ")")
+                        610 90 10 cpp/BLACK)
+
+          (cpp/EndDrawing)
+
+          (recur mode)))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,81 @@
+(ns raylib-examples.texture-waves
+  "raylib [shaders] example - texture waves, ported to jank.
+
+  A space texture rippled by a sine-wave fragment shader driven by a
+  'seconds' uniform that advances with frame time - the waves animate
+  continuously. ESC quits.
+  Based on raylib/examples/shaders/shaders_texture_waves.c
+
+  jank-native notes:
+  - Third shader port: seven float uniforms plus a vec2, all staged
+    through the cpp/raw static float buffer + jank_set_uniform wrapper
+    (the texture-outline pattern), calls confined to -main per the
+    per-fn static rule. The 'seconds' uniform updates every frame from
+    a jank real accumulated with GetFrameTime."
+  (:include "raylib.h"))
+
+;; Uniform staging (see texture-outline); only -main touches these.
+(cpp/raw "static float jank_uf_buf[4] = { 0 };
+static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
+static void jank_set_uniform(Shader s, int loc, int type) {
+  SetShaderValue(s, loc, jank_uf_buf, type);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - texture waves (jank)")
+
+  (let [texture (cpp/LoadTexture (str RES "space.png"))
+        tw (int (+ 0.0 (.-width texture)))
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/wave.fs"))
+        seconds-loc (int (cpp/GetShaderLocation shader "seconds"))
+        size-loc (int (cpp/GetShaderLocation shader "size"))
+        freq-x-loc (int (cpp/GetShaderLocation shader "freqX"))
+        freq-y-loc (int (cpp/GetShaderLocation shader "freqY"))
+        amp-x-loc (int (cpp/GetShaderLocation shader "ampX"))
+        amp-y-loc (int (cpp/GetShaderLocation shader "ampY"))
+        speed-x-loc (int (cpp/GetShaderLocation shader "speedX"))
+        speed-y-loc (int (cpp/GetShaderLocation shader "speedY"))]
+
+    ;; constant uniforms (each staged then sent, one at a time)
+    (cpp/jank_uf_set 0 800.0)
+    (cpp/jank_uf_set 1 450.0)
+    (cpp/jank_set_uniform shader size-loc cpp/SHADER_UNIFORM_VEC2)
+    (loop [i 0]
+      (when (< i 6)
+        (cpp/jank_uf_set 0 (nth [25.0 25.0 5.0 5.0 8.0 8.0] i))
+        (cpp/jank_set_uniform shader
+                              (nth [freq-x-loc freq-y-loc amp-x-loc amp-y-loc speed-x-loc speed-y-loc] i)
+                              cpp/SHADER_UNIFORM_FLOAT)
+        (recur (inc i))))
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [elapsed-seconds].
+    (loop [seconds 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [seconds (+ seconds (+ 0.0 (cpp/GetFrameTime)))]
+
+          (cpp/jank_uf_set 0 seconds)
+          (cpp/jank_set_uniform shader seconds-loc cpp/SHADER_UNIFORM_FLOAT)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginShaderMode shader)
+          (cpp/DrawTexture texture 0 0 cpp/WHITE)
+          (cpp/DrawTexture texture tw 0 cpp/WHITE)
+          (cpp/EndShaderMode)
+
+          (cpp/EndDrawing)
+
+          (recur seconds))))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadTexture texture))
+
+  (cpp/CloseWindow))

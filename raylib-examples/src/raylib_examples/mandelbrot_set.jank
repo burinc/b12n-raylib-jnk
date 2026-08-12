@@ -1,0 +1,139 @@
+(ns raylib-examples.mandelbrot-set
+  "raylib [shaders] example - mandelbrot set, ported to jank.
+
+  The Mandelbrot set in a fragment shader: keys 1-6 jump to deep-zoom
+  points of interest, mouse left/right buttons zoom in/out while
+  drifting toward the cursor, UP/DOWN change the iteration budget,
+  R recenters, F1 hides the help. ESC quits.
+  Based on raylib/examples/shaders/shaders_mandelbrot_set.c
+
+  jank-native notes:
+  - First INT uniform: the staging shim grows an int slot
+    (jank_ui_set + jank_set_uniform_i) beside the float buffer; all
+    calls stay in -main per the per-fn static rule.
+  - The C's adaptive iteration formula (nested sqrtf/fabsf) becomes
+    cpp/sqrt from math.h with an if-based abs; state (zoom, offset,
+    iteration multiplier) threads as jank reals and uniforms re-send
+    every frame (the julia-set simplification)."
+  (:include "raylib.h" "math.h"))
+
+;; Uniform staging: float[4] for FLOAT/VEC2, an int slot for INT.
+;; Only -main touches these statics.
+(cpp/raw "static float jank_uf_buf[4] = { 0 };
+static int jank_ui_buf[1] = { 0 };
+static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
+static void jank_ui_set(int v) { jank_ui_buf[0] = v; }
+static void jank_set_uniform(Shader s, int loc, int type) {
+  SetShaderValue(s, loc, jank_uf_buf, type);
+}
+static void jank_set_uniform_i(Shader s, int loc) {
+  SetShaderValue(s, loc, jank_ui_buf, SHADER_UNIFORM_INT);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+(def ZOOM-SPEED 1.01)
+(def OFFSET-SPEED-MUL 2.0)
+(def START-ZOOM 0.6)
+
+;; [offset-x offset-y zoom] deep-zoom points of interest (the C table).
+(def POIS [[-1.76826775 -0.00422996283 28435.9238]
+           [0.322004497 -0.0357099883 56499.7266]
+           [-0.748880744 -0.0562955774 9237.59082]
+           [-1.78385007 -0.0156200649 14599.5283]
+           [-0.0985441282 -0.924688697 26259.8535]
+           [0.317785531 -0.0322612226 29297.9258]])
+
+(defn- max-iterations
+  "The C's approximate zoom-adaptive iteration count."
+  [zoom mult]
+  (let [inner (- 1.0 (+ 0.0 (cpp/sqrt (* 37.5 zoom))))
+        inner (if (< inner 0.0) (- 0.0 inner) inner)]
+    (int (* (+ 0.0 (cpp/sqrt (* 2.0 (+ 0.0 (cpp/sqrt inner))))) mult))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - mandelbrot set (jank)")
+
+  (let [shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/mandelbrot_set.fs"))
+        target (cpp/LoadRenderTexture WIDTH HEIGHT)
+        zoom-loc (int (cpp/GetShaderLocation shader "zoom"))
+        offset-loc (int (cpp/GetShaderLocation shader "offset"))
+        iter-loc (int (cpp/GetShaderLocation shader "maxIterations"))]
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [offset-x offset-y zoom iteration-multiplier show-controls?].
+    (loop [ox -0.5 oy 0.0 zoom START-ZOOM mult 166.5 show? true]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [poi (cond (cpp/IsKeyPressed cpp/KEY_ONE) (nth POIS 0)
+                        (cpp/IsKeyPressed cpp/KEY_TWO) (nth POIS 1)
+                        (cpp/IsKeyPressed cpp/KEY_THREE) (nth POIS 2)
+                        (cpp/IsKeyPressed cpp/KEY_FOUR) (nth POIS 3)
+                        (cpp/IsKeyPressed cpp/KEY_FIVE) (nth POIS 4)
+                        (cpp/IsKeyPressed cpp/KEY_SIX) (nth POIS 5)
+                        :else nil)
+              ox (if poi (nth poi 0) ox)
+              oy (if poi (nth poi 1) oy)
+              zoom (if poi (nth poi 2) zoom)
+
+              reset? (if (cpp/IsKeyPressed cpp/KEY_R) true false)
+              ox (if reset? -0.5 ox)
+              oy (if reset? 0.0 oy)
+              zoom (if reset? START-ZOOM zoom)
+
+              show? (if (cpp/IsKeyPressed cpp/KEY_F1) (not show?) show?)
+              mult (cond (cpp/IsKeyPressed cpp/KEY_UP) (* mult 1.4)
+                         (cpp/IsKeyPressed cpp/KEY_DOWN) (/ mult 1.4)
+                         :else mult)
+
+              zin? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT) true false)
+              zout? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_RIGHT) true false)
+              ft (+ 0.0 (cpp/GetFrameTime))
+              zoom (cond zin? (* zoom ZOOM-SPEED)
+                         zout? (/ zoom ZOOM-SPEED)
+                         :else zoom)
+              ox (if (or zin? zout?)
+                   (+ ox (* ft (/ (* (- (/ (+ 0.0 (cpp/GetMouseX)) WIDTH) 0.5) OFFSET-SPEED-MUL) zoom)))
+                   ox)
+              oy (if (or zin? zout?)
+                   (+ oy (* ft (/ (* (- (/ (+ 0.0 (cpp/GetMouseY)) HEIGHT) 0.5) OFFSET-SPEED-MUL) zoom)))
+                   oy)]
+
+          ;; re-send all uniforms (iterations recomputed from the zoom)
+          (cpp/jank_uf_set 0 zoom)
+          (cpp/jank_set_uniform shader zoom-loc cpp/SHADER_UNIFORM_FLOAT)
+          (cpp/jank_uf_set 0 ox)
+          (cpp/jank_uf_set 1 oy)
+          (cpp/jank_set_uniform shader offset-loc cpp/SHADER_UNIFORM_VEC2)
+          (cpp/jank_ui_set (max-iterations zoom mult))
+          (cpp/jank_set_uniform_i shader iter-loc)
+
+          (cpp/BeginTextureMode target)
+          (cpp/ClearBackground cpp/BLACK)
+          (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/BLACK)
+          (cpp/EndTextureMode)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/BLACK)
+          (cpp/BeginShaderMode shader)
+          (cpp/DrawTextureEx (.-texture target)
+                             (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/float 0.0) (cpp/float 1.0) cpp/WHITE)
+          (cpp/EndShaderMode)
+
+          (when show?
+            (cpp/DrawText "Press Mouse buttons right/left to zoom in/out and move" 10 15 10 cpp/RAYWHITE)
+            (cpp/DrawText "Press F1 to toggle these controls" 10 30 10 cpp/RAYWHITE)
+            (cpp/DrawText "Press [1 - 6] to change point of interest" 10 45 10 cpp/RAYWHITE)
+            (cpp/DrawText "Press UP | DOWN to change number of iterations" 10 60 10 cpp/RAYWHITE)
+            (cpp/DrawText "Press R to recenter the camera" 10 75 10 cpp/RAYWHITE))
+
+          (cpp/EndDrawing)
+
+          (recur ox oy zoom mult show?))))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadRenderTexture target))
+
+  (cpp/CloseWindow))

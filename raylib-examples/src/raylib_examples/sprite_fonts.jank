@@ -1,0 +1,93 @@
+(ns raylib-examples.sprite-fonts
+  "raylib [text] example - sprite fonts, ported to jank.
+
+  A gallery of the eight free sprite fonts bundled with raylib, each
+  loaded from its PNG atlas and drawn at 2x its base size in its own
+  color and glyph spacing. Q quits.
+  Based on raylib/examples/text/text_sprite_fonts.c
+  (jank-native: the C keeps the eight Font structs in an array and
+  loops; jank can't hold natives in a vector, so the eight fonts are
+  separate let-locals and the draws are unrolled. Each center-x comes
+  from MeasureTextEx's Vector2 (.-x, nth-boxed) and .-baseSize.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SF "../jank-raylib-sys/raylib/examples/text/resources/sprite_fonts/")
+(def M0 "ALAGARD FONT designed by Hewett Tsoi")
+(def M1 "PIXELPLAY FONT designed by Aleksander Shevchuk")
+(def M2 "MECHA FONT designed by Captain Falcon")
+(def M3 "SETBACK FONT designed by Brian Kent (AEnigma)")
+(def M4 "ROMULUS FONT designed by Hewett Tsoi")
+(def M5 "PIXANTIQUA FONT designed by Gerhard Grossmann")
+(def M6 "ALPHA_BETA FONT designed by Brian Kent (AEnigma)")
+(def M7 "JUPITER_CRASH FONT designed by Brian Kent (AEnigma)")
+
+;; NOTE: base-size and center-x are computed INLINE below rather than via
+;; helper fns - a native Font passed as a jank fn parameter boxes to
+;; object_ref and MeasureTextEx / .-baseSize then reject it (the same rule
+;; that bars native returns). Fonts must stay let-locals.
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - sprite fonts (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [f0 (cpp/LoadFont (str SF "alagard.png"))
+        f1 (cpp/LoadFont (str SF "pixelplay.png"))
+        f2 (cpp/LoadFont (str SF "mecha.png"))
+        f3 (cpp/LoadFont (str SF "setback.png"))
+        f4 (cpp/LoadFont (str SF "romulus.png"))
+        f5 (cpp/LoadFont (str SF "pixantiqua.png"))
+        f6 (cpp/LoadFont (str SF "alpha_beta.png"))
+        f7 (cpp/LoadFont (str SF "jupiter_crash.png"))
+        ;; base sizes (inline .-baseSize reads), draw size is 2x each
+        b0 (nth [(+ 0.0 (.-baseSize f0))] 0) b1 (nth [(+ 0.0 (.-baseSize f1))] 0)
+        b2 (nth [(+ 0.0 (.-baseSize f2))] 0) b3 (nth [(+ 0.0 (.-baseSize f3))] 0)
+        b4 (nth [(+ 0.0 (.-baseSize f4))] 0) b5 (nth [(+ 0.0 (.-baseSize f5))] 0)
+        b6 (nth [(+ 0.0 (.-baseSize f6))] 0) b7 (nth [(+ 0.0 (.-baseSize f7))] 0)
+        ;; center-x per message at 2x size + its spacing (inline MeasureTextEx)
+        x0 (- (/ WIDTH 2.0) (/ (nth [(+ 0.0 (.-x (cpp/MeasureTextEx f0 M0 (cpp/float (* b0 2.0)) (cpp/float 2.0))))] 0) 2.0))
+        x1 (- (/ WIDTH 2.0) (/ (nth [(+ 0.0 (.-x (cpp/MeasureTextEx f1 M1 (cpp/float (* b1 2.0)) (cpp/float 4.0))))] 0) 2.0))
+        x2 (- (/ WIDTH 2.0) (/ (nth [(+ 0.0 (.-x (cpp/MeasureTextEx f2 M2 (cpp/float (* b2 2.0)) (cpp/float 8.0))))] 0) 2.0))
+        x3 (- (/ WIDTH 2.0) (/ (nth [(+ 0.0 (.-x (cpp/MeasureTextEx f3 M3 (cpp/float (* b3 2.0)) (cpp/float 4.0))))] 0) 2.0))
+        x4 (- (/ WIDTH 2.0) (/ (nth [(+ 0.0 (.-x (cpp/MeasureTextEx f4 M4 (cpp/float (* b4 2.0)) (cpp/float 3.0))))] 0) 2.0))
+        x5 (- (/ WIDTH 2.0) (/ (nth [(+ 0.0 (.-x (cpp/MeasureTextEx f5 M5 (cpp/float (* b5 2.0)) (cpp/float 4.0))))] 0) 2.0))
+        x6 (- (/ WIDTH 2.0) (/ (nth [(+ 0.0 (.-x (cpp/MeasureTextEx f6 M6 (cpp/float (* b6 2.0)) (cpp/float 4.0))))] 0) 2.0))
+        x7 (- (/ WIDTH 2.0) (/ (nth [(+ 0.0 (.-x (cpp/MeasureTextEx f7 M7 (cpp/float (* b7 2.0)) (cpp/float 1.0))))] 0) 2.0))
+        ;; y = 60 + baseSize + 45*i, with the C's small corrections
+        y0 (+ 60.0 b0)
+        y1 (+ (+ 60.0 b1) 45.0)
+        y2 (+ (+ 60.0 b2) 90.0)
+        y3 (+ (+ (+ 60.0 b3) 135.0) 8.0)
+        y4 (+ (+ (+ 60.0 b4) 180.0) 2.0)
+        y5 (+ (+ 60.0 b5) 225.0)
+        y6 (+ (+ 60.0 b6) 270.0)
+        y7 (- (+ (+ 60.0 b7) 315.0) 8.0)]
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "free sprite fonts included with raylib (Q quits)" 210 20 20 cpp/DARKGRAY)
+        (cpp/DrawLine 220 50 600 50 cpp/DARKGRAY)
+
+        (cpp/DrawTextEx f0 M0 (cpp/Vector2 (cpp/float x0) (cpp/float y0)) (cpp/float (* b0 2.0)) (cpp/float 2.0) cpp/MAROON)
+        (cpp/DrawTextEx f1 M1 (cpp/Vector2 (cpp/float x1) (cpp/float y1)) (cpp/float (* b1 2.0)) (cpp/float 4.0) cpp/ORANGE)
+        (cpp/DrawTextEx f2 M2 (cpp/Vector2 (cpp/float x2) (cpp/float y2)) (cpp/float (* b2 2.0)) (cpp/float 8.0) cpp/DARKGREEN)
+        (cpp/DrawTextEx f3 M3 (cpp/Vector2 (cpp/float x3) (cpp/float y3)) (cpp/float (* b3 2.0)) (cpp/float 4.0) cpp/DARKBLUE)
+        (cpp/DrawTextEx f4 M4 (cpp/Vector2 (cpp/float x4) (cpp/float y4)) (cpp/float (* b4 2.0)) (cpp/float 3.0) cpp/DARKPURPLE)
+        (cpp/DrawTextEx f5 M5 (cpp/Vector2 (cpp/float x5) (cpp/float y5)) (cpp/float (* b5 2.0)) (cpp/float 4.0) cpp/LIME)
+        (cpp/DrawTextEx f6 M6 (cpp/Vector2 (cpp/float x6) (cpp/float y6)) (cpp/float (* b6 2.0)) (cpp/float 4.0) cpp/GOLD)
+        (cpp/DrawTextEx f7 M7 (cpp/Vector2 (cpp/float x7) (cpp/float y7)) (cpp/float (* b7 2.0)) (cpp/float 1.0) cpp/RED)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur))))
+
+    (cpp/UnloadFont f0) (cpp/UnloadFont f1) (cpp/UnloadFont f2) (cpp/UnloadFont f3)
+    (cpp/UnloadFont f4) (cpp/UnloadFont f5) (cpp/UnloadFont f6) (cpp/UnloadFont f7))
+
+  (cpp/CloseWindow))

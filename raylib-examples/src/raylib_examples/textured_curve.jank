@@ -1,0 +1,154 @@
+(ns raylib-examples.textured-curve
+  "raylib [textures] example - textured curve, ported to jank.
+
+  A road texture swept along a cubic Bezier spline as a strip of
+  textured quads. Drag the four control points (start, end, and their
+  two tangents) to reshape the road; SPACE shows/hides the base spline,
+  +/- change the road width, LEFT/RIGHT change the segment count. Q
+  quits.
+  Based on raylib/examples/textures/textures_textured_curve.c
+
+  jank-native notes:
+  - The C original tracks the dragged handle with a `Vector2*`; jank
+    tracks it as an index (0-3, -1 = none) into a jank vector of the four
+    [x y] control points, which lives in loop state. No pointer needed.
+  - DrawTexturedCurve is reimplemented with rlgl RL_QUADS: the Bezier
+    point, the segment normal (for the strip width) and the running v
+    texture coordinate are all computed in jank per segment.
+  - MSAA/VSYNC config flags from the C original are omitted (cosmetic);
+    the road texture still gets a bilinear filter."
+  (:include "raylib.h" "rlgl.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+
+;; is the mouse (mx,my) within 6px of control point p ([x y])?
+(defn hit? [mx my p]
+  (cpp/CheckCollisionPointCircle (cpp/Vector2 (cpp/float mx) (cpp/float my))
+                                 (cpp/Vector2 (cpp/float (nth p 0)) (cpp/float (nth p 1)))
+                                 (cpp/float 6.0)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - textured curve (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [tex-road (cpp/LoadTexture (str RES "road.png"))]
+    (cpp/SetTextureFilter tex-road cpp/TEXTURE_FILTER_BILINEAR)
+    (let [tex-h (+ 0.0 (.-height tex-road))
+          tex-id (.-id tex-road)]
+
+      ;; state: 4 control points [start startTangent end endTangent], width, segments, show?, selected idx
+      (loop [pts [[80.0 100.0] [100.0 300.0] [700.0 350.0] [600.0 100.0]]
+             width 50.0 segs 24 show? false sel -1]
+        (when (cpp/! (cpp/WindowShouldClose))
+          (let [show? (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not show?) show?)
+                width (if (cpp/IsKeyPressed cpp/KEY_EQUAL) (+ width 2.0) width)
+                width (if (cpp/IsKeyPressed cpp/KEY_MINUS) (- width 2.0) width)
+                width (if (< width 2.0) 2.0 width)
+                segs (if (cpp/IsKeyPressed cpp/KEY_LEFT) (- segs 2) segs)
+                segs (if (cpp/IsKeyPressed cpp/KEY_RIGHT) (+ segs 2) segs)
+                segs (if (< segs 2) 2 segs)
+
+                down? (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT)
+                sel (if down? sel -1)
+                delta (cpp/GetMouseDelta)
+                ;; move the selected handle by the mouse delta
+                pts (if (>= sel 0)
+                      (assoc pts sel [(+ (nth (nth pts sel) 0) (+ 0.0 (.-x delta)))
+                                      (+ (nth (nth pts sel) 1) (+ 0.0 (.-y delta)))])
+                      pts)
+                mx (+ 0.0 (cpp/GetMouseX))
+                my (+ 0.0 (cpp/GetMouseY))
+                ;; pick a handle for next frame's drag
+                sel (cond
+                      (hit? mx my (nth pts 0)) 0
+                      (hit? mx my (nth pts 1)) 1
+                      (hit? mx my (nth pts 2)) 2
+                      (hit? mx my (nth pts 3)) 3
+                      :else -1)
+                p0 (nth pts 0) p1 (nth pts 1) p2 (nth pts 2) p3 (nth pts 3)]
+
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/RAYWHITE)
+
+            ;; --- DrawTexturedCurve: sweep the road along the spline ---
+            (let [step (/ 1.0 segs)]
+              (loop [i 1 prev-x (nth p0 0) prev-y (nth p0 1)
+                     ptan-x 0.0 ptan-y 0.0 prevV 0.0 tset? false]
+                (when (<= i segs)
+                  (let [t (* step (+ 0.0 i))
+                        omt (- 1.0 t)
+                        a (* omt omt omt)
+                        b (* 3.0 omt omt t)
+                        c (* 3.0 omt t t)
+                        dd (* t t t)
+                        cx (+ (* a (nth p0 0)) (* b (nth p1 0)) (* c (nth p3 0)) (* dd (nth p2 0)))
+                        cy (+ (* a (nth p0 1)) (* b (nth p1 1)) (* c (nth p3 1)) (* dd (nth p2 1)))
+                        dx (- cx prev-x)
+                        dy (- cy prev-y)
+                        len (cpp/sqrt (+ (* dx dx) (* dy dy)))
+                        nx (if (> len 0.0) (/ (- dy) len) 0.0)
+                        ny (if (> len 0.0) (/ dx len) 0.0)
+                        v (+ prevV (/ len (* tex-h 2.0)))
+                        ptan-x (if tset? ptan-x nx)
+                        ptan-y (if tset? ptan-y ny)
+                        pnn-x (+ prev-x (* ptan-x (- width))) pnn-y (+ prev-y (* ptan-y (- width)))
+                        ppn-x (+ prev-x (* ptan-x width))     ppn-y (+ prev-y (* ptan-y width))
+                        cpn-x (+ cx (* nx width))             cpn-y (+ cy (* ny width))
+                        cnn-x (+ cx (* nx (- width)))         cnn-y (+ cy (* ny (- width)))]
+                    (cpp/rlSetTexture tex-id)
+                    (cpp/rlBegin cpp/RL_QUADS)
+                    (cpp/rlColor4ub 255 255 255 255)
+                    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float 1.0))
+                    (cpp/rlTexCoord2f (cpp/float 0.0) (cpp/float prevV))
+                    (cpp/rlVertex2f (cpp/float pnn-x) (cpp/float pnn-y))
+                    (cpp/rlTexCoord2f (cpp/float 1.0) (cpp/float prevV))
+                    (cpp/rlVertex2f (cpp/float ppn-x) (cpp/float ppn-y))
+                    (cpp/rlTexCoord2f (cpp/float 1.0) (cpp/float v))
+                    (cpp/rlVertex2f (cpp/float cpn-x) (cpp/float cpn-y))
+                    (cpp/rlTexCoord2f (cpp/float 0.0) (cpp/float v))
+                    (cpp/rlVertex2f (cpp/float cnn-x) (cpp/float cnn-y))
+                    (cpp/rlEnd)
+                    (recur (inc i) cx cy nx ny v true)))))
+            (cpp/rlSetTexture 0)
+
+            ;; base spline for reference
+            (when show?
+              (cpp/DrawSplineSegmentBezierCubic
+               (cpp/Vector2 (cpp/float (nth p0 0)) (cpp/float (nth p0 1)))
+               (cpp/Vector2 (cpp/float (nth p2 0)) (cpp/float (nth p2 1)))
+               (cpp/Vector2 (cpp/float (nth p1 0)) (cpp/float (nth p1 1)))
+               (cpp/Vector2 (cpp/float (nth p3 0)) (cpp/float (nth p3 1)))
+               (cpp/float 2.0) cpp/BLUE))
+
+            ;; control handles + connecting lines
+            (cpp/DrawLineV (cpp/Vector2 (cpp/float (nth p0 0)) (cpp/float (nth p0 1)))
+                           (cpp/Vector2 (cpp/float (nth p1 0)) (cpp/float (nth p1 1))) cpp/SKYBLUE)
+            (cpp/DrawLineV (cpp/Vector2 (cpp/float (nth p1 0)) (cpp/float (nth p1 1)))
+                           (cpp/Vector2 (cpp/float (nth p3 0)) (cpp/float (nth p3 1))) (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.4)))
+            (cpp/DrawLineV (cpp/Vector2 (cpp/float (nth p2 0)) (cpp/float (nth p2 1)))
+                           (cpp/Vector2 (cpp/float (nth p3 0)) (cpp/float (nth p3 1))) cpp/PURPLE)
+
+            (when (hit? mx my p0) (cpp/DrawCircleV (cpp/Vector2 (cpp/float (nth p0 0)) (cpp/float (nth p0 1))) (cpp/float 7.0) cpp/YELLOW))
+            (cpp/DrawCircleV (cpp/Vector2 (cpp/float (nth p0 0)) (cpp/float (nth p0 1))) (cpp/float 5.0) cpp/RED)
+            (when (hit? mx my p1) (cpp/DrawCircleV (cpp/Vector2 (cpp/float (nth p1 0)) (cpp/float (nth p1 1))) (cpp/float 7.0) cpp/YELLOW))
+            (cpp/DrawCircleV (cpp/Vector2 (cpp/float (nth p1 0)) (cpp/float (nth p1 1))) (cpp/float 5.0) cpp/MAROON)
+            (when (hit? mx my p2) (cpp/DrawCircleV (cpp/Vector2 (cpp/float (nth p2 0)) (cpp/float (nth p2 1))) (cpp/float 7.0) cpp/YELLOW))
+            (cpp/DrawCircleV (cpp/Vector2 (cpp/float (nth p2 0)) (cpp/float (nth p2 1))) (cpp/float 5.0) cpp/GREEN)
+            (when (hit? mx my p3) (cpp/DrawCircleV (cpp/Vector2 (cpp/float (nth p3 0)) (cpp/float (nth p3 1))) (cpp/float 7.0) cpp/YELLOW))
+            (cpp/DrawCircleV (cpp/Vector2 (cpp/float (nth p3 0)) (cpp/float (nth p3 1))) (cpp/float 5.0) cpp/DARKGREEN)
+
+            (cpp/DrawText "Drag points to move curve, SPACE toggles base curve (Q quits)" 10 10 10 cpp/DARKGRAY)
+            (cpp/DrawText (str "Curve width: " (int width) " (+ / - to adjust)") 10 30 10 cpp/DARKGRAY)
+            (cpp/DrawText (str "Curve segments: " segs " (LEFT / RIGHT to adjust)") 10 50 10 cpp/DARKGRAY)
+
+            (cpp/EndDrawing)
+
+            (when-not (cpp/IsKeyDown cpp/KEY_Q)
+              (recur pts width segs show? sel)))))
+
+      (cpp/UnloadTexture tex-road)))
+
+  (cpp/CloseWindow))

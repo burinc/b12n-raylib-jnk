@@ -1,0 +1,68 @@
+(ns raylib-examples.image-text
+  "raylib [textures] example - image text, ported to jank.
+
+  A TTF font (KAISG) is rasterized at load, then text is baked INTO the
+  parrots image with ImageDrawTextEx before it becomes a texture. The
+  same string is also drawn live below with DrawTextEx; hold SPACE to
+  instead show the font's glyph atlas. Q quits.
+  Based on raylib/examples/textures/textures_image_text.c
+
+  jank-native: ImageDrawTextEx takes an Image* first arg, formed with
+  (cpp/& parrots) on the mutable let-local; the font's .baseSize is
+  nth-boxed for the cpp/float size arg and its .-texture field is read
+  for the atlas view."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+(def MSG "[Parrots font drawing]")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - image text (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [parrots (cpp/LoadImage (str RES "parrots.png"))
+        font (cpp/LoadFontEx (str RES "KAISG.ttf") 64 cpp/nullptr 0)
+        bs (nth [(+ 0.0 (.-baseSize font))] 0)]
+    ;; bake the text into the image (pointer-taking Image* op)
+    (cpp/ImageDrawTextEx (cpp/& parrots) font MSG
+                         (cpp/Vector2 (cpp/float 20.0) (cpp/float 20.0))
+                         (cpp/float bs) (cpp/float 0.0) cpp/RED)
+
+    (let [texture (cpp/LoadTextureFromImage parrots)
+          tw (int (+ 0.0 (.-width texture)))
+          th (int (+ 0.0 (.-height texture)))
+          px (- (/ WIDTH 2.0) (/ (+ 0.0 tw) 2.0))
+          py (- (- (/ HEIGHT 2.0) (/ (+ 0.0 th) 2.0)) 20.0)
+          ft (.-texture font)
+          ftw (int (+ 0.0 (.-width ft)))]
+      (cpp/UnloadImage parrots)
+
+      (loop []
+        (when (cpp/! (cpp/WindowShouldClose))
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (if (cpp/IsKeyDown cpp/KEY_SPACE)
+            ;; show the glyph atlas
+            (cpp/DrawTexture ft (- (int (/ WIDTH 2)) (int (/ ftw 2))) 50 cpp/BLACK)
+            ;; show the composed texture + live text
+            (do
+              (cpp/DrawTextureV texture (cpp/Vector2 (cpp/float px) (cpp/float py)) cpp/WHITE)
+              (cpp/DrawTextEx font MSG
+                              (cpp/Vector2 (cpp/float (+ px 20.0)) (cpp/float (+ py 20.0 280.0)))
+                              (cpp/float bs) (cpp/float 0.0) cpp/WHITE)))
+
+          (cpp/DrawText "PRESS SPACE to SHOW FONT ATLAS USED (Q quits)" 250 420 10 cpp/DARKGRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur))))
+
+      (cpp/UnloadTexture texture)
+      (cpp/UnloadFont font)))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,119 @@
+(ns raylib-examples.recursive-tree
+  "raylib [shapes] example - recursive tree, ported to jank.
+
+  A binary fractal tree rebuilt every frame. Hold LEFT/RIGHT for the
+  branch angle, DOWN/UP for the trunk length, A/S for the decay
+  factor; Z/X step the depth, T/Y the line thickness, B toggles
+  bezier branches. Q quits.
+  Based on raylib/examples/shapes/shapes_recursive_tree.c
+  (jank-native: the C's fixed Branch array becomes a vector of maps
+  grown breadth-first by indexing into itself; raygui sliders become
+  held/pressed keys with a text panel.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SX 275.0)                       ; WIDTH/2 - 125
+(def SY 450.0)
+(def DEG2RAD 0.017453292519943295)
+
+(defn fmt2
+  "A non-negative real formatted with exactly two decimals."
+  [x]
+  (let [c     (int (+ (* x 100.0) 0.5))
+        whole (int (quot c 100))
+        frac  (int (mod c 100))
+        frac  (str (if (< frac 10) "0" "") frac)]
+    (str whole "." frac)))
+
+(defn adj
+  "Adjust v by step while dn/up are held, clamped to lo..hi."
+  [v dn up step lo hi]
+  (let [v (if dn (- v step) v)
+        v (if up (+ v step) v)]
+    (if (< v lo) lo (if (> v hi) hi v))))
+
+(defn build-branches
+  "Grows the branch list breadth-first, like the C's in-place array
+  walk: each branch spawns two children rotated +/- theta until the
+  branch budget (2^depth) or the 2px minimum length is hit."
+  [theta max-b decay length]
+  (loop [i 0
+         acc [{:sx SX :sy SY :ex SX :ey (- SY length) :ang 0.0 :len length}]]
+    (if (< i (count acc))
+      (let [b (nth acc i)
+            nl (* (:len b) decay)]
+        (if (and (>= (:len b) 2.0) (< (count acc) max-b) (>= nl 2.0))
+          (let [a1 (+ (:ang b) theta)
+                a2 (- (:ang b) theta)
+                bx (:ex b) by (:ey b)
+                acc (conj acc {:sx bx :sy by
+                               :ex (+ bx (+ 0.0 (* nl (cpp/sin a1))))
+                               :ey (- by (+ 0.0 (* nl (cpp/cos a1))))
+                               :ang a1 :len nl})
+                acc (conj acc {:sx bx :sy by
+                               :ex (+ bx (+ 0.0 (* nl (cpp/sin a2))))
+                               :ey (- by (+ 0.0 (* nl (cpp/cos a2))))
+                               :ang a2 :len nl})]
+            (recur (inc i) acc))
+          (recur (inc i) acc)))
+      acc)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - recursive tree (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [angle length decay depth thickness bezier?].
+  (loop [ang 40.0 len 120.0 decay 0.66 depth 10.0 thick 1.0 bez? false]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [ang (adj ang (cpp/IsKeyDown cpp/KEY_LEFT) (cpp/IsKeyDown cpp/KEY_RIGHT) 1.0 0.0 180.0)
+            len (adj len (cpp/IsKeyDown cpp/KEY_DOWN) (cpp/IsKeyDown cpp/KEY_UP) 2.0 12.0 240.0)
+            decay (adj decay (cpp/IsKeyDown cpp/KEY_A) (cpp/IsKeyDown cpp/KEY_S) 0.005 0.1 0.78)
+            depth (adj depth (cpp/IsKeyPressed cpp/KEY_Z) (cpp/IsKeyPressed cpp/KEY_X) 1.0 1.0 10.0)
+            thick (adj thick (cpp/IsKeyPressed cpp/KEY_T) (cpp/IsKeyPressed cpp/KEY_Y) 1.0 1.0 8.0)
+            bez? (if (cpp/IsKeyPressed cpp/KEY_B) (not bez?) bez?)
+
+            theta (* ang DEG2RAD)
+            max-b (int (+ 0.0 (cpp/pow 2.0 (cpp/floor depth))))
+            branches (build-branches theta max-b decay len)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (loop [i 0]
+          (when (< i (count branches))
+            (let [b (nth branches i)]
+              (when (>= (:len b) 2.0)
+                (if bez?
+                  (cpp/DrawLineBezier (cpp/Vector2 (cpp/float (:sx b)) (cpp/float (:sy b)))
+                                      (cpp/Vector2 (cpp/float (:ex b)) (cpp/float (:ey b)))
+                                      (cpp/float thick) cpp/RED)
+                  (cpp/DrawLineEx (cpp/Vector2 (cpp/float (:sx b)) (cpp/float (:sy b)))
+                                  (cpp/Vector2 (cpp/float (:ex b)) (cpp/float (:ey b)))
+                                  (cpp/float thick) cpp/RED))))
+            (recur (inc i))))
+
+        ;; The control panel (C colors 218/218/218 and 232/232/232, packed
+        ;; as 0xRRGGBBAA ints for GetColor).
+        (cpp/DrawLine 580 0 580 HEIGHT
+                      (cpp/GetColor (+ (* 218 16777216) (* 218 65536) (* 218 256) 255)))
+        (cpp/DrawRectangle 580 0 (- WIDTH 580) HEIGHT
+                           (cpp/GetColor (+ (* 232 16777216) (* 232 65536) (* 232 256) 255)))
+
+        (cpp/DrawText (str "Angle: " (fmt2 ang) "  (LEFT/RIGHT)") 600 40 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Length: " (fmt2 len) "  (DOWN/UP)") 600 70 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Decay: " (fmt2 decay) "  (A/S)") 600 100 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Depth: " (int depth) "  (Z/X)") 600 130 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Thick: " (int thick) "  (T/Y)") 600 160 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "[B] Bezier: " (if bez? "ON" "OFF")) 600 190 10 cpp/DARKGRAY)
+        (cpp/DrawText "[Q] quit" 600 220 10 cpp/DARKGRAY)
+
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur ang len decay depth thick bez?)))))
+
+  (cpp/CloseWindow))

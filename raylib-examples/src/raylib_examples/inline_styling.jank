@@ -1,0 +1,196 @@
+(ns raylib-examples.inline-styling
+  "raylib [text] example - inline styling, ported to jank.
+
+  Text with inline [ ] style tags: [cRRGGBBAA] sets the foreground color,
+  [bRRGGBBAA] the background color, [r] resets both. Several demo lines
+  plus a CREATIVE line whose color re-rolls every 20 frames, with its
+  measured bounds outlined. ESC quits.
+  Based on raylib/examples/text/text_inline_styling.c
+
+  jank-native notes:
+  - DrawTextStyled/MeasureTextStyled advance per glyph by
+    font.glyphs[index].advanceX (or recs[index].width when 0) - the
+    struct-array (cpp/aget ...) field reads again, this time inside
+    helper fns, which is safe because no cpp/raw statics are involved
+    (the per-fn duplication trap only bites mutable raw statics).
+  - The C duplicates the tag-scanning logic between draw and measure;
+    the port factors ONE pure-jank tokenizer (next-token) both consume.
+    Style state (front/back colors) threads as packed 0xRRGGBBAA ints,
+    resolved with (cpp/GetColor v) at each draw (rule 2).
+  - strtoul(hex, 16) becomes a small jank hex parser over an index-of
+    digit table; the C's TextFormat %02x becomes hex2 + str.
+  - Codepoints come from the ASCII-table trick in reverse: the demo
+    strings are pure ASCII, so (+ 32 (str/index-of ASCII ch)) recovers
+    the char code the C gets from GetCodepointNext (a documented
+    simplification - the C walks UTF-8)."
+  (:require [clojure.string :as str])
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+;; Characters 32..126 in code order; index+32 = char code (input-box trick,
+;; used in reverse here).
+(def ASCII " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")
+
+(def HEX-DIGITS "0123456789abcdef")
+
+(defn- hex-val
+  "0-15 for a one-char hex digit string (either case), else nil."
+  [c]
+  (str/index-of HEX-DIGITS (str/lower-case c)))
+
+(defn- hex-parse
+  "The C's strtoul(s, NULL, 16): hex string to unsigned int (0 if empty)."
+  [s]
+  (loop [i 0 acc 0]
+    (if (< i (count s))
+      (recur (inc i) (+ (* acc 16) (hex-val (subs s i (inc i)))))
+      acc)))
+
+(defn- hex2
+  "Two lowercase hex digits of a 0-255 value (the C's %02x)."
+  [v]
+  (let [d1 (int (quot v 16))
+        d0 (int (mod v 16))]
+    (str (subs HEX-DIGITS d1 (inc d1)) (subs HEX-DIGITS d0 (inc d0)))))
+
+(defn- next-token
+  "Parse the styled text at index i. Returns {:type :next ...}:
+  :reset ([r]), :front/:back ([c..]/[b..] with :val packed rgba),
+  :newline, or :char with :ch. Mirrors the C's scanning, including the
+  unconditional skip of the char after the hex digits (the ])."
+  [text i]
+  (let [n (count text)
+        c (subs text i (inc i))]
+    (cond
+      (= c "\n") {:type :newline :next (inc i)}
+
+      (and (= c "[") (<= (+ i 3) n) (= (subs text (inc i) (+ i 3)) "r]"))
+      {:type :reset :next (+ i 3)}
+
+      (and (= c "[") (< (inc i) n)
+           (or (= (subs text (inc i) (+ i 2)) "c")
+               (= (subs text (inc i) (+ i 2)) "b")))
+      (let [kind (subs text (inc i) (+ i 2))
+            j (+ i 2)
+            end (loop [k j]
+                  (if (and (< k n) (some? (hex-val (subs text k (inc k)))))
+                    (recur (inc k))
+                    k))]
+        {:type (if (= kind "c") :front :back)
+         :val (hex-parse (subs text j end))
+         :next (inc end)})
+
+      :else {:type :char :next (inc i) :ch c})))
+
+(defn- glyph-advance
+  "Scaled x-advance for char code `cp`: advanceX, or the glyph rec width
+  when advanceX is 0, plus `spacing` (the C's increaseX)."
+  [cp scale spacing]
+  (let [font (cpp/GetFontDefault)
+        idx (int (cpp/GetGlyphIndex font cp))
+        g (cpp/aget (.-glyphs font) (cpp/int idx))
+        adv (int (.-advanceX g))]
+    (if (= adv 0)
+      (let [rec (cpp/aget (.-recs font) (cpp/int idx))]
+        (+ (* (+ 0.0 (.-width rec)) scale) spacing))
+      (+ (* adv scale) spacing))))
+
+(defn- draw-text-styled
+  "The C's DrawTextStyled: default-font styled text at x,y with base color
+  `rgba` (packed 0xRRGGBBAA)."
+  [{:keys [text x y size spacing rgba]}]
+  (let [font (cpp/GetFontDefault)
+        scale (/ size (+ 0.0 (.-baseSize font)))
+        n (count text)]
+    (loop [i 0 off-x 0.0 off-y 0.0 front rgba back 0]
+      (when (< i n)
+        (let [tok (next-token text i)
+              t (:type tok)]
+          (cond
+            (= t :newline) (recur (:next tok) 0.0 (+ off-y size) front back)
+            (= t :reset) (recur (:next tok) off-x off-y rgba 0)
+            (= t :front) (recur (:next tok) off-x off-y (:val tok) back)
+            (= t :back) (recur (:next tok) off-x off-y front (:val tok))
+            :else
+            (let [ch (:ch tok)
+                  cp (+ 32 (or (str/index-of ASCII ch) 31))   ; unknown -> ?
+                  inc-x (glyph-advance cp scale spacing)]
+              ;; background rectangle (alpha = the packed int's low byte)
+              (when (> (int (mod back 256)) 0)
+                (cpp/DrawRectangleRec
+                 (cpp/Rectangle (cpp/float (+ x off-x)) (cpp/float (- (+ y off-y) 4.0))
+                                (cpp/float inc-x) (cpp/float (+ size 8.0)))
+                 (cpp/GetColor back)))
+              (when (and (not= ch " ") (not= ch "\t"))
+                (cpp/DrawTextCodepoint font cp
+                                       (cpp/Vector2 (cpp/float (+ x off-x))
+                                                    (cpp/float (+ y off-y)))
+                                       (cpp/float size) (cpp/GetColor front)))
+              (recur (:next tok) (+ off-x inc-x) off-y front back))))))
+    nil))
+
+(defn- measure-text-styled
+  "The C's MeasureTextStyled: {:w :h} of the text with style tags skipped
+  (line breaks not considered, like the C)."
+  [{:keys [text size spacing]}]
+  (let [font (cpp/GetFontDefault)
+        scale (/ size (+ 0.0 (.-baseSize font)))
+        n (count text)]
+    (loop [i 0 w 0.0 valid 0]
+      (if (< i n)
+        (let [tok (next-token text i)
+              t (:type tok)]
+          (if (= t :char)
+            (let [ch (:ch tok)
+                  cp (+ 32 (or (str/index-of ASCII ch) 31))
+                  idx (int (cpp/GetGlyphIndex font cp))
+                  g (cpp/aget (.-glyphs font) (cpp/int idx))
+                  adv (int (.-advanceX g))
+                  dw (if (> adv 0)
+                       (+ 0.0 adv)
+                       (let [rec (cpp/aget (.-recs font) (cpp/int idx))]
+                         (+ (+ 0.0 (.-width rec)) (.-offsetX g))))]
+              (recur (:next tok) (+ w dw) (inc valid)))
+            (recur (:next tok) w valid)))
+        {:w (+ (* w scale) (* (dec valid) spacing)) :h size}))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - inline styling (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [frame-counter creative-r -g -b] (the color re-rolls every 20
+  ;; frames; starts RED like the C).
+  (loop [fc 0 r 230 g 41 b 55]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [fc (inc fc)
+            roll? (= (int (mod fc 20)) 0)
+            r (if roll? (int (cpp/GetRandomValue 0 255)) r)
+            g (if roll? (int (cpp/GetRandomValue 0 255)) g)
+            b (if roll? (int (cpp/GetRandomValue 0 255)) b)
+            creative (str "Let's be [c" (hex2 r) (hex2 g) (hex2 b) "ff]CREATIVE[r] !!!")]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (draw-text-styled {:text "This changes the [cFF0000FF]foreground color[r] of provided text!!!"
+                           :x 100.0 :y 80.0 :size 20.0 :spacing 2.0 :rgba 0x000000FF})
+        (draw-text-styled {:text "This changes the [bFF00FFFF]background color[r] of provided text!!!"
+                           :x 100.0 :y 120.0 :size 20.0 :spacing 2.0 :rgba 0x000000FF})
+        (draw-text-styled {:text "This changes the [c00ff00ff][bff0000ff]foreground and background colors[r]!!!"
+                           :x 100.0 :y 160.0 :size 20.0 :spacing 2.0 :rgba 0x000000FF})
+        (draw-text-styled {:text "This changes the [c00ff00ff]alpha[r] relative [cffffffff][b000000ff]from source[r] [cff000088]color[r]!!!"
+                           :x 100.0 :y 200.0 :size 20.0 :spacing 2.0 :rgba 0x00000064})
+
+        (draw-text-styled {:text creative
+                           :x 100.0 :y 240.0 :size 40.0 :spacing 2.0 :rgba 0x000000FF})
+        (let [ts (measure-text-styled {:text creative :size 40.0 :spacing 2.0})]
+          (cpp/DrawRectangleLines 100 240 (int (:w ts)) (int (:h ts)) cpp/GREEN))
+
+        (cpp/EndDrawing)
+
+        (recur fc r g b))))
+
+  (cpp/CloseWindow))

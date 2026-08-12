@@ -1,0 +1,83 @@
+(ns raylib-examples.input-box
+  "raylib [text] example - input box, ported to jank.
+
+  Hover the box and type (up to 9 characters); BACKSPACE deletes, and
+  the cursor becomes an I-beam over the box. Q quits - but only while
+  the mouse is outside the box, so typing a 'q' works.
+  Based on raylib/examples/text/text_input_box.c
+  (jank-native: GetCharPressed returns an int char code and jank has no
+  char literals, so codes 32..125 index into an ASCII table string via
+  subs to yield one-char strings appended with str.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-CHARS 9)
+
+;; Characters 32..126 in code order; (subs ASCII (- c 32) (- c 31)) is the
+;; one-char string for code c.
+(def ASCII " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - input box (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [name-string frames-counter]. The text box is at 300,180 225x50.
+  (loop [name "" fc 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+            on-text? (cpp/CheckCollisionPointRec
+                      (cpp/Vector2 (cpp/float mx) (cpp/float my))
+                      (cpp/Rectangle (cpp/float 300.0) (cpp/float 180.0)
+                                     (cpp/float 225.0) (cpp/float 50.0)))
+            fc (if on-text? (+ fc 1) 0)
+
+            ;; Drain this frame's typed-character queue.
+            name (if on-text?
+                   (loop [nm name]
+                     (let [key (int (cpp/GetCharPressed))]
+                       (if (> key 0)
+                         (recur (if (and (>= key 32) (<= key 125)
+                                         (< (count nm) MAX-CHARS))
+                                  (str nm (subs ASCII (- key 32) (- key 31)))
+                                  nm))
+                         nm)))
+                   name)
+            name (if (and on-text?
+                          (cpp/IsKeyPressed cpp/KEY_BACKSPACE)
+                          (> (count name) 0))
+                   (subs name 0 (- (count name) 1))
+                   name)]
+
+        (if on-text?
+          (cpp/SetMouseCursor cpp/MOUSE_CURSOR_IBEAM)
+          (cpp/SetMouseCursor cpp/MOUSE_CURSOR_DEFAULT))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "PLACE MOUSE OVER INPUT BOX!" 240 140 20 cpp/GRAY)
+
+        (cpp/DrawRectangle 300 180 225 50 cpp/LIGHTGRAY)
+        (cpp/DrawRectangleLines 300 180 225 50 (if on-text? cpp/RED cpp/DARKGRAY))
+
+        (cpp/DrawText name 305 188 40 cpp/MAROON)
+
+        (cpp/DrawText (str "INPUT CHARS: " (count name) "/" MAX-CHARS) 315 250 20 cpp/DARKGRAY)
+        (cpp/DrawText "Q (outside the box) quits" 315 280 20 cpp/LIGHTGRAY)
+
+        (when on-text?
+          (if (< (count name) MAX-CHARS)
+            ;; Blinking underscore caret after the typed text.
+            (when (= (int (mod (int (quot fc 20)) 2)) 0)
+              (cpp/DrawText "_" (int (+ 308.0 (+ 0.0 (cpp/MeasureText name 40)))) 192 40 cpp/MAROON))
+            (cpp/DrawText "Press BACKSPACE to delete chars..." 230 300 20 cpp/GRAY)))
+
+        (cpp/EndDrawing)
+
+        (when-not (and (cpp/IsKeyDown cpp/KEY_Q) (not on-text?))
+          (recur name fc)))))
+
+  (cpp/CloseWindow))

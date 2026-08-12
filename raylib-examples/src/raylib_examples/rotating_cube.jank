@@ -1,0 +1,96 @@
+(ns raylib-examples.rotating-cube
+  "raylib [models] example - rotating cube, ported to jank.
+
+  A single textured cube spinning about a tilted (0.5, 1, 0) axis over a
+  grid. ESC quits.
+  Based on raylib/examples/models/models_rotating_cube.c
+
+  jank-native notes:
+  - The C loads a Model (LoadModelFromMesh(GenMeshCube)) and spins it with
+    DrawModelEx. Model/Mesh loading is jank's remaining `models` blocker,
+    so the cube is drawn with rlgl immediate mode (the textured-cube
+    technique) and rotated with the rlgl matrix stack: rlPushMatrix ->
+    rlRotatef(angle, 0.5, 1, 0) -> emit the cube -> rlPopMatrix (the
+    rlgl-solar-system technique). DrawModelEx's axis/angle map exactly onto
+    rlRotatef.
+  - The C crops the atlas' bottom-left quarter with ImageFromImage and maps
+    that whole crop over every face. That is identical to mapping the
+    normalized source rect {0, 0.5, 0.5, 1.0} of the full atlas on each
+    face, so we skip ImageFromImage and reuse the proven source-rect path.
+  - The cube-draw fn can't take the native Texture2D by value (rule 2), so
+    it gets the already-read texture id + normalized source coords as jank
+    data; rlSetTexture takes the boxed id fine (function coercion)."
+  (:include "raylib.h" "rlgl.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn- tv
+  "One textured vertex: rlTexCoord2f(u,v) then rlVertex3f(x,y,z)."
+  [u v x y z]
+  (cpp/rlTexCoord2f (cpp/float u) (cpp/float v))
+  (cpp/rlVertex3f (cpp/float x) (cpp/float y) (cpp/float z)))
+
+(defn- draw-cube-crop
+  "A unit cube centred at the origin, every face mapped with the atlas
+  slice [su0..su1] x [sv0..sv1] (already normalized to 0..1)."
+  [{:keys [tex-id su0 su1 sv0 sv1]}]
+  (let [h 0.5]                              ; half-extent of a 1x1x1 cube
+    (cpp/rlSetTexture tex-id)
+    (cpp/rlBegin cpp/RL_QUADS)
+    (cpp/rlColor4ub 255 255 255 255)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float 1.0))    ; front
+    (tv su0 sv1 (- h) (- h) h) (tv su1 sv1 h (- h) h) (tv su1 sv0 h h h) (tv su0 sv0 (- h) h h)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float -1.0))   ; back
+    (tv su1 sv1 (- h) (- h) (- h)) (tv su1 sv0 (- h) h (- h)) (tv su0 sv0 h h (- h)) (tv su0 sv1 h (- h) (- h))
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))    ; top
+    (tv su0 sv0 (- h) h (- h)) (tv su0 sv1 (- h) h h) (tv su1 sv1 h h h) (tv su1 sv0 h h (- h))
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float -1.0) (cpp/float 0.0))   ; bottom
+    (tv su1 sv0 (- h) (- h) (- h)) (tv su0 sv0 h (- h) (- h)) (tv su0 sv1 h (- h) h) (tv su1 sv1 (- h) (- h) h)
+    (cpp/rlNormal3f (cpp/float 1.0) (cpp/float 0.0) (cpp/float 0.0))    ; right
+    (tv su1 sv1 h (- h) (- h)) (tv su1 sv0 h h (- h)) (tv su0 sv0 h h h) (tv su0 sv1 h (- h) h)
+    (cpp/rlNormal3f (cpp/float -1.0) (cpp/float 0.0) (cpp/float 0.0))   ; left
+    (tv su0 sv1 (- h) (- h) (- h)) (tv su1 sv1 (- h) (- h) h) (tv su1 sv0 (- h) h h) (tv su0 sv0 (- h) h (- h))
+    (cpp/rlEnd)
+    (cpp/rlSetTexture 0)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - rotating cube (jank)")
+  (let [camera  (cpp/Camera3D (cpp/Vector3 (cpp/float 0.0) (cpp/float 3.0) (cpp/float 3.0))
+                              (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                              (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                              (cpp/float 45.0) cpp/CAMERA_PERSPECTIVE)
+        texture (cpp/LoadTexture (str RES "cubicmap_atlas.png"))
+        tex-id  (nth [(+ 0 (.-id texture))] 0)
+        tw      (nth [(+ 0.0 (.-width texture))] 0)
+        th      (nth [(+ 0.0 (.-height texture))] 0)
+        ;; bottom-left quarter of the atlas: {0, texH/2, texW/2, texH/2}
+        su0 0.0
+        su1 (/ (/ tw 2.0) tw)
+        sv0 (/ (/ th 2.0) th)
+        sv1 1.0]
+    (cpp/SetTargetFPS 60)
+
+    (loop [rotation 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/rlPushMatrix)
+        (cpp/rlRotatef (cpp/float rotation) (cpp/float 0.5) (cpp/float 1.0) (cpp/float 0.0))
+        (draw-cube-crop {:tex-id tex-id :su0 su0 :su1 su1 :sv0 sv0 :sv1 sv1})
+        (cpp/rlPopMatrix)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndMode3D)
+
+        (cpp/DrawFPS 10 10)
+        (cpp/EndDrawing)
+
+        (recur (+ rotation 1.0))))
+
+    (cpp/UnloadTexture texture))
+
+  (cpp/CloseWindow))

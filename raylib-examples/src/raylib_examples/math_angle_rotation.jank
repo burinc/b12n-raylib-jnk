@@ -1,0 +1,63 @@
+(ns raylib-examples.math-angle-rotation
+  "raylib [shapes] example - math angle rotation, ported to jank.
+
+  Four fixed-angle lines (0/30/60/90 degrees) plus one line that spins
+  through every angle, its color cycling through HSV. Q quits.
+  Based on raylib/examples/shapes/shapes_math_angle_rotation.c
+  (jank-native: C cos/sin, Vector2 built inline for DrawLineEx)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 720)
+(def HEIGHT 400)
+(def PI 3.141592653589793)
+(def DEG2RAD (/ PI 180.0))
+(def CX (/ WIDTH 2.0))     ; 360.0
+(def CY (/ HEIGHT 2.0))    ; 200.0
+(def LEN 150.0)
+(def ANGLES [0 30 60 90])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - math angle rotation (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [total 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [total (let [t (+ total 1.0)] (if (>= t 360.0) (- t 360.0) t))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/WHITE)
+
+        (cpp/DrawText "Fixed angles + a rotating line - Q to quit" 10 10 20 cpp/LIGHTGRAY)
+
+        ;; Fixed-angle lines, each a different color.
+        (loop [i 0]
+          (when (< i 4)
+            (let [a   (nth ANGLES i)
+                  rad (* a DEG2RAD)
+                  ex  (+ CX (* (cpp/cos rad) LEN))
+                  ey  (+ CY (* (cpp/sin rad) LEN))
+                  tx  (+ CX (* (cpp/cos rad) (+ LEN 20.0)))
+                  ty  (+ CY (* (cpp/sin rad) (+ LEN 20.0)))
+                  col (if (= i 0) cpp/GREEN
+                        (if (= i 1) cpp/ORANGE
+                          (if (= i 2) cpp/BLUE cpp/MAGENTA)))]
+              (cpp/DrawLineEx (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                              (cpp/Vector2 (cpp/float ex) (cpp/float ey)) (cpp/float 5.0) col)
+              (cpp/DrawText (str a " deg") (int tx) (int ty) 20 col))
+            (recur (inc i))))
+
+        ;; The animated line, cycling color through HSV.
+        (let [arad (* total DEG2RAD)
+              aex  (+ CX (* (cpp/cos arad) LEN))
+              aey  (+ CY (* (cpp/sin arad) LEN))]
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                          (cpp/Vector2 (cpp/float aex) (cpp/float aey)) (cpp/float 5.0)
+                          (cpp/ColorFromHSV (cpp/float total) (cpp/float 0.8) (cpp/float 0.9))))
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur total)))))
+
+  (cpp/CloseWindow))

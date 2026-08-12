@@ -1,0 +1,253 @@
+(ns raylib-examples.automation-events
+  "raylib [core] example - automation events, ported to jank.
+
+  A tiny 2D-camera platformer (LEFT/RIGHT move, SPACE jump, R reset)
+  wired to raylib's automation-event system: press S to start/stop
+  RECORDING your input into an AutomationEventList (exported to
+  automation.rae), press A to REPLAY the last recording frame-for-frame.
+  Drop a .rae/.txt file to load and replay it. A fixed 0.015s timestep
+  keeps replay deterministic.
+  Based on raylib/examples/core/core_automation_events.c (3/4 complexity).
+
+  jank-native notes:
+  - Every piece of state is a native value jank can't build or thread:
+    a Player + EnvElement[5] + Camera2D, and the AutomationEventList
+    whose `.events[]` array and `.count` the record/replay loop reads
+    (PlayAutomationEvent takes an AutomationEvent by value). So the
+    platformer physics, the record/replay state machine, the camera
+    framing and the 2D draw all live verbatim in one cpp/raw shim over
+    static state; jank owns the window lifecycle, the frame loop and the
+    frame boundaries, calling init / update / draw / cleanup."
+  (:include "raylib.h" "raymath.h"))
+
+;; The platformer + automation-event record/replay engine.
+(cpp/raw "
+#define JANK_AE_GRAVITY         400
+#define JANK_AE_PLAYER_JUMP_SPD 350.0f
+#define JANK_AE_PLAYER_HOR_SPD  200.0f
+#define JANK_AE_MAX_ENV         5
+#define JANK_AE_SW              800
+#define JANK_AE_SH              450
+
+typedef struct { Vector2 position; float speed; bool canJump; } JankAePlayer;
+typedef struct { Rectangle rect; int blocking; Color color; } JankAeEnvElement;
+
+static JankAePlayer jank_ae_player = { 0 };
+static JankAeEnvElement jank_ae_env[JANK_AE_MAX_ENV] = { 0 };
+static Camera2D jank_ae_camera = { 0 };
+static AutomationEventList jank_ae_list = { 0 };
+static bool jank_ae_recording = false;
+static bool jank_ae_playing = false;
+static unsigned int jank_ae_frameCounter = 0;
+static unsigned int jank_ae_playFrameCounter = 0;
+static unsigned int jank_ae_currentPlayFrame = 0;
+
+static void jank_ae_reset_scene(void) {
+  jank_ae_player.position = (Vector2){ 400, 280 };
+  jank_ae_player.speed = 0;
+  jank_ae_player.canJump = false;
+  jank_ae_camera.target = jank_ae_player.position;
+  jank_ae_camera.offset = (Vector2){ JANK_AE_SW/2.0f, JANK_AE_SH/2.0f };
+  jank_ae_camera.rotation = 0.0f;
+  jank_ae_camera.zoom = 1.0f;
+}
+
+static void jank_ae_init(void) {
+  jank_ae_player.position = (Vector2){ 400, 280 };
+  jank_ae_player.speed = 0;
+  jank_ae_player.canJump = false;
+
+  JankAeEnvElement init[JANK_AE_MAX_ENV] = {
+    {{ 0, 0, 1000, 400 }, 0, LIGHTGRAY },
+    {{ 0, 400, 1000, 200 }, 1, GRAY },
+    {{ 300, 200, 400, 10 }, 1, GRAY },
+    {{ 250, 300, 100, 10 }, 1, GRAY },
+    {{ 650, 300, 100, 10 }, 1, GRAY }
+  };
+  for (int i = 0; i < JANK_AE_MAX_ENV; i++) jank_ae_env[i] = init[i];
+
+  jank_ae_camera.target = jank_ae_player.position;
+  jank_ae_camera.offset = (Vector2){ JANK_AE_SW/2.0f, JANK_AE_SH/2.0f };
+  jank_ae_camera.rotation = 0.0f;
+  jank_ae_camera.zoom = 1.0f;
+
+  jank_ae_list = LoadAutomationEventList(0);
+  SetAutomationEventList(&jank_ae_list);
+
+  SetTargetFPS(60);
+}
+
+static void jank_ae_update(void) {
+  float deltaTime = 0.015f; /* fixed timestep keeps replay deterministic */
+
+  /* Dropped files: load + replay a recorded event list */
+  if (IsFileDropped()) {
+    FilePathList droppedFiles = LoadDroppedFiles();
+    if (IsFileExtension(droppedFiles.paths[0], \".txt;.rae\")) {
+      UnloadAutomationEventList(jank_ae_list);
+      jank_ae_list = LoadAutomationEventList(droppedFiles.paths[0]);
+      jank_ae_recording = false;
+      jank_ae_playing = true;
+      jank_ae_playFrameCounter = 0;
+      jank_ae_currentPlayFrame = 0;
+      jank_ae_reset_scene();
+    }
+    UnloadDroppedFiles(droppedFiles);
+  }
+
+  /* Update player */
+  if (IsKeyDown(KEY_LEFT)) jank_ae_player.position.x -= JANK_AE_PLAYER_HOR_SPD*deltaTime;
+  if (IsKeyDown(KEY_RIGHT)) jank_ae_player.position.x += JANK_AE_PLAYER_HOR_SPD*deltaTime;
+  if (IsKeyDown(KEY_SPACE) && jank_ae_player.canJump) {
+    jank_ae_player.speed = -JANK_AE_PLAYER_JUMP_SPD;
+    jank_ae_player.canJump = false;
+  }
+
+  int hitObstacle = 0;
+  for (int i = 0; i < JANK_AE_MAX_ENV; i++) {
+    JankAeEnvElement *element = &jank_ae_env[i];
+    Vector2 *p = &(jank_ae_player.position);
+    if (element->blocking &&
+        element->rect.x <= p->x &&
+        element->rect.x + element->rect.width >= p->x &&
+        element->rect.y >= p->y &&
+        element->rect.y <= p->y + jank_ae_player.speed*deltaTime) {
+      hitObstacle = 1;
+      jank_ae_player.speed = 0.0f;
+      p->y = element->rect.y;
+    }
+  }
+
+  if (!hitObstacle) {
+    jank_ae_player.position.y += jank_ae_player.speed*deltaTime;
+    jank_ae_player.speed += JANK_AE_GRAVITY*deltaTime;
+    jank_ae_player.canJump = false;
+  } else jank_ae_player.canJump = true;
+
+  if (IsKeyPressed(KEY_R)) jank_ae_reset_scene();
+
+  /* Events playing (before camera update: replay can set mouse-wheel) */
+  if (jank_ae_playing) {
+    while (jank_ae_playFrameCounter == jank_ae_list.events[jank_ae_currentPlayFrame].frame) {
+      PlayAutomationEvent(jank_ae_list.events[jank_ae_currentPlayFrame]);
+      jank_ae_currentPlayFrame++;
+      if (jank_ae_currentPlayFrame == jank_ae_list.count) {
+        jank_ae_playing = false;
+        jank_ae_currentPlayFrame = 0;
+        jank_ae_playFrameCounter = 0;
+        TraceLog(LOG_INFO, \"FINISH PLAYING!\");
+        break;
+      }
+    }
+    jank_ae_playFrameCounter++;
+  }
+
+  /* Update camera to frame the whole level */
+  jank_ae_camera.target = jank_ae_player.position;
+  jank_ae_camera.offset = (Vector2){ JANK_AE_SW/2.0f, JANK_AE_SH/2.0f };
+  float minX = 1000, minY = 1000, maxX = -1000, maxY = -1000;
+
+  jank_ae_camera.zoom += ((float)GetMouseWheelMove()*0.05f);
+  if (jank_ae_camera.zoom > 3.0f) jank_ae_camera.zoom = 3.0f;
+  else if (jank_ae_camera.zoom < 0.25f) jank_ae_camera.zoom = 0.25f;
+
+  for (int i = 0; i < JANK_AE_MAX_ENV; i++) {
+    JankAeEnvElement *element = &jank_ae_env[i];
+    minX = fminf(element->rect.x, minX);
+    maxX = fmaxf(element->rect.x + element->rect.width, maxX);
+    minY = fminf(element->rect.y, minY);
+    maxY = fmaxf(element->rect.y + element->rect.height, maxY);
+  }
+
+  Vector2 max = GetWorldToScreen2D((Vector2){ maxX, maxY }, jank_ae_camera);
+  Vector2 min = GetWorldToScreen2D((Vector2){ minX, minY }, jank_ae_camera);
+
+  if (max.x < JANK_AE_SW) jank_ae_camera.offset.x = JANK_AE_SW - (max.x - (float)JANK_AE_SW/2);
+  if (max.y < JANK_AE_SH) jank_ae_camera.offset.y = JANK_AE_SH - (max.y - (float)JANK_AE_SH/2);
+  if (min.x > 0) jank_ae_camera.offset.x = (float)JANK_AE_SW/2 - min.x;
+  if (min.y > 0) jank_ae_camera.offset.y = (float)JANK_AE_SH/2 - min.y;
+
+  /* Events management */
+  if (IsKeyPressed(KEY_S)) {
+    if (!jank_ae_playing) {
+      if (jank_ae_recording) {
+        StopAutomationEventRecording();
+        jank_ae_recording = false;
+        ExportAutomationEventList(jank_ae_list, \"automation.rae\");
+        TraceLog(LOG_INFO, \"RECORDED FRAMES: %i\", jank_ae_list.count);
+      } else {
+        SetAutomationEventBaseFrame(180);
+        StartAutomationEventRecording();
+        jank_ae_recording = true;
+      }
+    }
+  } else if (IsKeyPressed(KEY_A)) {
+    if (!jank_ae_recording && (jank_ae_list.count > 0)) {
+      jank_ae_playing = true;
+      jank_ae_playFrameCounter = 0;
+      jank_ae_currentPlayFrame = 0;
+      jank_ae_reset_scene();
+    }
+  }
+
+  if (jank_ae_recording || jank_ae_playing) jank_ae_frameCounter++;
+  else jank_ae_frameCounter = 0;
+}
+
+static void jank_ae_draw(void) {
+  ClearBackground(LIGHTGRAY);
+
+  BeginMode2D(jank_ae_camera);
+    for (int i = 0; i < JANK_AE_MAX_ENV; i++) DrawRectangleRec(jank_ae_env[i].rect, jank_ae_env[i].color);
+    DrawRectangleRec((Rectangle){ jank_ae_player.position.x - 20, jank_ae_player.position.y - 40, 40, 40 }, RED);
+  EndMode2D();
+
+  /* Game controls panel */
+  DrawRectangle(10, 10, 290, 145, Fade(SKYBLUE, 0.5f));
+  DrawRectangleLines(10, 10, 290, 145, Fade(BLUE, 0.8f));
+
+  DrawText(\"Controls:\", 20, 20, 10, BLACK);
+  DrawText(\"- RIGHT | LEFT: Player movement\", 30, 40, 10, DARKGRAY);
+  DrawText(\"- SPACE: Player jump\", 30, 60, 10, DARKGRAY);
+  DrawText(\"- R: Reset game state\", 30, 80, 10, DARKGRAY);
+  DrawText(\"- S: START/STOP RECORDING INPUT EVENTS\", 30, 110, 10, BLACK);
+  DrawText(\"- A: REPLAY LAST RECORDED INPUT EVENTS\", 30, 130, 10, BLACK);
+
+  /* Recording / playing indicator */
+  if (jank_ae_recording) {
+    DrawRectangle(10, 160, 290, 30, Fade(RED, 0.3f));
+    DrawRectangleLines(10, 160, 290, 30, Fade(MAROON, 0.8f));
+    DrawCircle(30, 175, 10, MAROON);
+    if (((jank_ae_frameCounter/15)%2) == 1) DrawText(TextFormat(\"RECORDING EVENTS... [%i]\", jank_ae_list.count), 50, 170, 10, MAROON);
+  } else if (jank_ae_playing) {
+    DrawRectangle(10, 160, 290, 30, Fade(LIME, 0.3f));
+    DrawRectangleLines(10, 160, 290, 30, Fade(DARKGREEN, 0.8f));
+    DrawTriangle((Vector2){ 20, 155 + 10 }, (Vector2){ 20, 155 + 30 }, (Vector2){ 40, 155 + 20 }, DARKGREEN);
+    if (((jank_ae_frameCounter/15)%2) == 1) DrawText(TextFormat(\"PLAYING RECORDED EVENTS... [%i]\", jank_ae_currentPlayFrame), 50, 170, 10, DARKGREEN);
+  }
+}
+
+static void jank_ae_cleanup(void) {
+  UnloadAutomationEventList(jank_ae_list);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - automation events (jank)")
+
+  (cpp/jank_ae_init)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (cpp/jank_ae_update)
+
+      (cpp/BeginDrawing)
+      (cpp/jank_ae_draw)
+      (cpp/EndDrawing)
+      (recur)))
+
+  (cpp/jank_ae_cleanup)
+  (cpp/CloseWindow))

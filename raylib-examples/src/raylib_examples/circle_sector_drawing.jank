@@ -1,0 +1,74 @@
+(ns raylib-examples.circle-sector-drawing
+  "raylib [shapes] example - circle sector drawing, ported to jank.
+
+  A filled circle sector plus its outline, with adjustable angles,
+  radius and segment count. Hold LEFT/RIGHT for the start angle,
+  DOWN/UP for the end angle, A/S for the radius, O/P for the segment
+  count (below the auto threshold = AUTO mode). Q quits.
+  Based on raylib/examples/shapes/shapes_circle_sector_drawing.c
+  (jank-native: the raygui sliders become held-key adjustments with the
+  control panel drawn as text, mirroring ring_drawing.jank.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def CX 250.0)                       ; (WIDTH - 300) / 2
+(def CY 225.0)
+
+(defn fmt1
+  "A non-negative real formatted with one decimal."
+  [x]
+  (let [c (int (+ (* x 10.0) 0.5))]
+    (str (int (quot c 10)) "." (int (mod c 10)))))
+
+(defn adj
+  "Adjust v by step while dn/up are held, clamped to lo..hi."
+  [v dn up step lo hi]
+  (let [v (if dn (- v step) v)
+        v (if up (+ v step) v)]
+    (if (< v lo) lo (if (> v hi) hi v))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - circle sector drawing (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [start-angle end-angle radius segments].
+  (loop [sa 0.0 ea 180.0 rad 180.0 segs 10.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [sa (adj sa (cpp/IsKeyDown cpp/KEY_LEFT) (cpp/IsKeyDown cpp/KEY_RIGHT) 2.0 0.0 720.0)
+            ea (adj ea (cpp/IsKeyDown cpp/KEY_DOWN) (cpp/IsKeyDown cpp/KEY_UP) 2.0 0.0 720.0)
+            rad (adj rad (cpp/IsKeyDown cpp/KEY_A) (cpp/IsKeyDown cpp/KEY_S) 1.0 0.0 200.0)
+            segs (adj segs (cpp/IsKeyDown cpp/KEY_O) (cpp/IsKeyDown cpp/KEY_P) 0.5 0.0 100.0)
+            min-segs (int (+ 0.0 (cpp/ceil (/ (- ea sa) 90.0))))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawLine 500 0 500 HEIGHT (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.6)))
+        (cpp/DrawRectangle 500 0 (- WIDTH 500) HEIGHT (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.3)))
+
+        (cpp/DrawCircleSector (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                              (cpp/float rad) (cpp/float sa) (cpp/float ea) (int segs)
+                              (cpp/Fade cpp/MAROON (cpp/float 0.3)))
+        (cpp/DrawCircleSectorLines (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                                   (cpp/float rad) (cpp/float sa) (cpp/float ea) (int segs)
+                                   (cpp/Fade cpp/MAROON (cpp/float 0.6)))
+
+        ;; The control panel, as text.
+        (cpp/DrawText (str "StartAngle: " (fmt1 sa) "  (LEFT/RIGHT)") 560 40 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "EndAngle: " (fmt1 ea) "  (DOWN/UP)") 560 70 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Radius: " (fmt1 rad) "  (A/S)") 560 140 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Segments: " (fmt1 segs) "  (O/P)") 560 170 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "MODE: " (if (>= segs min-segs) "MANUAL" "AUTO"))
+                      560 200 10 (if (>= segs min-segs) cpp/MAROON cpp/DARKGRAY))
+        (cpp/DrawText "[Q] quit" 560 230 10 cpp/DARKGRAY)
+
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur sa ea rad segs)))))
+
+  (cpp/CloseWindow))

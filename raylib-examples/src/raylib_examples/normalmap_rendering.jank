@@ -1,0 +1,134 @@
+(ns raylib-examples.normalmap-rendering
+  "raylib [shaders] example - normalmap rendering, ported to jank.
+
+  A spinning tiled plane lit per-pixel through a tangent-space normal
+  map: N toggles the normal map for comparison, WASD move the point
+  light, UP/DOWN change the specular shininess. ESC quits.
+  Based on raylib/examples/shaders/shaders_normalmap_rendering.c
+
+  jank-native notes:
+  - First MATERIAL_MAP_NORMAL use: a per-file shim assigns a texture
+    to any material map slot AND runs the example's mipmaps +
+    trilinear-filter setup on it in one call (GenTextureMipmaps needs
+    the texture pointer, which only exists inside the material).
+  - plane.transform = MatrixRotateY(t) is an absolute transform SET
+    (fog-rendering's spin was a multiply) - its own shim.
+  - Light movement is jank math: dx/dz accumulated from WASD, hand
+    normalized with cpp/sqrt (no Vector3Normalize needed).
+  - Uniforms ride jank_rlights.h's generic setters even though the
+    example creates no lights - the header doubles as the shared
+    uniform toolbox."
+  (:require [clojure.string :as string])
+  (:include "raylib.h" "raymath.h" "math.h" "jank_rlights.h"))
+
+;; Material map setup + absolute Y-rotation transform set.
+(cpp/raw "static void jank_model_setup_map(Model* m, int map, Texture2D tex) {
+  m->materials[0].maps[map].texture = tex;
+  GenTextureMipmaps(&m->materials[0].maps[map].texture);
+  SetTextureFilter(m->materials[0].maps[map].texture, TEXTURE_FILTER_TRILINEAR);
+}
+static void jank_model_set_shader(Model* m, Shader s) {
+  m->materials[0].shader = s;
+}
+static void jank_model_set_rotate_y(Model* m, double angle) {
+  m->transform = MatrixRotateY((float)angle);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn- fmt2
+  "The C's %.2f, via trimming str two digits past the dot."
+  [v]
+  (let [s (str v)
+        dot (string/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - normalmap rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float -4.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        shader (cpp/LoadShader (str RES "shaders/glsl330/normalmap.vs")
+                               (str RES "shaders/glsl330/normalmap.fs"))
+        view-loc (int (cpp/GetShaderLocation shader "viewPos"))
+        light-pos-loc (int (cpp/GetShaderLocation shader "lightPos"))
+        specular-loc (int (cpp/GetShaderLocation shader "specularExponent"))
+        use-nm-loc (int (cpp/GetShaderLocation shader "useNormalMap"))
+        plane (cpp/LoadModel (str RES "models/plane.glb"))]
+
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_NORMAL
+                                (int (cpp/GetShaderLocation shader "normalMap")))
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+
+    (cpp/jank_model_set_shader (cpp/& plane) shader)
+    (cpp/jank_model_setup_map (cpp/& plane) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
+                              (cpp/LoadTexture (str RES "tiles_diffuse.png")))
+    (cpp/jank_model_setup_map (cpp/& plane) (cpp/int cpp/MATERIAL_MAP_NORMAL)
+                              (cpp/LoadTexture (str RES "tiles_normal.png")))
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [light-x light-z specular-exponent use-normal-map?].
+    (loop [lx 0.0
+           lz 0.0
+           specular 8.0
+           use-nm? true]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [dt (+ 0.0 (cpp/GetFrameTime))
+              ;; WASD light movement, hand-normalized
+              dz (+ (if (cpp/IsKeyDown cpp/KEY_W) 1.0 0.0)
+                    (if (cpp/IsKeyDown cpp/KEY_S) -1.0 0.0))
+              dx (+ (if (cpp/IsKeyDown cpp/KEY_D) -1.0 0.0)
+                    (if (cpp/IsKeyDown cpp/KEY_A) 1.0 0.0))
+              len (+ 0.0 (cpp/sqrt (+ (* dx dx) (* dz dz))))
+              step (* dt 3.0)
+              lx (if (> len 0.0) (+ lx (* (/ dx len) step)) lx)
+              lz (if (> len 0.0) (+ lz (* (/ dz len) step)) lz)
+              specular (cond (cpp/IsKeyDown cpp/KEY_UP) (+ specular (* 40.0 dt))
+                             (cpp/IsKeyDown cpp/KEY_DOWN) (- specular (* 40.0 dt))
+                             :else specular)
+              specular (if (> specular 128.0) 128.0 (if (< specular 2.0) 2.0 specular))
+              use-nm? (if (cpp/IsKeyPressed cpp/KEY_N) (not use-nm?) use-nm?)]
+
+          ;; spin the plane at a constant rate (absolute transform set)
+          (cpp/jank_model_set_rotate_y (cpp/& plane) (* (+ 0.0 (cpp/GetTime)) 0.5))
+
+          (cpp/jank_rl_set_vec3 shader light-pos-loc lx 1.0 lz)
+          (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
+          (cpp/jank_rl_set_float shader specular-loc specular)
+          (cpp/jank_rl_set_int shader use-nm-loc (if use-nm? 1 0))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/BeginShaderMode shader)
+          (cpp/DrawModel plane
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 2.0) cpp/WHITE)
+          (cpp/EndShaderMode)
+          (cpp/DrawSphereWires (cpp/Vector3 (cpp/float lx) (cpp/float 1.0) (cpp/float lz))
+                               (cpp/float 0.2) 8 8 cpp/ORANGE)
+          (cpp/EndMode3D)
+
+          (cpp/DrawText (str "Use key [N] to toggle normal map: " (if use-nm? "On" "Off"))
+                        10 10 10 (if use-nm? cpp/DARKGREEN cpp/RED))
+          (cpp/DrawText "Use keys [W][A][S][D] to move the light" 10 34 10 cpp/BLACK)
+          (cpp/DrawText "Use keys [Up][Down] to change specular exponent" 10 58 10 cpp/BLACK)
+          (cpp/DrawText (str "Specular Exponent: " (fmt2 specular)) 10 82 10 cpp/BLUE)
+          (cpp/DrawFPS (- WIDTH 90) 10)
+
+          (cpp/EndDrawing)
+          (recur lx lz specular use-nm?))))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadModel plane))
+
+  (cpp/CloseWindow))

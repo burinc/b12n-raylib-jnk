@@ -1,0 +1,85 @@
+(ns raylib-examples.bunnymark
+  "raylib [textures] example - bunnymark, ported to jank.
+
+  The classic batching benchmark: hold LEFT to spawn 100 bunnies per
+  frame at the cursor, each bouncing off the screen edges. P pauses,
+  Q quits. The FPS counter shows what the runtime can sustain.
+  Based on raylib/examples/textures/textures_bunnymark.c
+  (jank-native: bunnies are jank maps in a persistent vector instead
+  of a malloc'd struct array, so throughput measures jank's
+  collection update rate as much as raylib's draw batching. Each
+  bunny's color is stored as r/g/b ints and resolved per draw via
+  GetColor on a packed RGBA int.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def BUNNY "../jank-raylib-sys/raylib/examples/textures/resources/raybunny.png")
+(def MAX-BUNNIES 80000)
+(def BATCH-ELEMENTS 8192)
+
+(defn new-bunny [mx my]
+  {:x (+ 0.0 mx) :y (+ 0.0 my)
+   :sx (+ 0.0 (cpp/GetRandomValue -250 250))
+   :sy (+ 0.0 (cpp/GetRandomValue -250 250))
+   :r (cpp/GetRandomValue 50 240)
+   :g (cpp/GetRandomValue 80 240)
+   :b (cpp/GetRandomValue 100 240)})
+
+(defn update-bunny [b ft hw hh]
+  (let [x (+ (:x b) (* (:sx b) ft))
+        y (+ (:y b) (* (:sy b) ft))
+        sx (if (or (> (+ x hw) WIDTH) (< (+ x hw) 0)) (- 0.0 (:sx b)) (:sx b))
+        sy (if (or (> (+ y hh) HEIGHT) (< (- (+ y hh) 40) 0)) (- 0.0 (:sy b)) (:sy b))]
+    (assoc b :x x :y y :sx sx :sy sy)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - bunnymark (jank)")
+
+  (let [tex (cpp/LoadTexture BUNNY)
+        hw (int (quot (int (+ 0.0 (.-width tex))) 2))
+        hh (int (quot (int (+ 0.0 (.-height tex))) 2))]
+
+    (loop [bunnies [] paused false]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [cnt (count bunnies)
+              bunnies (if (and (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT)
+                               (< cnt MAX-BUNNIES))
+                        (let [mx (cpp/GetMouseX)
+                              my (cpp/GetMouseY)
+                              n (min 100 (- MAX-BUNNIES cnt))]
+                          (into bunnies (repeatedly n (fn [] (new-bunny mx my)))))
+                        bunnies)
+              paused (if (cpp/IsKeyPressed cpp/KEY_P) (not paused) paused)
+              ft (+ 0.0 (cpp/GetFrameTime))
+              bunnies (if paused
+                        bunnies
+                        (mapv (fn [b] (update-bunny b ft hw hh)) bunnies))
+              cnt (count bunnies)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (doseq [b bunnies]
+            (cpp/DrawTexture tex (int (:x b)) (int (:y b))
+                             (cpp/GetColor (+ (* (:r b) 16777216)
+                                              (* (:g b) 65536)
+                                              (* (:b b) 256)
+                                              255))))
+
+          (cpp/DrawRectangle 0 0 WIDTH 40 cpp/BLACK)
+          (cpp/DrawText (str "bunnies: " cnt) 120 10 20 cpp/GREEN)
+          (cpp/DrawText (str "batched draw calls: " (+ 1 (int (quot cnt BATCH-ELEMENTS))))
+                        320 10 20 cpp/MAROON)
+          (cpp/DrawText "LEFT spawn - P pause - Q quit" 620 10 10 cpp/RAYWHITE)
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur bunnies paused)))))
+
+    (cpp/UnloadTexture tex))
+
+  (cpp/CloseWindow))

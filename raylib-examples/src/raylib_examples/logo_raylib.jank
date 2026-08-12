@@ -1,0 +1,34 @@
+(ns raylib-examples.logo-raylib
+  "raylib [shapes] example - raylib logo, ported to jank.
+
+  The raylib logo drawn from two rectangles and a text label - not a
+  texture. Q quits. Based on raylib/examples/shapes/shapes_logo_raylib.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def HW (quot WIDTH 2))    ; 400
+(def HH (quot HEIGHT 2))   ; 225
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - raylib logo (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (cpp/BeginDrawing)
+      (cpp/ClearBackground cpp/RAYWHITE)
+
+      (cpp/DrawRectangle (- HW 128) (- HH 128) 256 256 cpp/BLACK)
+      (cpp/DrawRectangle (- HW 112) (- HH 112) 224 224 cpp/RAYWHITE)
+      (cpp/DrawText "raylib" (- HW 44) (+ HH 48) 50 cpp/BLACK)
+
+      (cpp/DrawText "this is NOT a texture! (Q to quit)" 330 370 10 cpp/GRAY)
+
+      (cpp/EndDrawing)
+
+      (when-not (cpp/IsKeyDown cpp/KEY_Q)
+        (recur))))
+
+  (cpp/CloseWindow))

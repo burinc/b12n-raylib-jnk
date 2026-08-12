@@ -1,0 +1,93 @@
+(ns raylib-examples.texture-tiling
+  "raylib [shaders] example - texture tiling, ported to jank.
+
+  A generated cube model whose atlas texture is tiled 3x3 across each
+  face by the tiling.fs shader (TEXTURE_WRAP_REPEAT + scaled UVs).
+  Free camera: mouse look, WASD move, Z re-target. ESC quits.
+  Based on raylib/examples/shaders/shaders_texture_tiling.c
+
+  jank-native notes:
+  - THE MODEL BLOCKER FALLS: GenMeshCube -> LoadModelFromMesh ->
+    DrawModel all work with zero wrapper changes - the Mesh and Model
+    structs (pointers inside and all) bind as outer-let locals exactly
+    like Font did in font-loading.
+  - The C's model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture and
+    .shader field writes have no jank spelling; a pointer-shim pair
+    does them through (cpp/& model) (the image-processing address-of
+    pattern).
+  - The Z camera re-target reuses camera-3d-free's jank_cam_retarget
+    shim shape."
+  (:include "raylib.h"))
+
+;; Field writes into the model's material (no jank syntax for
+;; struct-array member assignment) + the usual VEC2 uniform setter.
+(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}
+static void jank_model_set_shader(Model* m, Shader s) {
+  m->materials[0].shader = s;
+}
+static void jank_cam_retarget(Camera3D* c) {
+  c->target = (Vector3){ 0.0f, 0.5f, 0.0f };
+}
+static void jank_set_vec2(Shader s, int loc, double a, double b) {
+  float v[2] = { (float)a, (float)b };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - texture tiling (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 4.0) (cpp/float 4.0) (cpp/float 4.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModelFromMesh (cpp/GenMeshCube (cpp/float 1.0)
+                                                      (cpp/float 1.0)
+                                                      (cpp/float 1.0)))
+        texture (cpp/LoadTexture (str RES "cubicmap_atlas.png"))
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/tiling.fs"))
+        tiling-loc (int (cpp/GetShaderLocation shader "tiling"))]
+
+    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (cpp/SetTextureWrap texture cpp/TEXTURE_WRAP_REPEAT)
+    (cpp/jank_set_vec2 shader tiling-loc 3.0 3.0)
+    (cpp/jank_model_set_shader (cpp/& model) shader)
+
+    (cpp/DisableCursor)
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FREE)
+        (when (cpp/IsKeyPressed cpp/KEY_Z)
+          (cpp/jank_cam_retarget (cpp/& camera)))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/BeginShaderMode shader)
+        (cpp/DrawModel model
+                       (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                       (cpp/float 2.0) cpp/WHITE)
+        (cpp/EndShaderMode)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndMode3D)
+
+        (cpp/DrawText "Use mouse to rotate the camera" 10 10 20 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadModel model)
+    (cpp/UnloadShader shader)
+    (cpp/UnloadTexture texture))
+
+  (cpp/CloseWindow))

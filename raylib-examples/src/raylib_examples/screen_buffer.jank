@@ -1,0 +1,116 @@
+(ns raylib-examples.screen-buffer
+  "raylib [textures] example - screen buffer, ported to jank.
+
+  The classic DOS fire effect as a software screen buffer: a 400x225
+  palette-indexed byte buffer is simulated every frame (embers grow
+  at the bottom row, rise with random drift and decay) and blitted
+  through a 256-color flame palette into a texture drawn at 2x. ESC
+  quits.
+  Based on raylib/examples/textures/textures_screen_buffer.c
+
+  jank-native notes:
+  - The per-frame simulation touches ~90k cells across four loops -
+    the whole step (grow roots, seed the bottom row, clear the top,
+    propagate upward, palette-blit via ImageDrawPixel) lives in one C
+    shim over RL_CALLOC'd index buffers and the precomputed palette;
+    jank owns the raylib objects and the frame loop."
+  (:include "raylib.h" "stdlib.h"))
+
+;; The fire simulation state + one full step per call.
+(cpp/raw "#define JANK_MAX_COLORS 256
+static int jank_img_w = 0;
+static int jank_img_h = 0;
+static Color jank_palette[JANK_MAX_COLORS] = { 0 };
+static unsigned char *jank_index_buffer = NULL;
+static unsigned char *jank_flame_root = NULL;
+
+static void jank_flame_init(int imageWidth, int imageHeight) {
+  jank_img_w = imageWidth;
+  jank_img_h = imageHeight;
+  jank_index_buffer = (unsigned char *)RL_CALLOC(imageWidth*imageWidth, sizeof(unsigned char));
+  jank_flame_root = (unsigned char *)RL_CALLOC(imageWidth, sizeof(unsigned char));
+  for (int i = 0; i < JANK_MAX_COLORS; i++) {
+    float t = (float)i/(float)(JANK_MAX_COLORS - 1);
+    float hue = t*t;
+    jank_palette[i] = ColorFromHSV(250.0f + 150.0f*hue, t, t);
+  }
+}
+static void jank_flame_free(void) {
+  RL_FREE(jank_index_buffer);
+  RL_FREE(jank_flame_root);
+}
+/* one simulation step + palette blit into the screen image */
+static void jank_flame_step(Image *screenImage) {
+  /* grow the ember roots */
+  for (int x = 2; x < jank_img_w; x++) {
+    int flame = (int)jank_flame_root[x];
+    flame += GetRandomValue(0, 2);
+    jank_flame_root[x] = (flame > 255)? 255 : (unsigned char)flame;
+  }
+  /* seed the bottom row */
+  for (int x = 0; x < jank_img_w; x++)
+    jank_index_buffer[x + (jank_img_h - 1)*jank_img_w] = jank_flame_root[x];
+  /* the top row can't rise further */
+  for (int x = 0; x < jank_img_w; x++)
+    if (jank_index_buffer[x] != 0) jank_index_buffer[x] = 0;
+  /* rise with random drift + decay */
+  for (int y = 1; y < jank_img_h; y++) {
+    for (int x = 0; x < jank_img_w; x++) {
+      unsigned int i = x + y*jank_img_w;
+      unsigned char colorIndex = jank_index_buffer[i];
+      if (colorIndex != 0) {
+        jank_index_buffer[i] = 0;
+        int moveX = GetRandomValue(0, 2) - 1;
+        int newX = x + moveX;
+        if ((newX > 0) && (newX < jank_img_w)) {
+          unsigned int iabove = i - jank_img_w + moveX;
+          int decay = GetRandomValue(0, 3);
+          colorIndex -= (decay < colorIndex)? decay : colorIndex;
+          jank_index_buffer[iabove] = colorIndex;
+        }
+      }
+    }
+  }
+  /* palette blit */
+  for (int y = 1; y < jank_img_h; y++)
+    for (int x = 0; x < jank_img_w; x++)
+      ImageDrawPixel(screenImage, x, y, jank_palette[jank_index_buffer[x + y*jank_img_w]]);
+}
+static void jank_update_screen_texture(Texture2D tex, Image *img) {
+  UpdateTexture(tex, img->data);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - screen buffer (jank)")
+
+  ;; the software buffer runs at half resolution, drawn at 2x
+  (let [img-w (int (quot WIDTH 2))
+        img-h (int (quot HEIGHT 2))
+        screen-image (cpp/GenImageColor img-w img-h cpp/BLACK)
+        screen-texture (cpp/LoadTextureFromImage screen-image)]
+
+    (cpp/jank_flame_init img-w img-h)
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/jank_flame_step (cpp/& screen-image))
+        (cpp/jank_update_screen_texture screen-texture (cpp/& screen-image))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/DrawTextureEx screen-texture
+                           (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 0.0) (cpp/float 2.0) cpp/WHITE)
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/jank_flame_free)
+    (cpp/UnloadTexture screen-texture)
+    (cpp/UnloadImage screen-image))
+
+  (cpp/CloseWindow))

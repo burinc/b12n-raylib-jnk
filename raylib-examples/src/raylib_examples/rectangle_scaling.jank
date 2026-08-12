@@ -1,0 +1,63 @@
+(ns raylib-examples.rectangle-scaling
+  "raylib [shapes] example - rectangle scaling, ported to jank.
+
+  Drag the bottom-right corner mark to resize the rectangle. Q quits.
+  Based on raylib/examples/shapes/shapes_rectangle_scaling.c
+  (jank-native: Rectangle + Vector2 built inline for CheckCollisionPointRec
+  and DrawTriangle)."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RX 100.0)             ; rectangle top-left is fixed
+(def RY 100.0)
+(def MARK 12.0)            ; size of the corner grab mark
+
+(defn clamp [v lo hi] (max lo (min hi v)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - rectangle scaling (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread the rectangle size + whether we're mid-drag.
+  (loop [w 200.0 h 80.0 mode false]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+            over-mark (cpp/CheckCollisionPointRec
+                       (cpp/Vector2 (cpp/float mx) (cpp/float my))
+                       (cpp/Rectangle (cpp/float (- (+ RX w) MARK))
+                                      (cpp/float (- (+ RY h) MARK))
+                                      (cpp/float MARK) (cpp/float MARK)))
+            pressed  (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+            released (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT)
+            mode    (if (and over-mark pressed) true mode)
+            ;; While scaling, size follows the mouse (clamped to sane bounds).
+            w       (if mode (clamp (- mx RX) MARK (- WIDTH RX)) w)
+            h       (if mode (clamp (- my RY) MARK (- HEIGHT RY)) h)
+            ready?  (if mode true over-mark)
+            mode    (if (and mode released) false mode)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "Scale the rectangle by dragging its bottom-right corner! Q quits."
+                      10 10 20 cpp/GRAY)
+
+        (cpp/DrawRectangle (int RX) (int RY) (int w) (int h)
+                           (cpp/Fade cpp/GREEN (cpp/float 0.5)))
+
+        (when ready?
+          (cpp/DrawRectangleLines (int RX) (int RY) (int w) (int h) cpp/RED)
+          (cpp/DrawTriangle (cpp/Vector2 (cpp/float (- (+ RX w) MARK)) (cpp/float (+ RY h)))
+                            (cpp/Vector2 (cpp/float (+ RX w)) (cpp/float (+ RY h)))
+                            (cpp/Vector2 (cpp/float (+ RX w)) (cpp/float (- (+ RY h) MARK)))
+                            cpp/RED))
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur w h mode)))))
+
+  (cpp/CloseWindow))

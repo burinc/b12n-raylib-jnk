@@ -1,0 +1,93 @@
+(ns raylib-examples.image-drawing
+  "raylib [textures] example - image drawing, ported to jank.
+
+  One texture composed from several CPU images: a cat is cropped,
+  flipped, resized and drawn onto the parrots image, which is then
+  cropped and decorated with a pixel, a circle outline, a rectangle,
+  and custom-font text - all before a single LoadTextureFromImage.
+  Q quits. Cat & parrots sprites by Eiden Marsal.
+  Based on raylib/examples/textures/textures_image_drawing.c (the
+  submodule's raylib 6.0 version, which uses ImageDraw - the newer
+  ImageDrawImagePro with origin+rotation isn't in the linked lib, and
+  with rotation 0 / origin 0 the two are equivalent).
+
+  jank-native: every pointer-taking Image* op forms its pointer with
+  (cpp/& img) on a mutable let-local (see the pointer-interop section of
+  docs/guide/jank-interop-lessons.md). The source `cat` image is passed
+  by value to ImageDraw. All setup runs once before the loop; only the
+  final texture is drawn each frame."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - image drawing (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [cat (cpp/LoadImage (str RES "cat.png"))]
+    (cpp/ImageCrop (cpp/& cat) (cpp/Rectangle (cpp/float 100.0) (cpp/float 10.0)
+                                              (cpp/float 280.0) (cpp/float 380.0)))
+    (cpp/ImageFlipHorizontal (cpp/& cat))
+    (cpp/ImageResize (cpp/& cat) 150 200)
+
+    (let [parrots (cpp/LoadImage (str RES "parrots.png"))
+          cw (int (+ 0.0 (.-width cat)))
+          ch (int (+ 0.0 (.-height cat)))]
+      ;; draw the cat over the parrots, scaled 1.5x
+      (cpp/ImageDraw (cpp/& parrots) cat
+                     (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                    (cpp/float (+ 0.0 cw)) (cpp/float (+ 0.0 ch)))
+                     (cpp/Rectangle (cpp/float 30.0) (cpp/float 40.0)
+                                    (cpp/float (* cw 1.5)) (cpp/float (* ch 1.5)))
+                     cpp/WHITE)
+
+      (let [pw (int (+ 0.0 (.-width parrots)))
+            ph (int (+ 0.0 (.-height parrots)))]
+        (cpp/ImageCrop (cpp/& parrots) (cpp/Rectangle (cpp/float 0.0) (cpp/float 50.0)
+                                                      (cpp/float (+ 0.0 pw))
+                                                      (cpp/float (+ 0.0 (- ph 100)))))
+        ;; a few in-image draw calls
+        (cpp/ImageDrawPixel (cpp/& parrots) 10 10 cpp/RAYWHITE)
+        (cpp/ImageDrawCircleLines (cpp/& parrots) 10 10 5 cpp/RAYWHITE)
+        (cpp/ImageDrawRectangle (cpp/& parrots) 5 20 10 10 cpp/RAYWHITE)
+        (cpp/UnloadImage cat)
+
+        (let [font (cpp/LoadFont (str RES "custom_jupiter_crash.png"))
+              bs (nth [(+ 0.0 (.-baseSize font))] 0)]
+          (cpp/ImageDrawTextEx (cpp/& parrots) font "PARROTS & CAT"
+                               (cpp/Vector2 (cpp/float 300.0) (cpp/float 230.0))
+                               (cpp/float bs) (cpp/float -2.0) cpp/WHITE)
+          (cpp/UnloadFont font)
+
+          (let [texture (cpp/LoadTextureFromImage parrots)
+                tw (int (+ 0.0 (.-width texture)))
+                th (int (+ 0.0 (.-height texture)))
+                tx (- (int (/ WIDTH 2)) (int (/ tw 2)))
+                ty (- (- (int (/ HEIGHT 2)) (int (/ th 2))) 40)]
+            (cpp/UnloadImage parrots)
+
+            (loop []
+              (when (cpp/! (cpp/WindowShouldClose))
+                (cpp/BeginDrawing)
+                (cpp/ClearBackground cpp/RAYWHITE)
+
+                (cpp/DrawTexture texture tx ty cpp/WHITE)
+                (cpp/DrawRectangleLines tx ty tw th cpp/DARKGRAY)
+
+                (cpp/DrawText "We are drawing only one texture from various images composed!"
+                              240 350 10 cpp/DARKGRAY)
+                (cpp/DrawText "Source images have been cropped, scaled, flipped and copied one over the other."
+                              190 370 10 cpp/DARKGRAY)
+                (cpp/DrawText "Q to quit" 10 10 10 cpp/GRAY)
+
+                (cpp/EndDrawing)
+
+                (when-not (cpp/IsKeyDown cpp/KEY_Q)
+                  (recur))))
+
+            (cpp/UnloadTexture texture))))))
+
+  (cpp/CloseWindow))

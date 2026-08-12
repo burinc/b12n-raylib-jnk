@@ -1,0 +1,126 @@
+(ns raylib-examples.basic-voxel
+  "raylib [models] example - basic voxel, ported to jank.
+
+  An 8x8x8 grid of beige cubes. Left-click a cube to cast a ray into the
+  world and remove the nearest hit voxel; LEFT/RIGHT spin the camera and R
+  refills the grid. ESC quits.
+  Based on raylib/examples/models/models_basic_voxel.c
+
+  jank-native notes (three forced substitutions, each with precedent):
+  - The C's `UpdateCamera(&camera, CAMERA_FIRST_PERSON)` takes a pointer
+    jank cannot form, so the camera is an ORBITAL one rebuilt inline each
+    frame from a jank-tracked angle (the billboard-rendering pattern).
+    Picking follows: instead of a fixed screen-centre crosshair the ray is
+    cast from the MOUSE position (the picking-3d pattern), which suits an
+    orbital view better.
+  - The C's `LoadModelFromMesh(GenMeshCube(...))` tinted BEIGE and drawn
+    with `DrawModel` is visually identical to a plain `DrawCube ... BEIGE`
+    (the mesh is untextured), so no Model/Mesh loading is needed - the one
+    blocker class left in `models`. `DrawCubeWires ... BLACK` outlines each.
+  - The `bool voxels[8][8][8]` becomes a flat 512-slot jank vector of bools
+    indexed by `x*64 + y*8 + z` (the fog-of-war flat-grid pattern); removal
+    is an `assoc idx false`. No native struct array, no ray/collision value
+    carried across frames - `.-hit`/`.-distance` are read into jank
+    bools/reals inside the pick loop and discarded."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def N 8)                       ; world is N x N x N voxels
+(def NCELLS (* N N N))          ; 512
+(def CENTER (* 0.5 (dec N)))    ; 3.5 - orbit target / world centre
+(def ORBIT-R 16.0)              ; camera distance from centre
+(def ORBIT-Y 11.0)              ; camera height
+
+(defn- idx->xyz
+  "Decode a flat voxel index into its integer [x y z] (rule 3: quot returns
+  a real, so cast each component back to int)."
+  [idx]
+  (let [x (int (quot idx 64))
+        r (- idx (* x 64))
+        y (int (quot r 8))
+        z (- r (* y 8))]
+    [x y z]))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - basic voxel (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; state: the voxel grid (flat vector of bools) and the orbit angle.
+  (loop [voxels (vec (repeat NCELLS true))
+         angle 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [;; auto-orbit, faster while an arrow key is held
+            angle (+ angle (cond (cpp/IsKeyDown cpp/KEY_RIGHT) 0.03
+                                 (cpp/IsKeyDown cpp/KEY_LEFT) -0.03
+                                 :else 0.006))
+            reset? (cpp/IsKeyPressed cpp/KEY_R)
+            cx (+ CENTER (* ORBIT-R (cpp/cos angle)))
+            cz (+ CENTER (* ORBIT-R (cpp/sin angle)))
+            camera (cpp/Camera3D
+                    (cpp/Vector3 (cpp/float cx) (cpp/float ORBIT-Y) (cpp/float cz))
+                    (cpp/Vector3 (cpp/float CENTER) (cpp/float CENTER) (cpp/float CENTER))
+                    (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                    (cpp/float 45.0)
+                    cpp/CAMERA_PERSPECTIVE)
+
+            ;; left-click: ray from the mouse, remove the nearest hit voxel
+            voxels (cond
+                     reset? (vec (repeat NCELLS true))
+                     (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+                     (let [ray (cpp/GetScreenToWorldRay (cpp/GetMousePosition) camera)
+                           best (loop [idx 0 hit-idx -1 best-d 1000000.0]
+                                  (if (< idx NCELLS)
+                                    (if (nth voxels idx)
+                                      (let [[x y z] (idx->xyz idx)
+                                            box (cpp/BoundingBox
+                                                 (cpp/Vector3 (cpp/float (- (+ 0.0 x) 0.5))
+                                                              (cpp/float (- (+ 0.0 y) 0.5))
+                                                              (cpp/float (- (+ 0.0 z) 0.5)))
+                                                 (cpp/Vector3 (cpp/float (+ x 0.5))
+                                                              (cpp/float (+ y 0.5))
+                                                              (cpp/float (+ z 0.5))))
+                                            coll (cpp/GetRayCollisionBox ray box)
+                                            d (+ 0.0 (.-distance coll))]
+                                        ;; nested ifs, not `and`: `and` unifies
+                                        ;; its branch types and (.-hit coll) is a
+                                        ;; `bool &` ref while (< d best-d) is a plain
+                                        ;; bool - a Mismatched-if-types clash.
+                                        (if (.-hit coll)
+                                          (if (< d best-d)
+                                            (recur (inc idx) idx d)
+                                            (recur (inc idx) hit-idx best-d))
+                                          (recur (inc idx) hit-idx best-d)))
+                                      (recur (inc idx) hit-idx best-d))
+                                    hit-idx))]
+                       (if (>= best 0) (assoc voxels best false) voxels))
+                     :else voxels)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+
+        ;; draw every present voxel as a beige cube with a black wire outline
+        (loop [idx 0]
+          (when (< idx NCELLS)
+            (when (nth voxels idx)
+              (let [[x y z] (idx->xyz idx)
+                    pos (cpp/Vector3 (cpp/float (+ 0.0 x)) (cpp/float (+ 0.0 y)) (cpp/float (+ 0.0 z)))]
+                (cpp/DrawCube pos (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0) cpp/BEIGE)
+                (cpp/DrawCubeWires pos (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0) cpp/BLACK)))
+            (recur (inc idx))))
+
+        (cpp/EndMode3D)
+
+        (cpp/DrawText "Left-click a voxel to remove it!" 10 10 20 cpp/DARKGRAY)
+        (cpp/DrawText "LEFT/RIGHT spin the camera, R refills, ESC quits" 10 35 10 cpp/GRAY)
+        (cpp/DrawFPS (- WIDTH 90) 10)
+
+        (cpp/EndDrawing)
+
+        (recur voxels angle))))
+
+  (cpp/CloseWindow))

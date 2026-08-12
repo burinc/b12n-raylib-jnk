@@ -1,0 +1,158 @@
+(ns raylib-examples.window-flags
+  "raylib [core] example - window flags, ported to jank.
+
+  Toggle window state flags live and watch the effect. A ball bounces
+  inside the frame so resizing/maximizing is obvious. Keys:
+    F fullscreen   R resizable   D undecorated   H hide (3s)
+    N minimize (3s)   M maximize   U unfocused    T topmost
+    A always-run   V vsync        B borderless    ESC quit
+  Some flags (HIGHDPI, TRANSPARENT, MSAA) can only be set before window
+  creation, so they stay off here.
+  Based on raylib/examples/core/core_window_flags.c
+
+  jank-native notes: every function here is by-value or no-arg, so the
+  port is a straight transcription. The bouncing ball can't be a native
+  Vector2 in loop/recur state (rule 2), so its position/speed are plain
+  jank reals and the Vector2 is built inline at the DrawCircleV call."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RADIUS 20.0)
+
+(defn -main [& args]
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - window flags (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; state: ball x/y, ball speed x/y, frames counter (for hide/minimize timers)
+  (loop [bx (/ WIDTH 2.0) by (/ HEIGHT 2.0) svx 5.0 svy 4.0 fc 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      ;; --- flag toggles ---
+      (when (cpp/IsKeyPressed cpp/KEY_F) (cpp/ToggleFullscreen))
+      (when (cpp/IsKeyPressed cpp/KEY_R)
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_RESIZABLE)
+          (cpp/ClearWindowState cpp/FLAG_WINDOW_RESIZABLE)
+          (cpp/SetWindowState cpp/FLAG_WINDOW_RESIZABLE)))
+      (when (cpp/IsKeyPressed cpp/KEY_D)
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_UNDECORATED)
+          (cpp/ClearWindowState cpp/FLAG_WINDOW_UNDECORATED)
+          (cpp/SetWindowState cpp/FLAG_WINDOW_UNDECORATED)))
+      (when (cpp/IsKeyPressed cpp/KEY_U)
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_UNFOCUSED)
+          (cpp/ClearWindowState cpp/FLAG_WINDOW_UNFOCUSED)
+          (cpp/SetWindowState cpp/FLAG_WINDOW_UNFOCUSED)))
+      (when (cpp/IsKeyPressed cpp/KEY_T)
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_TOPMOST)
+          (cpp/ClearWindowState cpp/FLAG_WINDOW_TOPMOST)
+          (cpp/SetWindowState cpp/FLAG_WINDOW_TOPMOST)))
+      (when (cpp/IsKeyPressed cpp/KEY_A)
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_ALWAYS_RUN)
+          (cpp/ClearWindowState cpp/FLAG_WINDOW_ALWAYS_RUN)
+          (cpp/SetWindowState cpp/FLAG_WINDOW_ALWAYS_RUN)))
+      (when (cpp/IsKeyPressed cpp/KEY_V)
+        (if (cpp/IsWindowState cpp/FLAG_VSYNC_HINT)
+          (cpp/ClearWindowState cpp/FLAG_VSYNC_HINT)
+          (cpp/SetWindowState cpp/FLAG_VSYNC_HINT)))
+      (when (cpp/IsKeyPressed cpp/KEY_B) (cpp/ToggleBorderlessWindowed))
+      (when (cpp/IsKeyPressed cpp/KEY_M)
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_MAXIMIZED)
+          (cpp/RestoreWindow)
+          (cpp/MaximizeWindow)))
+
+      (let [;; H hides the window for 3 seconds (240 frames at 60 FPS)
+            h? (cpp/IsKeyPressed cpp/KEY_H)
+            _  (when h?
+                 (when (cpp/! (cpp/IsWindowState cpp/FLAG_WINDOW_HIDDEN))
+                   (cpp/SetWindowState cpp/FLAG_WINDOW_HIDDEN)))
+            ;; N minimizes for 3 seconds
+            n? (cpp/IsKeyPressed cpp/KEY_N)
+            _  (when n?
+                 (when (cpp/! (cpp/IsWindowState cpp/FLAG_WINDOW_MINIMIZED))
+                   (cpp/MinimizeWindow)))
+            fc (if (or h? n?) 0 fc)                       ; reset timer on H/N
+            ;; hidden auto-restore
+            hidden? (cpp/IsWindowState cpp/FLAG_WINDOW_HIDDEN)
+            fc (if hidden? (+ fc 1) fc)
+            _  (when (and hidden? (>= fc 240))
+                 (cpp/ClearWindowState cpp/FLAG_WINDOW_HIDDEN))
+            ;; minimized auto-restore
+            min? (cpp/IsWindowState cpp/FLAG_WINDOW_MINIMIZED)
+            fc (if min? (+ fc 1) fc)
+            restore? (and min? (>= fc 240))
+            _  (when restore? (cpp/RestoreWindow))
+            fc (if restore? 0 fc)
+
+            ;; --- bouncing ball ---
+            bx (+ bx svx)
+            by (+ by svy)
+            sw (int (cpp/GetScreenWidth))
+            sh (int (cpp/GetScreenHeight))
+            svx (if (or (>= bx (- sw RADIUS)) (<= bx RADIUS)) (* svx -1.0) svx)
+            svy (if (or (>= by (- sh RADIUS)) (<= by RADIUS)) (* svy -1.0) svy)]
+
+        (cpp/BeginDrawing)
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_TRANSPARENT)
+          (cpp/ClearBackground cpp/BLANK)
+          (cpp/ClearBackground cpp/RAYWHITE))
+
+        (cpp/DrawCircleV (cpp/Vector2 (cpp/float bx) (cpp/float by))
+                         (cpp/float RADIUS) cpp/MAROON)
+        (cpp/DrawRectangleLinesEx (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                                 (cpp/float (+ 0.0 sw)) (cpp/float (+ 0.0 sh)))
+                                  (cpp/float 4.0) cpp/RAYWHITE)
+        (cpp/DrawCircleV (cpp/GetMousePosition) (cpp/float 10.0) cpp/DARKBLUE)
+        (cpp/DrawFPS 10 10)
+        (cpp/DrawText (str "Screen Size: [" sw ", " sh "]") 10 40 10 cpp/GREEN)
+
+        ;; --- flag state readout (green = on, red = off) ---
+        (cpp/DrawText "Following flags can be set after window creation:" 10 60 10 cpp/GRAY)
+        (if (cpp/IsWindowState cpp/FLAG_FULLSCREEN_MODE)
+          (cpp/DrawText "[F] FLAG_FULLSCREEN_MODE: on" 10 80 10 cpp/LIME)
+          (cpp/DrawText "[F] FLAG_FULLSCREEN_MODE: off" 10 80 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_RESIZABLE)
+          (cpp/DrawText "[R] FLAG_WINDOW_RESIZABLE: on" 10 100 10 cpp/LIME)
+          (cpp/DrawText "[R] FLAG_WINDOW_RESIZABLE: off" 10 100 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_UNDECORATED)
+          (cpp/DrawText "[D] FLAG_WINDOW_UNDECORATED: on" 10 120 10 cpp/LIME)
+          (cpp/DrawText "[D] FLAG_WINDOW_UNDECORATED: off" 10 120 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_HIDDEN)
+          (cpp/DrawText "[H] FLAG_WINDOW_HIDDEN: on" 10 140 10 cpp/LIME)
+          (cpp/DrawText "[H] FLAG_WINDOW_HIDDEN: off (hides for 3 seconds)" 10 140 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_MINIMIZED)
+          (cpp/DrawText "[N] FLAG_WINDOW_MINIMIZED: on" 10 160 10 cpp/LIME)
+          (cpp/DrawText "[N] FLAG_WINDOW_MINIMIZED: off (restores after 3 seconds)" 10 160 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_MAXIMIZED)
+          (cpp/DrawText "[M] FLAG_WINDOW_MAXIMIZED: on" 10 180 10 cpp/LIME)
+          (cpp/DrawText "[M] FLAG_WINDOW_MAXIMIZED: off" 10 180 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_UNFOCUSED)
+          (cpp/DrawText "[U] FLAG_WINDOW_UNFOCUSED: on" 10 200 10 cpp/LIME)
+          (cpp/DrawText "[U] FLAG_WINDOW_UNFOCUSED: off" 10 200 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_TOPMOST)
+          (cpp/DrawText "[T] FLAG_WINDOW_TOPMOST: on" 10 220 10 cpp/LIME)
+          (cpp/DrawText "[T] FLAG_WINDOW_TOPMOST: off" 10 220 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_ALWAYS_RUN)
+          (cpp/DrawText "[A] FLAG_WINDOW_ALWAYS_RUN: on" 10 240 10 cpp/LIME)
+          (cpp/DrawText "[A] FLAG_WINDOW_ALWAYS_RUN: off" 10 240 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_VSYNC_HINT)
+          (cpp/DrawText "[V] FLAG_VSYNC_HINT: on" 10 260 10 cpp/LIME)
+          (cpp/DrawText "[V] FLAG_VSYNC_HINT: off" 10 260 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_BORDERLESS_WINDOWED_MODE)
+          (cpp/DrawText "[B] FLAG_BORDERLESS_WINDOWED_MODE: on" 10 280 10 cpp/LIME)
+          (cpp/DrawText "[B] FLAG_BORDERLESS_WINDOWED_MODE: off" 10 280 10 cpp/MAROON))
+
+        (cpp/DrawText "Following flags can only be set before window creation:" 10 320 10 cpp/GRAY)
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_HIGHDPI)
+          (cpp/DrawText "FLAG_WINDOW_HIGHDPI: on" 10 340 10 cpp/LIME)
+          (cpp/DrawText "FLAG_WINDOW_HIGHDPI: off" 10 340 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_WINDOW_TRANSPARENT)
+          (cpp/DrawText "FLAG_WINDOW_TRANSPARENT: on" 10 360 10 cpp/LIME)
+          (cpp/DrawText "FLAG_WINDOW_TRANSPARENT: off" 10 360 10 cpp/MAROON))
+        (if (cpp/IsWindowState cpp/FLAG_MSAA_4X_HINT)
+          (cpp/DrawText "FLAG_MSAA_4X_HINT: on" 10 380 10 cpp/LIME)
+          (cpp/DrawText "FLAG_MSAA_4X_HINT: off" 10 380 10 cpp/MAROON))
+
+        (cpp/EndDrawing)
+
+        (recur bx by svx svy fc))))
+
+  (cpp/CloseWindow))

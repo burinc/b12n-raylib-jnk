@@ -1,0 +1,140 @@
+(ns raylib-examples.ball-physics
+  "raylib [shapes] example - ball physics, ported to jank.
+
+  Grab a ball with the mouse and throw it by releasing. Right-click to
+  spawn a new ball, mouse wheel changes gravity, middle-click shakes.
+  Q quits. Based on raylib/examples/shapes/shapes_ball_physics.c
+  (jank-native: C hypot, ColorFromHSV per-ball hue, scalar drawing)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def FRICTION 0.99)
+(def ELAST 0.9)
+(def MAX-BALLS 300)
+
+(defn make-ball [x y]
+  {:x x :y y
+   :vx (- (cpp/GetRandomValue 0 600) 300)
+   :vy (- (cpp/GetRandomValue 0 600) 300)
+   :px x :py y
+   :radius (+ 20.0 (cpp/GetRandomValue 0 30))
+   :hue (+ 0.0 (cpp/GetRandomValue 0 359))})
+
+(defn clamp-ball [b]
+  (let [x (:x b) y (:y b) vx (:vx b) vy (:vy b) r (:radius b)
+        [x vx] (cond (>= (+ x r) WIDTH) [(- WIDTH r) (* (- vx) ELAST)]
+                     (<= (- x r) 0)     [r (* (- vx) ELAST)]
+                     :else              [x vx])
+        [y vy] (cond (>= (+ y r) HEIGHT) [(- HEIGHT r) (* (- vy) ELAST)]
+                     (<= (- y r) 0)      [r (* (- vy) ELAST)]
+                     :else               [y vy])]
+    (assoc b :x x :y y :vx vx :vy vy)))
+
+;; Matches shapes_ball_physics.c: friction scales velocity each frame and
+;; gravity is added straight to vy (not scaled by dt), position += speed*dt.
+(defn update-free [b dt gravity]
+  (clamp-ball
+   (assoc b
+          :x  (+ (:x b) (* (:vx b) dt))
+          :y  (+ (:y b) (* (:vy b) dt))
+          :vx (* (:vx b) FRICTION)
+          :vy (+ (* (:vy b) FRICTION) gravity))))
+
+(defn update-grabbed [b mx my offx offy dt]
+  (let [nx (- mx offx)
+        ny (- my offy)
+        d  (max dt 0.001)]
+    (assoc b :x nx :y ny :px nx :py ny
+             :vx (/ (- nx (:px b)) d)
+             :vy (/ (- ny (:py b)) d))))
+
+;; Topmost ball (highest index) under the cursor, or nil.
+(defn find-grab [balls mx my]
+  (loop [i (dec (count balls))]
+    (if (< i 0)
+      nil
+      (let [b (nth balls i)]
+        (if (<= (cpp/hypot (- mx (:x b)) (- my (:y b))) (:radius b))
+          i
+          (recur (dec i)))))))
+
+(defn update-balls [balls grabbed-idx mx my offx offy dt gravity]
+  (loop [i 0 acc []]
+    (if (< i (count balls))
+      (let [b (nth balls i)]
+        (recur (inc i)
+               (conj acc (if (= i grabbed-idx)
+                           (update-grabbed b mx my offx offy dt)
+                           (update-free b dt gravity)))))
+      acc)))
+
+(defn shake [balls]
+  (loop [i 0 acc []]
+    (if (< i (count balls))
+      (recur (inc i)
+             (conj acc (assoc (nth balls i)
+                              :vx (- (cpp/GetRandomValue 0 4000) 2000)
+                              :vy (- (cpp/GetRandomValue 0 4000) 2000))))
+      acc)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - ball physics (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; First ball matches the C original: blue, centered, speed 200/200, r=40.
+  (loop [balls       [{:x 400.0 :y 225.0 :vx 200 :vy 200 :px 0.0 :py 0.0
+                       :radius 40.0 :hue 210.0}]
+         grabbed-idx nil
+         offx        0
+         offy        0
+         gravity     100.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [dt    (cpp/GetFrameTime)
+            mx    (cpp/GetMouseX)
+            my    (cpp/GetMouseY)
+            wheel (cpp/GetMouseWheelMove)
+            ;; Grab the topmost ball on left-press.
+            [gi offx offy]
+            (if (and (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT) (nil? grabbed-idx))
+              (let [hit (find-grab balls mx my)]
+                (if hit
+                  [hit (- mx (:x (nth balls hit))) (- my (:y (nth balls hit)))]
+                  [grabbed-idx offx offy]))
+              [grabbed-idx offx offy])
+            gi      (if (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT) nil gi)
+            balls   (if (and (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_RIGHT)
+                             (< (count balls) MAX-BALLS))
+                      (conj balls (make-ball mx my))
+                      balls)
+            balls   (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_MIDDLE) (shake balls) balls)
+            gravity (+ gravity (* wheel 5.0))
+            balls   (update-balls balls gi mx my offx offy dt gravity)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (loop [i 0]
+          (when (< i (count balls))
+            (let [b (nth balls i)
+                  x (int (:x b))
+                  y (int (:y b))
+                  r (cpp/float (:radius b))]
+              (cpp/DrawCircle x y r
+                              (cpp/ColorFromHSV (cpp/float (:hue b)) (cpp/float 0.7) (cpp/float 0.9)))
+              (cpp/DrawCircleLines x y r cpp/BLACK))
+            (recur (inc i))))
+
+        (cpp/DrawText "Grab a ball with the mouse and release to throw" 10 10 10 cpp/DARKGRAY)
+        (cpp/DrawText "Right-click: new ball - Wheel: gravity - Middle: shake - Q: quit"
+                      10 28 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "BALLS: " (count balls)) 10 (- HEIGHT 60) 20 cpp/BLACK)
+        (cpp/DrawText (str "GRAVITY: " gravity) 10 (- HEIGHT 34) 20 cpp/BLACK)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur balls gi offx offy gravity)))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,143 @@
+(ns raylib-examples.cellular-automata
+  "raylib [textures] example - cellular automata, ported to jank.
+
+  A 1-D elementary cellular automaton (Wolfram rules) grown line by
+  line into an Image and streamed to a texture with UpdateTexture. Click
+  the eight rule-output bits to toggle them, or click a preset (18, 30,
+  60, ...) to load a classic rule; either resets the automaton. Q quits.
+  Based on raylib/examples/textures/textures_cellular_automata.c
+
+  jank-native: the automaton lives in one mutable Image (outer-let
+  local); each frame ComputeLine reads the previous row with
+  GetImageColor and writes the next with ImageDrawPixel through
+  (cpp/& image), then UpdateTexture streams image.data (a void*) to the
+  texture. Rule maths use jank's bit-and / bit-xor / bit-shift-* ops."
+  (:include "raylib.h"))
+
+(def SW 800)
+(def SH 450)
+(def IW 800)   ; image width
+(def IH 400)   ; image height (SH-ish; C uses 800/2)
+;; rule-editor button layout
+(def RSX 585) (def RSY 10) (def RSP 15) (def RGP 50) (def RS 14) (def RIS 10)
+;; preset button size
+(def PSX 42) (def PSY 22)
+(def LPF 4)    ; lines computed per frame
+(def PRESETS [18 30 60 86 102 124 126 150 182 225])
+
+;; Which button is the mouse over? -1 none, 0-7 rule-output cells, 8+ presets.
+(defn mouse-cell [mx my]
+  (loop [i 0]
+    (if (< i 8)
+      (let [cx (+ (- RSX (* RGP i)) RSP)
+            cy (+ RSY RSP)]
+        (if (and (>= mx cx) (<= mx (+ cx RS)) (>= my cy) (<= my (+ cy RS)))
+          i
+          (recur (inc i))))
+      (loop [k 0]
+        (if (< k 10)
+          (let [cx (int (+ 4 (* (+ PSX 2) (quot k 2))))
+                cy (int (+ 2 (* (+ PSY 2) (mod k 2))))]
+            (if (and (>= mx cx) (<= mx (+ cx PSX)) (>= my cy) (<= my (+ cy PSY)))
+              (+ k 8)
+              (recur (inc k))))
+          -1)))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow SW SH "raylib [textures] example - cellular automata (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [image (cpp/GenImageColor IW IH cpp/RAYWHITE)]
+    (cpp/ImageDrawPixel (cpp/& image) (int (/ IW 2)) 0 cpp/BLACK)
+    (let [texture (cpp/LoadTextureFromImage image)]
+
+      ;; loop state: current rule and the next line to compute.
+      (loop [rule 30 line 1]
+        (when (cpp/! (cpp/WindowShouldClose))
+          (let [mx (int (cpp/GetMouseX))
+                my (int (cpp/GetMouseY))
+                mic (mouse-cell mx my)
+                clicked? (and (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT) (>= mic 0))
+                rule (if clicked?
+                       (if (< mic 8)
+                         (bit-xor rule (bit-shift-left 1 mic))
+                         (nth PRESETS (- mic 8)))
+                       rule)]
+
+            ;; a click (bit toggle or preset) resets the automaton
+            (when clicked?
+              (cpp/ImageClearBackground (cpp/& image) cpp/RAYWHITE)
+              (cpp/ImageDrawPixel (cpp/& image) (int (/ IW 2)) 0 cpp/BLACK))
+
+            (let [line (if clicked? 1 line)]
+              ;; compute up to LPF new lines from the row above
+              (when (< line IH)
+                (loop [k 0]
+                  (when (and (< k LPF) (< (+ line k) IH))
+                    (let [ln (+ line k)]
+                      (loop [i 1]
+                        (when (< i (- IW 1))
+                          (let [pl (int (+ 0.0 (.-r (cpp/GetImageColor image (- i 1) (- ln 1)))))
+                                pc (int (+ 0.0 (.-r (cpp/GetImageColor image i (- ln 1)))))
+                                pr (int (+ 0.0 (.-r (cpp/GetImageColor image (+ i 1) (- ln 1)))))
+                                prev (+ (if (< pl 5) 4 0) (if (< pc 5) 2 0) (if (< pr 5) 1 0))
+                                on? (not (zero? (bit-and rule (bit-shift-left 1 prev))))]
+                            (cpp/ImageDrawPixel (cpp/& image) i ln (if on? cpp/BLACK cpp/RAYWHITE)))
+                          (recur (inc i)))))
+                    (recur (inc k))))
+                (cpp/UpdateTexture texture (.-data image)))
+
+              (let [line (if (< line IH) (+ line LPF) line)]
+
+                (cpp/BeginDrawing)
+                (cpp/ClearBackground cpp/RAYWHITE)
+
+                (cpp/DrawTexture texture 0 (- SH IH) cpp/WHITE)
+
+                ;; preset buttons
+                (loop [i 0]
+                  (when (< i 10)
+                    ;; quot/mod return reals in jank - int-wrap before cpp int args
+                    (let [bx (int (+ 4 (* (+ PSX 2) (quot i 2))))
+                          by (int (+ 2 (* (+ PSY 2) (mod i 2))))]
+                      (cpp/DrawText (str (nth PRESETS i)) (+ bx 4) (+ by 2) 20 cpp/GRAY)
+                      (cpp/DrawRectangleLines bx by PSX PSY cpp/BLUE)
+                      (when (= mic (+ i 8))
+                        (cpp/DrawRectangleLinesEx
+                         (cpp/Rectangle (cpp/float (+ 0.0 (- bx 2))) (cpp/float (+ 0.0 (- by 2)))
+                                        (cpp/float (+ 0.0 (+ PSX 4))) (cpp/float (+ 0.0 (+ PSY 4))))
+                         (cpp/float 3.0) cpp/RED)))
+                    (recur (inc i))))
+
+                ;; rule bits: 3 input cells (fixed per row index) + 1 output cell
+                (loop [i 0]
+                  (when (< i 8)
+                    (loop [j 0]
+                      (when (< j 3)
+                        (cpp/DrawRectangleLines (+ (- RSX (* RGP i)) (* RSP j)) RSY RS RS cpp/GRAY)
+                        (when (not (zero? (bit-and i (bit-shift-right 4 j))))
+                          (cpp/DrawRectangle (+ (- (+ RSX 2) (* RGP i)) (* RSP j)) (+ RSY 2) RIS RIS cpp/BLACK))
+                        (recur (inc j))))
+                    (cpp/DrawRectangleLines (+ (- RSX (* RGP i)) RSP) (+ RSY RSP) RS RS cpp/BLUE)
+                    (when (not (zero? (bit-and rule (bit-shift-left 1 i))))
+                      (cpp/DrawRectangle (+ (- (+ RSX 2) (* RGP i)) RSP) (+ (+ RSY 2) RSP) RIS RIS cpp/BLACK))
+                    (when (= mic i)
+                      (cpp/DrawRectangleLinesEx
+                       (cpp/Rectangle (cpp/float (+ 0.0 (- (+ (- RSX (* RGP i)) RSP) 2)))
+                                      (cpp/float (+ 0.0 (- (+ RSY RSP) 2)))
+                                      (cpp/float (+ 0.0 (+ RS 4))) (cpp/float (+ 0.0 (+ RS 4))))
+                       (cpp/float 3.0) cpp/RED))
+                    (recur (inc i))))
+
+                (cpp/DrawText (str "RULE: " rule) (+ RSX (* RSP 4)) (+ RSY 1) 30 cpp/GRAY)
+
+                (cpp/EndDrawing)
+
+                (when-not (cpp/IsKeyDown cpp/KEY_Q)
+                  (recur rule line)))))))
+
+      (cpp/UnloadTexture texture)
+      (cpp/UnloadImage image)))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,87 @@
+(ns raylib-examples.input-gestures
+  "raylib [core] example - input gestures, ported to jank.
+
+  Mouse/touch gestures (tap, double-tap, hold, drag, swipes) detected
+  inside the test area are logged in a side panel while a circle follows
+  the touch point. Q quits.
+  Based on raylib/examples/core/core_input_gestures.c
+  (jank-native: gesture ids are compared as plain ints against the
+  raylib Gesture enum values, and the log is a jank vector of strings
+  capped at 20 entries like the C string array.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-STRINGS 20)
+
+(defn gesture-name
+  "Readable name for a raylib Gesture enum value (nil for none/unknown)."
+  [g]
+  (cond
+    (= g 1)   "GESTURE TAP"
+    (= g 2)   "GESTURE DOUBLETAP"
+    (= g 4)   "GESTURE HOLD"
+    (= g 8)   "GESTURE DRAG"
+    (= g 16)  "GESTURE SWIPE RIGHT"
+    (= g 32)  "GESTURE SWIPE LEFT"
+    (= g 64)  "GESTURE SWIPE UP"
+    (= g 128) "GESTURE SWIPE DOWN"
+    (= g 256) "GESTURE PINCH IN"
+    (= g 512) "GESTURE PINCH OUT"
+    :else nil))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - input gestures (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [gesture-log last-gesture].
+  (loop [log [] last 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [cur (int (cpp/GetGestureDetected))
+            tx  (+ 0.0 (cpp/GetTouchX))
+            ty  (+ 0.0 (cpp/GetTouchY))
+            in-area? (cpp/CheckCollisionPointRec
+                      (cpp/Vector2 (cpp/float tx) (cpp/float ty))
+                      (cpp/Rectangle (cpp/float 220.0) (cpp/float 10.0)
+                                     (cpp/float (- WIDTH 230.0))
+                                     (cpp/float (- HEIGHT 20.0))))
+            entry (if (and in-area? (not (= cur 0)) (not (= cur last)))
+                    (gesture-name cur)
+                    nil)
+            log (if entry (conj log entry) log)
+            log (if (>= (count log) MAX-STRINGS) [] log)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float 220.0) (cpp/float 10.0)
+                                             (cpp/float (- WIDTH 230.0))
+                                             (cpp/float (- HEIGHT 20.0)))
+                              cpp/GRAY)
+        (cpp/DrawRectangle 225 15 (- WIDTH 240) (- HEIGHT 30) cpp/RAYWHITE)
+        (cpp/DrawText "GESTURES TEST AREA" (- WIDTH 270) (- HEIGHT 40) 20
+                      (cpp/Fade cpp/GRAY (cpp/float 0.5)))
+
+        (loop [i 0]
+          (when (< i (count log))
+            (cpp/DrawRectangle 10 (+ 30 (* 20 i)) 200 20
+                               (cpp/Fade cpp/LIGHTGRAY
+                                         (cpp/float (if (= (int (mod i 2)) 0) 0.5 0.3))))
+            (cpp/DrawText (nth log i) 35 (+ 36 (* 20 i)) 10
+                          (if (< i (- (count log) 1)) cpp/DARKGRAY cpp/MAROON))
+            (recur (inc i))))
+
+        (cpp/DrawRectangleLines 10 29 200 (- HEIGHT 50) cpp/GRAY)
+        (cpp/DrawText "DETECTED GESTURES" 50 15 10 cpp/GRAY)
+
+        (when (not (= cur 0))
+          (cpp/DrawCircleV (cpp/Vector2 (cpp/float tx) (cpp/float ty))
+                           (cpp/float 30.0) cpp/MAROON))
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur log cur)))))
+
+  (cpp/CloseWindow))

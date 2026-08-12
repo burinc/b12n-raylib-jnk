@@ -1,0 +1,113 @@
+(ns raylib-examples.hilbert-curve
+  "raylib [shapes] example - hilbert curve, ported to jank.
+
+  A rainbow Hilbert space-filling curve, animated one stroke per frame
+  when regenerated. Z/X step the order (2-8), hold DOWN/UP for the
+  total size, LEFT/RIGHT for the line thickness; A toggles
+  animate-on-change, R redraws, Q quits.
+  Based on raylib/examples/shapes/shapes_hilbert_curve.c
+  (jank-native: the calloc'd Vector2* path becomes a vector of point
+  maps rebuilt on change; the C's bit ops become mod/quot/doubling,
+  and its switch case-2 fallthrough into case 1 is transcribed as
+  x+=len AND y+=len. Beware order 8 = 65536 strokes - it works, but
+  the full-path draw is heavy.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+;; Base U pattern for the two low bits of the stroke index.
+(def BASE [{:x 0.0 :y 0.0} {:x 0.0 :y 1.0} {:x 1.0 :y 1.0} {:x 1.0 :y 0.0}])
+
+(defn hilbert-step
+  "Unscaled Hilbert coordinates {:x :y} of stroke `index` at `order`.
+  Transcribes ComputeHilbertStep: at level j (len = 2^j) quadrant 0
+  swaps x/y, quadrant 1 shifts y, quadrant 2 shifts x AND y (the C
+  switch falls through), quadrant 3 rotates."
+  [order index]
+  (let [v (nth BASE (int (mod index 4)))]
+    (loop [j 1 idx index len 2.0 x (:x v) y (:y v)]
+      (if (< j order)
+        (let [idx (int (quot idx 4))
+              h (int (mod idx 4))]
+          (cond
+            (= h 0) (recur (inc j) idx (* len 2.0) y x)
+            (= h 1) (recur (inc j) idx (* len 2.0) x (+ y len))
+            (= h 2) (recur (inc j) idx (* len 2.0) (+ x len) (+ y len))
+            :else   (recur (inc j) idx (* len 2.0)
+                           (- (* 2.0 len) 1.0 y) (- len 1.0 x))))
+        {:x x :y y}))))
+
+(defn hilbert-path
+  "The full scaled path: N*N points, cell size size/N, centered in
+  each cell like LoadHilbertPath."
+  [order size]
+  (let [n (int (cpp/pow 2.0 (+ 0.0 order)))
+        cell (/ size n)
+        total (* n n)]
+    (loop [i 0 acc []]
+      (if (< i total)
+        (let [p (hilbert-step order i)]
+          (recur (inc i)
+                 (conj acc {:x (+ (* (:x p) cell) (/ cell 2.0))
+                            :y (+ (* (:y p) cell) (/ cell 2.0))})))
+        acc))))
+
+(defn adj
+  "Adjust v by step while dn/up are held/pressed, clamped to lo..hi."
+  [v dn up step lo hi]
+  (let [v (if dn (- v step) v)
+        v (if up (+ v step) v)]
+    (if (< v lo) lo (if (> v hi) hi v))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - hilbert curve (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [order size thick animate? path counter prev-order prev-size].
+  (loop [order 2 size 450.0 thick 2.0 anim? true
+         path (hilbert-path 2 450.0) counter 0 porder 2 psize 450]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [order (int (adj order (cpp/IsKeyPressed cpp/KEY_Z) (cpp/IsKeyPressed cpp/KEY_X) 1 2 8))
+            size (adj size (cpp/IsKeyDown cpp/KEY_DOWN) (cpp/IsKeyDown cpp/KEY_UP) 5.0 10.0 675.0)
+            thick (adj thick (cpp/IsKeyDown cpp/KEY_LEFT) (cpp/IsKeyDown cpp/KEY_RIGHT) 0.25 1.0 10.0)
+            anim? (if (cpp/IsKeyPressed cpp/KEY_A) (not anim?) anim?)
+            redraw? (cpp/IsKeyPressed cpp/KEY_R)
+
+            changed? (or (not (= order porder)) (not (= (int size) psize)) redraw?)
+            path (if changed? (hilbert-path order size) path)
+            total (count path)
+            counter (if changed? (if anim? 0 total) counter)
+
+            draw-max (if (< counter total) counter (- total 1))
+            counter (if (< counter total) (+ counter 1) counter)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (loop [i 1]
+          (when (<= i draw-max)
+            (let [p (nth path i) q (nth path (- i 1))]
+              (cpp/DrawLineEx (cpp/Vector2 (cpp/float (:x p)) (cpp/float (:y p)))
+                              (cpp/Vector2 (cpp/float (:x q)) (cpp/float (:y q)))
+                              (cpp/float thick)
+                              (cpp/ColorFromHSV (cpp/float (* (/ (+ 0.0 i) total) 360.0))
+                                                (cpp/float 1.0) (cpp/float 1.0))))
+            (recur (inc i))))
+
+        ;; The controls, as text.
+        (cpp/DrawText (str "Order: " order "  (Z/X)") 590 50 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Size: " (int size) "  (DOWN/UP)") 590 70 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Thickness: " thick "  (LEFT/RIGHT)") 590 90 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "[A] Animate on change: " (if anim? "ON" "OFF")) 590 110 10 cpp/DARKGRAY)
+        (cpp/DrawText "[R] redraw, [Q] quit" 590 130 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Strokes: " total) 590 150 10 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur order size thick anim? path counter
+                 (int order) (int size))))))
+
+  (cpp/CloseWindow))

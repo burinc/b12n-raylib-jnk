@@ -1,0 +1,84 @@
+(ns raylib-examples.raymarching
+  "raylib [shaders] example - raymarching rendering, ported to jank.
+
+  A raymarched scene (Inigo Quilez's SDF primitives, MIT) rendered
+  entirely in a fragment shader over a single full-screen rectangle.
+  The camera is a first-person fly-cam: move with W/A/S/D, look with
+  the mouse, Q/E down/up. ESC quits (cursor is captured while running).
+  Based on raylib/examples/shaders/shaders_raymarching_rendering.c
+
+  jank-native notes:
+  - First VEC3 uniforms: the eye/target camera vectors. Rather than
+    read camera.position.x/y/z field-by-field in jank, a one-line C
+    shim (jank_set_view) takes the Camera3D pointer via (cpp/& camera)
+    - the proven camera-3d-free address-of - and pushes both VEC3s.
+  - runTime accumulates as a plain jank double threaded through recur;
+    the per-frame GetFrameTime is boxed via (+ 0.0 ...) before adding.
+  - Simplification vs the C: the window is a fixed size, so the
+    resolution uniform is set once and the FLAG_WINDOW_RESIZABLE /
+    IsWindowResized re-send path is dropped."
+  (:include "raylib.h"))
+
+;; Push the two view VEC3 uniforms straight from the camera struct;
+;; jank can't read nested native fields as ergonomically as C can.
+(cpp/raw "static void jank_set_view(Shader s, int eyeLoc, int centerLoc, Camera3D* c) {
+  float eye[3]    = { c->position.x, c->position.y, c->position.z };
+  float center[3] = { c->target.x,   c->target.y,   c->target.z };
+  SetShaderValue(s, eyeLoc,    eye,    SHADER_UNIFORM_VEC3);
+  SetShaderValue(s, centerLoc, center, SHADER_UNIFORM_VEC3);
+}
+static void jank_set_vec2(Shader s, int loc, double a, double b) {
+  float v[2] = { (float)a, (float)b };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}
+static void jank_set_float(Shader s, int loc, double a) {
+  float v = (float)a;
+  SetShaderValue(s, loc, &v, SHADER_UNIFORM_FLOAT);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - raymarching rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 2.5) (cpp/float 2.5) (cpp/float 3.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.7))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 65.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/raymarching.fs"))
+        eye-loc (int (cpp/GetShaderLocation shader "viewEye"))
+        center-loc (int (cpp/GetShaderLocation shader "viewCenter"))
+        runtime-loc (int (cpp/GetShaderLocation shader "runTime"))
+        resolution-loc (int (cpp/GetShaderLocation shader "resolution"))]
+    (cpp/jank_set_vec2 shader resolution-loc (+ 0.0 WIDTH) (+ 0.0 HEIGHT))
+    (cpp/DisableCursor)
+    (cpp/SetTargetFPS 60)
+
+    ;; runTime drives the shader's animation; thread it as a jank double.
+    (loop [run-time 0.0]
+      (if (cpp/! (cpp/WindowShouldClose))
+        (let [_ (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FIRST_PERSON)
+              run-time (+ run-time (+ 0.0 (cpp/GetFrameTime)))]
+          (cpp/jank_set_view shader eye-loc center-loc (cpp/& camera))
+          (cpp/jank_set_float shader runtime-loc run-time)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; The whole frame is generated in the shader over one rectangle.
+          (cpp/BeginShaderMode shader)
+          (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/WHITE)
+          (cpp/EndShaderMode)
+
+          (cpp/DrawText "(c) Raymarching shader by Inigo Quilez. MIT License."
+                        (- WIDTH 280) (- HEIGHT 20) 10 cpp/BLACK)
+          (cpp/EndDrawing)
+
+          (recur run-time))
+        (cpp/UnloadShader shader))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,224 @@
+(ns raylib-examples.mesh-picking
+  "raylib [models] example - mesh picking, ported to jank.
+
+  A mouse ray tested against everything in the scene - ground quad,
+  a triangle, a wire sphere, the turret's bounding box and then its
+  actual MESH triangles - with the closest hit marked by a cube, its
+  surface normal drawn, and hit details printed. RIGHT CLICK toggles
+  first-person camera control. ESC quits.
+  Based on raylib/examples/models/models_mesh_picking.c
+
+  jank-native notes:
+  - The C accumulates the closest hit by reassigning a RayCollision
+    struct; here each native result is BOXED into a jank map the
+    moment it's read (hit?/dist/point/normal as reals) and the
+    closest-hit logic runs over plain jank data, in the C's order.
+  - The per-mesh loop (tower.meshes[m] + tower.transform) stays a
+    RayCollision-returning C shim, first-hit-wins like the C.
+  - GetRayCollisionQuad/Triangle/Sphere with inline Vector3 args and
+    Vector3Barycenter on the native point complete the collision-API
+    coverage."
+  (:require [clojure.string :as string])
+  (:include "raylib.h" "raymath.h"))
+
+;; Material texture write + the C's per-mesh collision loop.
+(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}
+static BoundingBox jank_model_bounds(Model* m) {
+  return GetMeshBoundingBox(m->meshes[0]);
+}
+static RayCollision jank_ray_vs_model(Ray ray, Model* m) {
+  RayCollision meshHitInfo = { 0 };
+  for (int i = 0; i < m->meshCount; i++) {
+    meshHitInfo = GetRayCollisionMesh(ray, m->meshes[i], m->transform);
+    if (meshHitInfo.hit) break;
+  }
+  return meshHitInfo;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn- fmt2
+  "The C's %3.2f, via trimming str two digits past the dot."
+  [v]
+  (let [s (str v)
+        dot (string/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
+
+(defn- closer
+  "Adopt the candidate hit when it is real and closer than the best."
+  [best candidate]
+  (if (and (:hit? candidate) (< (:dist candidate) (:dist best)))
+    candidate
+    best))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - mesh picking (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 20.0) (cpp/float 20.0) (cpp/float 20.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 8.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.6) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        tower (cpp/LoadModel (str RES "models/obj/turret.obj"))
+        texture (cpp/LoadTexture (str RES "models/obj/turret_diffuse.png"))
+        bounds (cpp/jank_model_bounds (cpp/& tower))]
+
+    (cpp/jank_model_set_texture (cpp/& tower) texture)
+
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (when (cpp/IsCursorHidden)
+          (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FIRST_PERSON))
+        (when (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_RIGHT)
+          (if (cpp/IsCursorHidden)
+            (cpp/EnableCursor)
+            (cpp/DisableCursor)))
+
+        (let [ray (cpp/GetScreenToWorldRay (cpp/GetMousePosition) camera)
+
+              ;; each native RayCollision boxed to jank data immediately
+              gc (cpp/GetRayCollisionQuad ray
+                                          (cpp/Vector3 (cpp/float -50.0) (cpp/float 0.0) (cpp/float -50.0))
+                                          (cpp/Vector3 (cpp/float -50.0) (cpp/float 0.0) (cpp/float 50.0))
+                                          (cpp/Vector3 (cpp/float 50.0) (cpp/float 0.0) (cpp/float 50.0))
+                                          (cpp/Vector3 (cpp/float 50.0) (cpp/float 0.0) (cpp/float -50.0)))
+              gp (.-point gc)
+              gn (.-normal gc)
+              ground {:hit? (if (.-hit gc) true false)
+                      :dist (+ 0.0 (.-distance gc))
+                      :px (+ 0.0 (.-x gp)) :py (+ 0.0 (.-y gp)) :pz (+ 0.0 (.-z gp))
+                      :nx (+ 0.0 (.-x gn)) :ny (+ 0.0 (.-y gn)) :nz (+ 0.0 (.-z gn))
+                      :name "Ground"}
+
+              tc (cpp/GetRayCollisionTriangle ray
+                                              (cpp/Vector3 (cpp/float -25.0) (cpp/float 0.5) (cpp/float 0.0))
+                                              (cpp/Vector3 (cpp/float -4.0) (cpp/float 2.5) (cpp/float 1.0))
+                                              (cpp/Vector3 (cpp/float -8.0) (cpp/float 6.5) (cpp/float 0.0)))
+              tp (.-point tc)
+              tn (.-normal tc)
+              tri-bary (if (.-hit tc)
+                         (let [b (cpp/Vector3Barycenter (.-point tc)
+                                                        (cpp/Vector3 (cpp/float -25.0) (cpp/float 0.5) (cpp/float 0.0))
+                                                        (cpp/Vector3 (cpp/float -4.0) (cpp/float 2.5) (cpp/float 1.0))
+                                                        (cpp/Vector3 (cpp/float -8.0) (cpp/float 6.5) (cpp/float 0.0)))]
+                           [(+ 0.0 (.-x b)) (+ 0.0 (.-y b)) (+ 0.0 (.-z b))])
+                         [0.0 0.0 0.0])
+              triangle {:hit? (if (.-hit tc) true false)
+                        :dist (+ 0.0 (.-distance tc))
+                        :px (+ 0.0 (.-x tp)) :py (+ 0.0 (.-y tp)) :pz (+ 0.0 (.-z tp))
+                        :nx (+ 0.0 (.-x tn)) :ny (+ 0.0 (.-y tn)) :nz (+ 0.0 (.-z tn))
+                        :name "Triangle"}
+
+              sc (cpp/GetRayCollisionSphere ray
+                                            (cpp/Vector3 (cpp/float -30.0) (cpp/float 5.0) (cpp/float 5.0))
+                                            (cpp/float 4.0))
+              sp' (.-point sc)
+              sn (.-normal sc)
+              sphere {:hit? (if (.-hit sc) true false)
+                      :dist (+ 0.0 (.-distance sc))
+                      :px (+ 0.0 (.-x sp')) :py (+ 0.0 (.-y sp')) :pz (+ 0.0 (.-z sp'))
+                      :nx (+ 0.0 (.-x sn)) :ny (+ 0.0 (.-y sn)) :nz (+ 0.0 (.-z sn))
+                      :name "Sphere"}
+
+              bc (cpp/GetRayCollisionBox ray bounds)
+              bp (.-point bc)
+              bn (.-normal bc)
+              box {:hit? (if (.-hit bc) true false)
+                   :dist (+ 0.0 (.-distance bc))
+                   :px (+ 0.0 (.-x bp)) :py (+ 0.0 (.-y bp)) :pz (+ 0.0 (.-z bp))
+                   :nx (+ 0.0 (.-x bn)) :ny (+ 0.0 (.-y bn)) :nz (+ 0.0 (.-z bn))
+                   :name "Box"}
+
+              ;; closest-hit accumulation, in the C's order
+              best {:hit? false :dist 3.4e38 :name "None"}
+              best (closer best ground)
+              best (closer best triangle)
+              best (closer best sphere)
+              ;; the box gates the expensive mesh test; a mesh hit overrides
+              best (if (and (:hit? box) (< (:dist box) (:dist best)))
+                     (let [mc (cpp/jank_ray_vs_model ray (cpp/& tower))
+                           mp (.-point mc)
+                           mn (.-normal mc)]
+                       (if (.-hit mc)
+                         {:hit? true
+                          :dist (+ 0.0 (.-distance mc))
+                          :px (+ 0.0 (.-x mp)) :py (+ 0.0 (.-y mp)) :pz (+ 0.0 (.-z mp))
+                          :nx (+ 0.0 (.-x mn)) :ny (+ 0.0 (.-y mn)) :nz (+ 0.0 (.-z mn))
+                          :name "Mesh"}
+                         box))
+                     best)
+              hit-name (:name best)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+
+          (cpp/DrawModel tower
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+
+          ;; the test triangle
+          (cpp/DrawLine3D (cpp/Vector3 (cpp/float -25.0) (cpp/float 0.5) (cpp/float 0.0))
+                          (cpp/Vector3 (cpp/float -4.0) (cpp/float 2.5) (cpp/float 1.0)) cpp/PURPLE)
+          (cpp/DrawLine3D (cpp/Vector3 (cpp/float -4.0) (cpp/float 2.5) (cpp/float 1.0))
+                          (cpp/Vector3 (cpp/float -8.0) (cpp/float 6.5) (cpp/float 0.0)) cpp/PURPLE)
+          (cpp/DrawLine3D (cpp/Vector3 (cpp/float -8.0) (cpp/float 6.5) (cpp/float 0.0))
+                          (cpp/Vector3 (cpp/float -25.0) (cpp/float 0.5) (cpp/float 0.0)) cpp/PURPLE)
+
+          ;; the test sphere
+          (cpp/DrawSphereWires (cpp/Vector3 (cpp/float -30.0) (cpp/float 5.0) (cpp/float 5.0))
+                               (cpp/float 4.0) 8 8 cpp/PURPLE)
+
+          (when (:hit? box)
+            (cpp/DrawBoundingBox bounds cpp/LIME))
+
+          ;; cursor cube + surface normal at the winning hit
+          (when (:hit? best)
+            (let [{:keys [px py pz nx ny nz name]} best]
+              ;; hand-nested ifs: cond's trailing nil clashes with Color (rule 1)
+              (cpp/DrawCube (cpp/Vector3 (cpp/float px) (cpp/float py) (cpp/float pz))
+                            (cpp/float 0.3) (cpp/float 0.3) (cpp/float 0.3)
+                            (if (= name "Ground") cpp/GREEN
+                                (if (= name "Triangle") cpp/PURPLE cpp/ORANGE)))
+              (cpp/DrawCubeWires (cpp/Vector3 (cpp/float px) (cpp/float py) (cpp/float pz))
+                                 (cpp/float 0.3) (cpp/float 0.3) (cpp/float 0.3) cpp/RED)
+              (cpp/DrawLine3D (cpp/Vector3 (cpp/float px) (cpp/float py) (cpp/float pz))
+                              (cpp/Vector3 (cpp/float (+ px nx)) (cpp/float (+ py ny)) (cpp/float (+ pz nz)))
+                              cpp/RED)))
+
+          (cpp/DrawRay ray cpp/MAROON)
+          (cpp/DrawGrid 10 (cpp/float 10.0))
+
+          (cpp/EndMode3D)
+
+          (cpp/DrawText (str "Hit Object: " hit-name) 10 50 10 cpp/BLACK)
+          (when (:hit? best)
+            (cpp/DrawText (str "Distance: " (fmt2 (:dist best))) 10 70 10 cpp/BLACK)
+            (cpp/DrawText (str "Hit Pos: " (fmt2 (:px best)) " " (fmt2 (:py best)) " " (fmt2 (:pz best)))
+                          10 85 10 cpp/BLACK)
+            (cpp/DrawText (str "Hit Norm: " (fmt2 (:nx best)) " " (fmt2 (:ny best)) " " (fmt2 (:nz best)))
+                          10 100 10 cpp/BLACK)
+            (when (and (:hit? triangle) (= hit-name "Triangle"))
+              (cpp/DrawText (str "Barycenter: " (fmt2 (nth tri-bary 0)) " "
+                                 (fmt2 (nth tri-bary 1)) " " (fmt2 (nth tri-bary 2)))
+                            10 115 10 cpp/BLACK)))
+
+          (cpp/DrawText "Right click mouse to toggle camera controls" 10 430 10 cpp/GRAY)
+          (cpp/DrawText "(c) Turret 3D model by Alberto Cano" (- WIDTH 200) (- HEIGHT 20) 10 cpp/GRAY)
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+          (recur))))
+
+    (cpp/UnloadModel tower)
+    (cpp/UnloadTexture texture))
+
+  (cpp/CloseWindow))

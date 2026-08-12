@@ -1,0 +1,79 @@
+(ns raylib-examples.geometric-shapes
+  "raylib [models] example - geometric shapes, ported to jank.
+
+  The first models-category port: a static 3D scene of cubes,
+  spheres, cylinders, cones and capsules (solid + wireframe) over a
+  grid, viewed through a fixed perspective camera. Q quits.
+  Based on raylib/examples/models/models_geometric_shapes.c
+  (jank-native: every Vector3 is constructed inline as a call
+  argument; the Camera3D is an outer-let local.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - geometric shapes (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 0.0) (cpp/float 10.0) (cpp/float 10.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)]
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+
+        (cpp/DrawCube (cpp/Vector3 (cpp/float -4.0) (cpp/float 0.0) (cpp/float 2.0))
+                      (cpp/float 2.0) (cpp/float 5.0) (cpp/float 2.0) cpp/RED)
+        (cpp/DrawCubeWires (cpp/Vector3 (cpp/float -4.0) (cpp/float 0.0) (cpp/float 2.0))
+                           (cpp/float 2.0) (cpp/float 5.0) (cpp/float 2.0) cpp/GOLD)
+        (cpp/DrawCubeWires (cpp/Vector3 (cpp/float -4.0) (cpp/float 0.0) (cpp/float -2.0))
+                           (cpp/float 3.0) (cpp/float 6.0) (cpp/float 2.0) cpp/MAROON)
+
+        (cpp/DrawSphere (cpp/Vector3 (cpp/float -1.0) (cpp/float 0.0) (cpp/float -2.0))
+                        (cpp/float 1.0) cpp/GREEN)
+        (cpp/DrawSphereWires (cpp/Vector3 (cpp/float 1.0) (cpp/float 0.0) (cpp/float 2.0))
+                             (cpp/float 2.0) 16 16 cpp/LIME)
+
+        (cpp/DrawCylinder (cpp/Vector3 (cpp/float 4.0) (cpp/float 0.0) (cpp/float -2.0))
+                          (cpp/float 1.0) (cpp/float 2.0) (cpp/float 3.0) 4 cpp/SKYBLUE)
+        (cpp/DrawCylinderWires (cpp/Vector3 (cpp/float 4.0) (cpp/float 0.0) (cpp/float -2.0))
+                               (cpp/float 1.0) (cpp/float 2.0) (cpp/float 3.0) 4 cpp/DARKBLUE)
+        (cpp/DrawCylinderWires (cpp/Vector3 (cpp/float 4.5) (cpp/float -1.0) (cpp/float 2.0))
+                               (cpp/float 1.0) (cpp/float 1.0) (cpp/float 2.0) 6 cpp/BROWN)
+
+        ;; A cone is a cylinder with a zero top radius.
+        (cpp/DrawCylinder (cpp/Vector3 (cpp/float 1.0) (cpp/float 0.0) (cpp/float -4.0))
+                          (cpp/float 0.0) (cpp/float 1.5) (cpp/float 3.0) 8 cpp/GOLD)
+        (cpp/DrawCylinderWires (cpp/Vector3 (cpp/float 1.0) (cpp/float 0.0) (cpp/float -4.0))
+                               (cpp/float 0.0) (cpp/float 1.5) (cpp/float 3.0) 8 cpp/PINK)
+
+        (cpp/DrawCapsule (cpp/Vector3 (cpp/float -3.0) (cpp/float 1.5) (cpp/float -4.0))
+                         (cpp/Vector3 (cpp/float -4.0) (cpp/float -1.0) (cpp/float -4.0))
+                         (cpp/float 1.2) 8 8 cpp/VIOLET)
+        (cpp/DrawCapsuleWires (cpp/Vector3 (cpp/float -3.0) (cpp/float 1.5) (cpp/float -4.0))
+                              (cpp/Vector3 (cpp/float -4.0) (cpp/float -1.0) (cpp/float -4.0))
+                              (cpp/float 1.2) 8 8 cpp/PURPLE)
+
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+
+        (cpp/EndMode3D)
+
+        (cpp/DrawFPS 10 10)
+        (cpp/DrawText "Q to quit" 10 40 10 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur))))
+
+    nil)
+
+  (cpp/CloseWindow))

@@ -1,0 +1,104 @@
+(ns raylib-examples.colors-palette
+  "raylib [shapes] example - colors palette, ported to jank.
+
+  Draws every named raylib color in a grid. Hover a swatch to highlight it
+  and show its name; hold SPACE to show all names. Press Q to quit.
+  Based on raylib/examples/shapes/shapes_colors_palette.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RECT-SIZE 100)
+(def RECT-SPACING 10)
+(def COLS 7)
+
+(def names
+  ["DARKGRAY" "MAROON" "ORANGE" "DARKGREEN" "DARKBLUE" "DARKPURPLE" "DARKBROWN"
+   "GRAY" "RED" "GOLD" "LIME" "BLUE" "VIOLET" "BROWN"
+   "LIGHTGRAY" "PINK" "YELLOW" "GREEN" "SKYBLUE" "PURPLE" "BEIGE"])
+
+;; NOTE: jank's `mod`/`quot` return reals, and raylib's Draw* take C ints, so
+;; wrap the results in `int` or the cpp call throws "expected integer found
+;; small_real" at runtime.
+(defn rect-x [i] (int (+ 20 (* (mod i COLS)  (+ RECT-SIZE RECT-SPACING)))))
+(defn rect-y [i] (int (+ 80 (* (quot i COLS) (+ RECT-SIZE RECT-SPACING)))))
+
+(defn hovered-index [mx my]
+  (loop [i 0]
+    (if (< i (count names))
+      (let [x (rect-x i)
+            y (rect-y i)]
+        (if (and (>= mx x) (<= mx (+ x RECT-SIZE))
+                 (>= my y) (<= my (+ y RECT-SIZE)))
+          i
+          (recur (inc i))))
+      -1)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - colors palette (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [hovered   (hovered-index (int (cpp/GetMouseX)) (int (cpp/GetMouseY)))
+            show-all? (cpp/IsKeyDown cpp/KEY_SPACE)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/DrawText "raylib colors palette (jank)" 28 42 20 cpp/BLACK)
+        (cpp/DrawText "hover a swatch - hold SPACE for all names - Q quits"
+                      28 (- HEIGHT 30) 10 cpp/GRAY)
+
+        (loop [i 0]
+         (when (< i (count names))
+          ;; jank statically type-checks each `if` branch and a jank function
+          ;; may not *return* a native `Color`, so we can't factor this into a
+          ;; `color-for` fn or a `cond` (whose implicit trailing `nil` clashes
+          ;; with `Color`). Instead we bind the Color to a local via a
+          ;; hand-nested `if` ending in a concrete Color - locals holding native
+          ;; values are fine (see the `color` binding in raylib-demo).
+          (let [x     (rect-x i)
+                y     (rect-y i)
+                name  (nth names i)
+                color (if (= i 0)  cpp/DARKGRAY
+                      (if (= i 1)  cpp/MAROON
+                      (if (= i 2)  cpp/ORANGE
+                      (if (= i 3)  cpp/DARKGREEN
+                      (if (= i 4)  cpp/DARKBLUE
+                      (if (= i 5)  cpp/DARKPURPLE
+                      (if (= i 6)  cpp/DARKBROWN
+                      (if (= i 7)  cpp/GRAY
+                      (if (= i 8)  cpp/RED
+                      (if (= i 9)  cpp/GOLD
+                      (if (= i 10) cpp/LIME
+                      (if (= i 11) cpp/BLUE
+                      (if (= i 12) cpp/VIOLET
+                      (if (= i 13) cpp/BROWN
+                      (if (= i 14) cpp/LIGHTGRAY
+                      (if (= i 15) cpp/PINK
+                      (if (= i 16) cpp/YELLOW
+                      (if (= i 17) cpp/GREEN
+                      (if (= i 18) cpp/SKYBLUE
+                      (if (= i 19) cpp/PURPLE
+                      cpp/BEIGE))))))))))))))))))))
+                hovered? (= i hovered)
+                show?    (or show-all? hovered?)]
+            (cpp/DrawRectangle x y RECT-SIZE RECT-SIZE color)
+            (when show?
+              (cpp/DrawRectangle x (+ y RECT-SIZE -26) RECT-SIZE 20 cpp/BLACK)
+              (let [tw (int (cpp/MeasureText name 10))]
+                (cpp/DrawText name (+ x RECT-SIZE (- tw) -12) (+ y RECT-SIZE -20) 10 color)))
+            (when hovered?
+              (cpp/DrawRectangle x y RECT-SIZE 3 cpp/BLACK)
+              (cpp/DrawRectangle x y 3 RECT-SIZE cpp/BLACK)
+              (cpp/DrawRectangle (+ x RECT-SIZE -3) y 3 RECT-SIZE cpp/BLACK)
+              (cpp/DrawRectangle x (+ y RECT-SIZE -3) RECT-SIZE 3 cpp/BLACK)))
+          (recur (inc i))))
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur)))))
+
+  (cpp/CloseWindow))

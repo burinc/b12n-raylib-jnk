@@ -1,0 +1,137 @@
+(ns raylib-examples.first-person-maze
+  "raylib [models] example - first person maze, ported to jank.
+
+  Walk around inside the cubicmap maze in first person (WASD + mouse
+  look); wall collision is a 2D circle-vs-cell test against the maze
+  image, and a red dot tracks you on the top-right radar map. ESC
+  quits.
+  Based on raylib/examples/models/models_first_person_maze.c
+
+  jank-native notes:
+  - The C's LoadImageColors Color* collision array becomes a jank
+    vector of 0/1 wall flags snapshotted at init through a one-line
+    GetImageColor shim (walls never change, so the pixel array need
+    not stay native).
+  - The collision response (camera.position = oldCamPos) is a
+    Camera3D-pointer shim; the old position is read field-by-field
+    off (.-position camera) into jank reals before UpdateCamera.
+  - Native bools stay out of and-chains: the CheckCollisionCircleRec
+    test nests in its own when (rule 1)."
+  (:include "raylib.h"))
+
+;; Wall lookup at init, collision-reset camera write, material texture write.
+(cpp/raw "static int jank_map_wall(Image img, int x, int y) {
+  return (GetImageColor(img, x, y).r == 255) ? 1 : 0;
+}
+static void jank_cam_set_pos(Camera3D* c, double x, double y, double z) {
+  c->position = (Vector3){ (float)x, (float)y, (float)z };
+}
+static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+;; mapPosition = {-16, 0, -8} (the maze model's world offset)
+(def MAP-X -16.0)
+(def MAP-Z -8.0)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - first person maze (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 0.2) (cpp/float 0.4) (cpp/float 0.2))
+                             (cpp/Vector3 (cpp/float 0.185) (cpp/float 0.4) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        im-map (cpp/LoadImage (str RES "cubicmap.png"))
+        cubicmap (cpp/LoadTextureFromImage im-map)
+        model (cpp/LoadModelFromMesh
+               (cpp/GenMeshCubicmap im-map
+                                    (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))))
+        texture (cpp/LoadTexture (str RES "cubicmap_atlas.png"))
+        mw (int (+ 0.0 (.-width cubicmap)))
+        mh (int (+ 0.0 (.-height cubicmap)))
+        ;; snapshot the wall grid (white pixel = wall) into jank data
+        walls (loop [i 0 acc []]
+                (if (< i (* mw mh))
+                  (recur (inc i)
+                         (conj acc (int (cpp/jank_map_wall im-map
+                                                           (int (mod i mw))
+                                                           (int (quot i mw))))))
+                  acc))]
+
+    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (cpp/UnloadImage im-map)
+
+    (cpp/DisableCursor)
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        ;; save the old position, then let the camera move
+        (let [old-pos (.-position camera)
+              old-x (+ 0.0 (.-x old-pos))
+              old-y (+ 0.0 (.-y old-pos))
+              old-z (+ 0.0 (.-z old-pos))]
+          (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FIRST_PERSON)
+
+          (let [new-pos (.-position camera)
+                px (+ 0.0 (.-x new-pos))
+                pz (+ 0.0 (.-z new-pos))
+                ;; clamp via ifs: jank's min/max reject a boxed int
+                ;; mixed with (int ...)'s unboxed long long
+                raw-x (int (+ (- px MAP-X) 0.5))
+                raw-y (int (+ (- pz MAP-Z) 0.5))
+                cell-x (if (< raw-x 0) 0 (if (>= raw-x mw) (dec mw) raw-x))
+                cell-y (if (< raw-y 0) 0 (if (>= raw-y mh) (dec mh) raw-y))]
+
+            ;; 2D collision against the 3x3 surrounding cells
+            (loop [y (dec cell-y)]
+              (when (<= y (inc cell-y))
+                (when (and (>= y 0) (< y mh))
+                  (loop [x (dec cell-x)]
+                    (when (<= x (inc cell-x))
+                      (when (and (>= x 0) (< x mw)
+                                 (= 1 (nth walls (+ (* y mw) x))))
+                        (when (cpp/CheckCollisionCircleRec
+                               (cpp/Vector2 (cpp/float px) (cpp/float pz))
+                               (cpp/float 0.1)
+                               (cpp/Rectangle (cpp/float (+ MAP-X -0.5 x))
+                                              (cpp/float (+ MAP-Z -0.5 y))
+                                              (cpp/float 1.0) (cpp/float 1.0)))
+                          (cpp/jank_cam_set_pos (cpp/& camera) old-x old-y old-z)))
+                      (recur (inc x)))))
+                (recur (inc y))))
+
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/RAYWHITE)
+
+            (cpp/BeginMode3D camera)
+            (cpp/DrawModel model
+                           (cpp/Vector3 (cpp/float MAP-X) (cpp/float 0.0) (cpp/float MAP-Z))
+                           (cpp/float 1.0) cpp/WHITE)
+            (cpp/EndMode3D)
+
+            ;; radar map: the maze image at 4x + the player cell in red
+            (cpp/DrawTextureEx cubicmap
+                               (cpp/Vector2 (cpp/float (+ 0.0 (- WIDTH (* mw 4) 20)))
+                                            (cpp/float 20.0))
+                               (cpp/float 0.0) (cpp/float 4.0) cpp/WHITE)
+            (cpp/DrawRectangleLines (- WIDTH (* mw 4) 20) 20 (* mw 4) (* mh 4) cpp/GREEN)
+            (cpp/DrawRectangle (+ (- WIDTH (* mw 4) 20) (* cell-x 4)) (+ 20 (* cell-y 4))
+                               4 4 cpp/RED)
+
+            (cpp/DrawFPS 10 10)
+
+            (cpp/EndDrawing)))
+        (recur)))
+
+    (cpp/UnloadTexture cubicmap)
+    (cpp/UnloadTexture texture)
+    (cpp/UnloadModel model))
+
+  (cpp/CloseWindow))

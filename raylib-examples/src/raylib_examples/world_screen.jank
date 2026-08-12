@@ -1,0 +1,62 @@
+(ns raylib-examples.world-screen
+  "raylib [core] example - world screen, ported to jank.
+
+  A floating 2D label pinned above a 3D cube: each frame the cube's
+  world position is projected to screen space with GetWorldToScreen so
+  the text tracks it as the camera moves. Q quits.
+  Based on raylib/examples/core/core_world_screen.c
+  (jank-native: the C uses UpdateCamera(&camera, CAMERA_THIRD_PERSON)
+  free-look, which needs a pointer jank cannot form; here the camera
+  slowly orbits via the per-frame Camera3D rebuild so the projection
+  is still visibly dynamic. GetWorldToScreen returns a native Vector2,
+  read via .-x/.-y inside a local so nothing native escapes.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def CAM-R 14.14)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - world screen (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread the orbit angle (accumulated frame time).
+  (loop [t 0.7854]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [t (+ t (* 0.3 (+ 0.0 (cpp/GetFrameTime))))
+            cx (* CAM-R (cpp/cos t))
+            cz (* CAM-R (cpp/sin t))
+            camera (cpp/Camera3D (cpp/Vector3 (cpp/float cx) (cpp/float 10.0) (cpp/float cz))
+                                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                 (cpp/float 45.0)
+                                 cpp/CAMERA_PERSPECTIVE)
+            ;; Project the point 2.5 above the cube to screen space.
+            sp (cpp/GetWorldToScreen (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.5) (cpp/float 0.0)) camera)
+            sx (int (+ 0.0 (.-x sp)))
+            sy (int (+ 0.0 (.-y sp)))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                      (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/RED)
+        (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/MAROON)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndMode3D)
+
+        ;; The 2D label, centered over the projected point.
+        (cpp/DrawText "Enemy: 100/100" (- sx (int (quot (cpp/MeasureText "Enemy: 100/100" 20) 2))) sy 20 cpp/BLACK)
+
+        (cpp/DrawText (str "Cube screen position: [" sx ", " sy "]") 10 10 20 cpp/LIME)
+        (cpp/DrawText "Text 2d is always on top of the cube (Q quits)" 10 40 20 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur t)))))
+
+  (cpp/CloseWindow))

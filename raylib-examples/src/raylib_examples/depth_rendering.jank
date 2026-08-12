@@ -1,0 +1,122 @@
+(ns raylib-examples.depth-rendering
+  "raylib [shaders] example - depth rendering, ported to jank.
+
+  The scene's DEPTH buffer visualized: a cube and a floor plane are
+  rendered into a custom framebuffer whose depth attachment is a
+  readable texture, then that depth texture is drawn to the screen
+  through the depth_render shader (near = dark, far = light). Free
+  camera: WASD move, mouse look, wheel-press pan, Z re-target. ESC
+  quits.
+  Based on raylib/examples/shaders/shaders_depth_rendering.c
+
+  jank-native notes:
+  - Same verbatim rlgl FBO shim pair as depth-writing (a depth
+    TEXTURE instead of raylib's default renderbuffer); the depth
+    texture is read back with (.-depth target) and handed to both
+    SetShaderValueTexture and DrawTexture.
+  - The C's LoadModelFromMesh(GenMeshCube/GenMeshPlane) models reduce
+    to DrawCube / DrawPlane primitives (the basic-voxel untextured
+    DrawModel substitution): the 1x1x1 cube at scale 3 becomes a
+    3x3x3 DrawCube, the 20x20 plane at scale 2 a 40x40 DrawPlane.
+  - flipY is the INT-uniform per-type setter (the mandelbrot-set
+    lesson, as a scalar setter)."
+  (:include "raylib.h" "rlgl.h"))
+
+;; Custom render texture with a readable depth TEXTURE (same shim as
+;; depth-writing, from the C's LoadRenderTextureDepthTex).
+(cpp/raw "static RenderTexture2D jank_load_rt_depth(int width, int height) {
+  RenderTexture2D target = { 0 };
+  target.id = rlLoadFramebuffer();
+  if (target.id > 0) {
+    rlEnableFramebuffer(target.id);
+    target.texture.id = rlLoadTexture(0, width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
+    target.texture.width = width;
+    target.texture.height = height;
+    target.texture.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    target.texture.mipmaps = 1;
+    target.depth.id = rlLoadTextureDepth(width, height, false);
+    target.depth.width = width;
+    target.depth.height = height;
+    target.depth.format = 19; /* DEPTH_COMPONENT_24BIT: not defined in raylib */
+    target.depth.mipmaps = 1;
+    rlFramebufferAttach(target.id, target.texture.id, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
+    rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+    if (rlFramebufferComplete(target.id)) TraceLog(LOG_INFO, \"FBO: [ID %i] Framebuffer object created successfully\", target.id);
+    rlDisableFramebuffer();
+  } else TraceLog(LOG_WARNING, \"FBO: Framebuffer object can not be created\");
+  return target;
+}
+static void jank_unload_rt_depth(RenderTexture2D target) {
+  if (target.id > 0) {
+    rlUnloadTexture(target.texture.id);
+    rlUnloadTexture(target.depth.id);
+    rlUnloadFramebuffer(target.id);
+  }
+}
+static void jank_set_int(Shader s, int loc, int v) {
+  SetShaderValue(s, loc, &v, SHADER_UNIFORM_INT);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - depth rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 4.0) (cpp/float 1.0) (cpp/float 5.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        target (cpp/jank_load_rt_depth WIDTH HEIGHT)
+        depth-shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/depth_render.fs"))
+        depth-loc (int (cpp/GetShaderLocation depth-shader "depthTexture"))
+        flip-y-loc (int (cpp/GetShaderLocation depth-shader "flipY"))]
+
+    (cpp/jank_set_int depth-shader flip-y-loc 1)
+
+    (cpp/DisableCursor)
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FREE)
+
+        ;; scene into the depth-texture framebuffer
+        (cpp/BeginTextureMode target)
+        (cpp/ClearBackground cpp/WHITE)
+        (cpp/BeginMode3D camera)
+        ;; the C's LoadModelFromMesh models as primitives: 1x1x1 cube at
+        ;; scale 3, 20x20 plane at scale 2
+        (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                      (cpp/float 3.0) (cpp/float 3.0) (cpp/float 3.0) cpp/YELLOW)
+        (cpp/DrawPlane (cpp/Vector3 (cpp/float 10.0) (cpp/float 0.0) (cpp/float 2.0))
+                       (cpp/Vector2 (cpp/float 40.0) (cpp/float 40.0)) cpp/RED)
+        (cpp/EndMode3D)
+        (cpp/EndTextureMode)
+
+        ;; visualize the depth texture through the shader
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginShaderMode depth-shader)
+        (cpp/SetShaderValueTexture depth-shader depth-loc (.-depth target))
+        (cpp/DrawTexture (.-depth target) 0 0 cpp/WHITE)
+        (cpp/EndShaderMode)
+
+        (cpp/DrawRectangle 10 10 320 93 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+        (cpp/DrawRectangleLines 10 10 320 93 cpp/BLUE)
+        (cpp/DrawText "Camera Controls:" 20 20 10 cpp/BLACK)
+        (cpp/DrawText "- WASD to move" 40 40 10 cpp/DARKGRAY)
+        (cpp/DrawText "- Mouse Wheel Pressed to Pan" 40 60 10 cpp/DARKGRAY)
+        (cpp/DrawText "- Z to zoom to (0, 0, 0)" 40 80 10 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/jank_unload_rt_depth target)
+    (cpp/UnloadShader depth-shader))
+
+  (cpp/CloseWindow))

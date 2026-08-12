@@ -1,0 +1,122 @@
+(ns raylib-examples.directory-files
+  "raylib [core] example - directory files, ported to jank.
+
+  A tiny file browser: it lists the directories, .png and .c files of the
+  current folder (starting at the working directory). UP/DOWN move the
+  selection, ENTER descends into a highlighted directory, and BACKSPACE
+  goes up to the parent. ESC quits.
+  Based on raylib/examples/core/core_directory_files.c
+
+  jank-native notes:
+  - LoadDirectoryFilesEx returns a FilePathList struct by value whose
+    `.paths` field is a `char **`. jank can't carry that native value
+    across frames (rule 2), so each load is snapshotted into a jank vector
+    of `{:path :name :dir?}` maps right away and the native list is
+    unloaded; the frame loop then reads only jank data. `.paths[i]` is
+    indexed through a one-line `cpp/raw` shim (`jank_path_at`, the same
+    subscript trick random-sequence uses for int*), and each path string is
+    copied out with `str` before UnloadDirectoryFiles frees it.
+  - The C is a raygui showcase (GuiListViewEx / GuiButton / GuiLabel); per
+    the repo's raygui-to-keyboard pattern the list becomes UP/DOWN + ENTER
+    and the back button becomes BACKSPACE.
+  - GetWorkingDirectory / GetPrevDirectoryPath / GetFileName return
+    `const char *` folded into jank strings via `str`; DirectoryExists takes
+    a jank string straight through its `const char *` param. The native bool
+    it returns is coerced to a jank bool before it enters the map."
+  (:include "raylib.h"))
+
+;; Subscript the FilePathList's char** paths in raw C++ and hand back the
+;; element pointer (jank can't index a raw char**).
+(cpp/raw "static const char* jank_path_at(char** paths, int i) { return paths[i]; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def FILTER "DIRS*;.png;.c")
+(def LIST-TOP 50)
+(def ROW-H 28)
+(def VISIBLE 14)                 ; rows that fit under the header
+
+(defn- list-dir
+  "Snapshot `dir`'s filtered entries into a jank vector of
+  {:path :name :dir?} maps, then free the native FilePathList."
+  [dir]
+  (let [files (cpp/LoadDirectoryFilesEx dir FILTER false)
+        n (+ 0 (.-count files))
+        v (loop [i 0 acc []]
+            (if (< i n)
+              (let [p (str (cpp/jank_path_at (.-paths files) i))]
+                (recur (inc i)
+                       (conj acc {:path p
+                                  :name (str (cpp/GetFileName p))
+                                  :dir? (if (cpp/DirectoryExists p) true false)})))
+              acc))]
+    (cpp/UnloadDirectoryFiles files)
+    v))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - directory files (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [dir files sel scroll]: current directory string, the snapshot
+  ;; vector, the selected row (-1 = none) and the scroll offset.
+  (loop [dir (str (cpp/GetWorkingDirectory))
+         files (list-dir (str (cpp/GetWorkingDirectory)))
+         sel -1 scroll 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [n (count files)
+            sel (cond (and (cpp/IsKeyPressed cpp/KEY_DOWN) (> n 0)) (min (dec n) (inc sel))
+                      (and (cpp/IsKeyPressed cpp/KEY_UP) (> n 0)) (max 0 (dec sel))
+                      :else sel)
+            enter? (cpp/IsKeyPressed cpp/KEY_ENTER)
+            back?  (cpp/IsKeyPressed cpp/KEY_BACKSPACE)
+
+            ;; keep the selection visible
+            scroll (cond (< sel 0) 0
+                         (< sel scroll) sel
+                         (>= sel (+ scroll VISIBLE)) (inc (- sel VISIBLE))
+                         :else scroll)
+
+            ;; navigation: BACKSPACE -> parent, ENTER on a dir -> descend.
+            ;; new-dir is the folder to move into (a string) or nil to stay.
+            new-dir (cond
+                      back? (str (cpp/GetPrevDirectoryPath dir))
+                      (and enter? (>= sel 0) (< sel n) (:dir? (nth files sel)))
+                      (:path (nth files sel))
+                      :else nil)
+            dir    (if new-dir new-dir dir)
+            files  (if new-dir (list-dir new-dir) files)
+            sel    (if new-dir -1 sel)
+            scroll (if new-dir 0 scroll)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        ;; header: back hint + current directory
+        (cpp/DrawText "[BACKSPACE] <" 40 14 20 cpp/MAROON)
+        (cpp/DrawText dir 200 14 20 cpp/DARKGRAY)
+        (cpp/DrawLine 0 LIST-TOP WIDTH LIST-TOP cpp/LIGHTGRAY)
+
+        ;; visible slice of the entry list (use the CURRENT count: `files`
+        ;; was just rebound by navigation, so the earlier `n` is stale)
+        (loop [row 0]
+          (when (and (< row VISIBLE) (< (+ scroll row) (count files)))
+            (let [idx (+ scroll row)
+                  item (nth files idx)
+                  y (+ LIST-TOP (* row ROW-H))]
+              (when (= idx sel)
+                (cpp/DrawRectangle 0 y WIDTH ROW-H (cpp/Fade cpp/SKYBLUE (cpp/float 0.5))))
+              ;; directories in blue with a trailing slash, files in dark gray
+              (cpp/DrawText (if (:dir? item) (str "[DIR] " (:name item)) (:name item))
+                            40 (+ y 5) 20
+                            (if (:dir? item) cpp/DARKBLUE cpp/DARKGRAY)))
+            (recur (inc row))))
+
+        (cpp/DrawText (str (count files) " items  -  UP/DOWN select, ENTER open dir, BACKSPACE up")
+                      40 (- HEIGHT 24) 10 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (recur dir files sel scroll))))
+
+  (cpp/CloseWindow))

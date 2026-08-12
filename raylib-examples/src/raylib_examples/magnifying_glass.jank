@@ -1,0 +1,110 @@
+(ns raylib-examples.magnifying-glass
+  "raylib [textures] example - magnifying glass, ported to jank.
+
+  A circular magnifier follows the cursor: the parrots scene is
+  re-rendered zoomed 2x into a 256x256 RenderTexture through a Camera2D
+  centred on the mouse, with hidden bunnies revealed under a MULTIPLIED
+  blend, then masked to a circle with a custom separate blend before
+  being drawn back to the screen under a ring. Q quits. Bunny & parrots
+  sprites by Eiden Marsal.
+  Based on raylib/examples/textures/textures_magnifying_glass.c
+
+  jank-native: the circular mask is generated with GenImageColor +
+  ImageDrawCircle through (cpp/& circle) - the pointer-taking Image API
+  that this arc unblocked. The Camera2D is rebuilt inline each frame with
+  its target set to the mouse; rlgl's rlSetBlendFactorsSeparate + the
+  RL_* factor constants drive the alpha-only mask blend."
+  (:include "raylib.h" "rlgl.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+(def MSG "Use the magnifying glass to find hidden bunnies!")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - magnifying glass (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [bunny (cpp/LoadTexture (str RES "raybunny.png"))
+        parrots (cpp/LoadTexture (str RES "parrots.png"))
+        circle (cpp/GenImageColor 256 256 cpp/BLANK)]
+    ;; build the circular mask by drawing a filled circle into the image
+    (cpp/ImageDrawCircle (cpp/& circle) 128 128 128 cpp/WHITE)
+    (let [mask (cpp/LoadTextureFromImage circle)]
+      (cpp/UnloadImage circle)
+      (let [magnified (cpp/LoadRenderTexture 256 256)]
+
+        (loop []
+          (when (cpp/! (cpp/WindowShouldClose))
+            (let [mx (int (cpp/GetMouseX))
+                  my (int (cpp/GetMouseY))
+                  ;; camera centred on the mouse, offset by half the glass, zoom 2
+                  camera (cpp/Camera2D (cpp/Vector2 (cpp/float 128.0) (cpp/float 128.0))
+                                       (cpp/Vector2 (cpp/float (+ 0.0 mx)) (cpp/float (+ 0.0 my)))
+                                       (cpp/float 0.0) (cpp/float 2.0))]
+
+              (cpp/BeginDrawing)
+              (cpp/ClearBackground cpp/RAYWHITE)
+
+              ;; the normal (un-magnified) world
+              (cpp/DrawTexture parrots 144 33 cpp/WHITE)
+              (cpp/DrawText MSG 154 6 20 cpp/BLACK)
+
+              ;; render the magnified world into the glass texture
+              (cpp/BeginTextureMode magnified)
+              (cpp/ClearBackground cpp/RAYWHITE)
+
+              (cpp/BeginMode2D camera)
+              (cpp/DrawTexture parrots 144 33 cpp/WHITE)
+              (cpp/DrawText MSG 154 6 20 cpp/BLACK)
+              ;; bunnies only appear magnified, multiplied into the scene below
+              (cpp/BeginBlendMode cpp/BLEND_MULTIPLIED)
+              (cpp/DrawTexture bunny 250 350 cpp/WHITE)
+              (cpp/DrawTexture bunny 500 100 cpp/WHITE)
+              (cpp/DrawTexture bunny 420 300 cpp/WHITE)
+              (cpp/DrawTexture bunny 650 10 cpp/WHITE)
+              (cpp/EndBlendMode)
+              (cpp/EndMode2D)
+
+              ;; mask the glass to a circle: keep dst rgb, set dst alpha = mask alpha
+              (cpp/BeginBlendMode cpp/BLEND_CUSTOM_SEPARATE)
+              (cpp/rlSetBlendFactorsSeparate cpp/RL_ZERO cpp/RL_ONE cpp/RL_ONE cpp/RL_ZERO
+                                             cpp/RL_FUNC_ADD cpp/RL_FUNC_ADD)
+              (cpp/DrawTexture mask 0 0 cpp/WHITE)
+              (cpp/EndBlendMode)
+              (cpp/EndTextureMode)
+
+              ;; draw the masked glass to screen, centred on the cursor (flip y)
+              (cpp/DrawTextureRec (.-texture magnified)
+                                  (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                                 (cpp/float 256.0) (cpp/float -256.0))
+                                  (cpp/Vector2 (cpp/float (+ 0.0 (- mx 128)))
+                                               (cpp/float (+ 0.0 (- my 128))))
+                                  cpp/WHITE)
+
+              ;; the metal ring around the glass
+              (cpp/DrawRing (cpp/Vector2 (cpp/float (+ 0.0 mx)) (cpp/float (+ 0.0 my)))
+                            (cpp/float 126.0) (cpp/float 130.0)
+                            (cpp/float 0.0) (cpp/float 360.0) 64 cpp/BLACK)
+
+              ;; a floating specular highlight on the glass
+              (let [rx (/ (+ 0.0 mx) 800.0)
+                    ry (/ (+ 0.0 my) 800.0)
+                    sx (int (- (- (+ 0.0 mx) (* 64.0 rx)) 32))
+                    sy (int (- (- (+ 0.0 my) (* 64.0 ry)) 32))]
+                (cpp/DrawCircle sx sy (cpp/float 4.0) (cpp/ColorAlpha cpp/WHITE (cpp/float 0.5))))
+
+              (cpp/DrawText "Q to quit" 10 425 10 cpp/GRAY)
+
+              (cpp/EndDrawing)
+
+              (when-not (cpp/IsKeyDown cpp/KEY_Q)
+                (recur)))))
+
+        (cpp/UnloadRenderTexture magnified))
+      (cpp/UnloadTexture mask))
+    (cpp/UnloadTexture parrots)
+    (cpp/UnloadTexture bunny))
+
+  (cpp/CloseWindow))

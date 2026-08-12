@@ -1,0 +1,86 @@
+(ns raylib-examples.npatch-drawing
+  "raylib [textures] example - N-patch drawing, ported to jank.
+
+  Four N-patches drawn from one texture with DrawTextureNPatch: two
+  9-patches (stretch on both axes), one horizontal 3-patch and one
+  vertical 3-patch. Move the mouse to stretch/shrink them; the source
+  texture is shown at the left. Q quits.
+  Based on raylib/examples/textures/textures_npatch_drawing.c
+  (jank-native: the four NPatchInfo structs are built once as outer-let
+  locals - like a Camera3D - and reused; each frame's destination
+  Rectangle is built inline from the jank-int mouse position, so no
+  native value is carried in loop state.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - npatch drawing (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [tex (cpp/LoadTexture (str RES "ninepatch_button.png"))
+        ;; 9-patch: stretches on both axes; borders left/top/right/bottom.
+        np1 (cpp/NPatchInfo (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0) (cpp/float 64.0) (cpp/float 64.0))
+                            (cpp/int 12) (cpp/int 40) (cpp/int 12) (cpp/int 12) cpp/NPATCH_NINE_PATCH)
+        np2 (cpp/NPatchInfo (cpp/Rectangle (cpp/float 0.0) (cpp/float 128.0) (cpp/float 64.0) (cpp/float 64.0))
+                            (cpp/int 16) (cpp/int 16) (cpp/int 16) (cpp/int 16) cpp/NPATCH_NINE_PATCH)
+        ;; 3-patch horizontal: stretches on x only.
+        h3 (cpp/NPatchInfo (cpp/Rectangle (cpp/float 0.0) (cpp/float 64.0) (cpp/float 64.0) (cpp/float 64.0))
+                           (cpp/int 8) (cpp/int 8) (cpp/int 8) (cpp/int 8) cpp/NPATCH_THREE_PATCH_HORIZONTAL)
+        ;; 3-patch vertical: stretches on y only.
+        v3 (cpp/NPatchInfo (cpp/Rectangle (cpp/float 0.0) (cpp/float 192.0) (cpp/float 64.0) (cpp/float 64.0))
+                           (cpp/int 6) (cpp/int 6) (cpp/int 6) (cpp/int 6) cpp/NPATCH_THREE_PATCH_VERTICAL)
+        origin (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))]
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mx (cpp/GetMouseX)
+              my (cpp/GetMouseY)
+              ;; each dest resizes toward the mouse; width clamps to [1,300],
+              ;; height to a minimum of 1 (mirrors the C guards).
+              w1 (max 1 (min 300 (- mx 480)))
+              h1 (max 1 (- my 160))
+              w2 (max 1 (min 300 (- mx 160)))
+              h2 (max 1 (- my 160))
+              wh (max 1 (- mx 160))
+              vh (max 1 (- my 160))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawTextureNPatch tex np2
+                                 (cpp/Rectangle (cpp/float 160.0) (cpp/float 160.0)
+                                                (cpp/float (+ 0.0 w2)) (cpp/float (+ 0.0 h2)))
+                                 origin (cpp/float 0.0) cpp/WHITE)
+          (cpp/DrawTextureNPatch tex np1
+                                 (cpp/Rectangle (cpp/float 480.0) (cpp/float 160.0)
+                                                (cpp/float (+ 0.0 w1)) (cpp/float (+ 0.0 h1)))
+                                 origin (cpp/float 0.0) cpp/WHITE)
+          (cpp/DrawTextureNPatch tex h3
+                                 (cpp/Rectangle (cpp/float 160.0) (cpp/float 93.0)
+                                                (cpp/float (+ 0.0 wh)) (cpp/float 32.0))
+                                 origin (cpp/float 0.0) cpp/WHITE)
+          (cpp/DrawTextureNPatch tex v3
+                                 (cpp/Rectangle (cpp/float 92.0) (cpp/float 160.0)
+                                                (cpp/float 32.0) (cpp/float (+ 0.0 vh)))
+                                 origin (cpp/float 0.0) cpp/WHITE)
+
+          ;; The source texture, boxed, for reference.
+          (cpp/DrawRectangleLines 5 88 74 266 cpp/BLUE)
+          (cpp/DrawTexture tex 10 93 cpp/WHITE)
+          (cpp/DrawText "TEXTURE" 15 360 10 cpp/DARKGRAY)
+
+          (cpp/DrawText "Move the mouse to stretch or shrink the n-patches" 10 20 20 cpp/DARKGRAY)
+          (cpp/DrawText "Q to quit" 10 430 10 cpp/GRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur)))))
+
+    (cpp/UnloadTexture tex))
+
+  (cpp/CloseWindow))

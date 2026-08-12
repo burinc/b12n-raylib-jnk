@@ -1,0 +1,95 @@
+(ns raylib-examples.custom-uniform
+  "raylib [shaders] example - custom uniform (swirl), ported to jank.
+
+  A swirl post-process distorts a 3D scene around the mouse. The scene
+  is rendered to a RenderTexture, then drawn back through the swirl
+  fragment shader whose 'center' VEC2 uniform tracks the cursor. The
+  camera orbits automatically. ESC quits.
+  Based on raylib/examples/shaders/shaders_custom_uniform.c
+
+  jank-native notes:
+  - Postprocess over a RenderTexture (vs color-correction's direct
+    DrawTexture): the scene is drawn into `target` under BeginTextureMode,
+    then the whole target.texture is drawn once through BeginShaderMode,
+    y-flipped via a negative-height source Rectangle.
+  - The single custom uniform 'center' is a VEC2 following the mouse,
+    pushed through the same scalar C setter the other shader ports use.
+  - Intentional simplification: the C loads an OBJ model (barracks.obj)
+    which needs the still-blocked LoadModel path. The swirl only needs
+    *something* in the render texture, so the scene is a handful of
+    DrawCube primitives + a grid (the basic-voxel 'DrawModel reduces to
+    DrawCube' precedent). The postprocess pipeline is unchanged."
+  (:include "raylib.h"))
+
+;; VEC2 uniform setter: build the 2-float array in C from scalar args.
+(cpp/raw "static void jank_set_vec2(Shader s, int loc, double a, double b) {
+  float v[2] = { (float)a, (float)b };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - custom uniform (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 8.0) (cpp/float 8.0) (cpp/float 8.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.5) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/swirl.fs"))
+        center-loc (int (cpp/GetShaderLocation shader "center"))
+        target (cpp/LoadRenderTexture WIDTH HEIGHT)]
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        ;; Swirl center follows the mouse (y measured from the bottom).
+        (cpp/jank_set_vec2 shader center-loc
+                           (+ 0.0 (cpp/GetMouseX))
+                           (+ 0.0 (- HEIGHT (cpp/GetMouseY))))
+
+        ;; Render the 3D scene into the target texture.
+        (cpp/BeginTextureMode target)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/BeginMode3D camera)
+        (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                      (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/MAROON)
+        (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                           (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/BLACK)
+        (cpp/DrawCube (cpp/Vector3 (cpp/float 3.0) (cpp/float 0.5) (cpp/float 2.0))
+                      (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0) cpp/BLUE)
+        (cpp/DrawCube (cpp/Vector3 (cpp/float -2.5) (cpp/float 0.75) (cpp/float -1.5))
+                      (cpp/float 1.5) (cpp/float 1.5) (cpp/float 1.5) cpp/GOLD)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndMode3D)
+        (cpp/DrawText "TEXT DRAWN IN RENDER TEXTURE" 200 10 30 cpp/RED)
+        (cpp/EndTextureMode)
+
+        ;; Draw the whole render texture back through the swirl shader.
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/BeginShaderMode shader)
+        ;; Negative height y-flips the texture (OpenGL bottom-left origin).
+        (cpp/DrawTextureRec (.-texture target)
+                            (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                           (cpp/float 800.0) (cpp/float -450.0))
+                            (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                            cpp/WHITE)
+        (cpp/EndShaderMode)
+        (cpp/DrawText "Move the mouse to steer the swirl" 10 (- HEIGHT 20) 10 cpp/GRAY)
+        (cpp/DrawFPS 10 10)
+        (cpp/EndDrawing)
+
+        (recur)))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadRenderTexture target))
+
+  (cpp/CloseWindow))

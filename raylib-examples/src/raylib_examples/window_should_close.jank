@@ -1,0 +1,40 @@
+(ns raylib-examples.window-should-close
+  "raylib [core] example - window should close, ported to jank.
+
+  Closing the window (X button or ESC) asks for confirmation instead of
+  quitting immediately: press Y to exit, N to cancel.
+  Based on raylib/examples/core/core_window_should_close.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - window should close (jank)")
+  (cpp/SetExitKey cpp/KEY_NULL)   ; ESC no longer auto-closes; X button still does
+  (cpp/SetTargetFPS 60)
+
+  ;; Custom loop: don't exit on WindowShouldClose - turn it into a request.
+  (loop [requested false]
+    (let [attempt   (or (cpp/WindowShouldClose) (cpp/IsKeyPressed cpp/KEY_ESCAPE))
+          requested (if attempt true requested)
+          exit?     (and requested (cpp/IsKeyPressed cpp/KEY_Y))
+          requested (if (and requested (cpp/IsKeyPressed cpp/KEY_N)) false requested)]
+
+      (cpp/BeginDrawing)
+      (cpp/ClearBackground cpp/RAYWHITE)
+
+      (if requested
+        (do
+          (cpp/DrawRectangle 0 100 WIDTH 200 cpp/BLACK)
+          (cpp/DrawText "Are you sure you want to exit? [Y/N]" 40 180 30 cpp/WHITE))
+        (cpp/DrawText "Try to close the window to get a confirmation message!"
+                      120 200 20 cpp/LIGHTGRAY))
+
+      (cpp/EndDrawing)
+
+      (when-not exit?
+        (recur requested))))
+
+  (cpp/CloseWindow))

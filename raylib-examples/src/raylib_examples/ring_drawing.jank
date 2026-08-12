@@ -1,0 +1,98 @@
+(ns raylib-examples.ring-drawing
+  "raylib [shapes] example - ring drawing, ported to jank.
+
+  A ring / annulus with adjustable angles, radii and segment count.
+  Hold LEFT/RIGHT for the start angle, DOWN/UP for the end angle,
+  A/S for the inner radius, Z/X for the outer radius, O/P for the
+  segment count (0 = auto). R toggles the filled ring, L the ring
+  outline, C the sector outline. Q quits.
+  Based on raylib/examples/shapes/shapes_ring_drawing.c
+  (jank-native: the raygui sliders/checkboxes become held-key
+  adjustments + toggle keys, with the control panel drawn as text.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def CX 250.0)                       ; (WIDTH - 300) / 2
+(def CY 225.0)
+
+(defn fmt1
+  "A real formatted with one decimal (handles negatives)."
+  [x]
+  (let [neg? (< x 0.0)
+        ax   (if neg? (- 0.0 x) x)
+        c    (int (+ (* ax 10.0) 0.5))
+        whole (int (quot c 10))
+        frac  (int (mod c 10))]
+    (str (if neg? "-" "") whole "." frac)))
+
+(defn adj
+  "Adjust v by step while dn/up are held, clamped to lo..hi."
+  [v dn up step lo hi]
+  (let [v (if dn (- v step) v)
+        v (if up (+ v step) v)]
+    (if (< v lo) lo (if (> v hi) hi v))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - ring drawing (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [start-angle end-angle inner-r outer-r segments
+  ;;         ring? ring-lines? circle-lines?].
+  (loop [sa 0.0 ea 360.0 ir 80.0 orr 190.0 segs 0.0
+         ring? true rlines? false clines? false]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [sa (adj sa (cpp/IsKeyDown cpp/KEY_LEFT) (cpp/IsKeyDown cpp/KEY_RIGHT) 2.0 -450.0 450.0)
+            ea (adj ea (cpp/IsKeyDown cpp/KEY_DOWN) (cpp/IsKeyDown cpp/KEY_UP) 2.0 -450.0 450.0)
+            ir (adj ir (cpp/IsKeyDown cpp/KEY_A) (cpp/IsKeyDown cpp/KEY_S) 1.0 0.0 100.0)
+            orr (adj orr (cpp/IsKeyDown cpp/KEY_Z) (cpp/IsKeyDown cpp/KEY_X) 1.0 0.0 200.0)
+            segs (adj segs (cpp/IsKeyDown cpp/KEY_O) (cpp/IsKeyDown cpp/KEY_P) 0.5 0.0 100.0)
+            ring?   (if (cpp/IsKeyPressed cpp/KEY_R) (not ring?) ring?)
+            rlines? (if (cpp/IsKeyPressed cpp/KEY_L) (not rlines?) rlines?)
+            clines? (if (cpp/IsKeyPressed cpp/KEY_C) (not clines?) clines?)
+            min-segs (int (+ 0.0 (cpp/ceil (/ (- ea sa) 90.0))))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawLine 500 0 500 HEIGHT (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.6)))
+        (cpp/DrawRectangle 500 0 (- WIDTH 500) HEIGHT (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.3)))
+
+        (when ring?
+          (cpp/DrawRing (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                        (cpp/float ir) (cpp/float orr)
+                        (cpp/float sa) (cpp/float ea) (int segs)
+                        (cpp/Fade cpp/MAROON (cpp/float 0.3))))
+        (when rlines?
+          (cpp/DrawRingLines (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                             (cpp/float ir) (cpp/float orr)
+                             (cpp/float sa) (cpp/float ea) (int segs)
+                             (cpp/Fade cpp/BLACK (cpp/float 0.4))))
+        (when clines?
+          (cpp/DrawCircleSectorLines (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                                     (cpp/float orr)
+                                     (cpp/float sa) (cpp/float ea) (int segs)
+                                     (cpp/Fade cpp/BLACK (cpp/float 0.4))))
+
+        ;; The control panel, as text.
+        (cpp/DrawText (str "StartAngle: " (fmt1 sa) "  (LEFT/RIGHT)") 560 40 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "EndAngle: " (fmt1 ea) "  (DOWN/UP)") 560 70 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "InnerRadius: " (fmt1 ir) "  (A/S)") 560 140 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "OuterRadius: " (fmt1 orr) "  (Z/X)") 560 170 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Segments: " (fmt1 segs) "  (O/P)") 560 240 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "MODE: " (if (>= segs min-segs) "MANUAL" "AUTO"))
+                      560 270 10 (if (>= segs min-segs) cpp/MAROON cpp/DARKGRAY))
+        (cpp/DrawText (str "[R] Draw Ring: " (if ring? "ON" "OFF")) 560 320 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "[L] Draw RingLines: " (if rlines? "ON" "OFF")) 560 350 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "[C] Draw CircleLines: " (if clines? "ON" "OFF")) 560 380 10 cpp/DARKGRAY)
+        (cpp/DrawText "[Q] quit" 560 410 10 cpp/DARKGRAY)
+
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur sa ea ir orr segs ring? rlines? clines?)))))
+
+  (cpp/CloseWindow))

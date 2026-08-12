@@ -1,0 +1,48 @@
+(ns raylib-examples.input-mouse
+  "raylib [core] example - mouse input, ported to jank.
+
+  A ball follows the mouse; click to change its color
+  (LEFT=red, MIDDLE=green, RIGHT=blue). Press Q to quit.
+  Based on raylib/examples/core/core_input_mouse.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def BALL-RADIUS 40.0)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - mouse input (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; A native Color can't live in loop state, so thread a small color id
+  ;; (0=blue default, 1=red, 2=green) and pick the Color inline when drawing.
+  (loop [color-id 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (cpp/GetMouseX)
+            my (cpp/GetMouseY)
+            color-id (cond
+                       (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)   1
+                       (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_RIGHT)  0
+                       (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_MIDDLE) 2
+                       :else color-id)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawCircle mx my (cpp/float BALL-RADIUS)
+                        (if (= color-id 1) cpp/MAROON
+                          (if (= color-id 2) cpp/LIME cpp/DARKBLUE)))
+
+        (cpp/DrawText "Move the ball with the mouse, click to change color"
+                      10 10 20 cpp/DARKGRAY)
+        (cpp/DrawText "LEFT = Red   MIDDLE = Green   RIGHT = Blue" 10 35 20 cpp/GRAY)
+        (cpp/DrawText "Press Q to exit" 10 60 20 cpp/GRAY)
+        (cpp/DrawText (str "Mouse: " mx ", " my) 10 (- HEIGHT 30) 20 cpp/LIGHTGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur color-id)))))
+
+  (cpp/CloseWindow))

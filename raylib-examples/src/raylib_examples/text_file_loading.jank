@@ -1,0 +1,106 @@
+(ns raylib-examples.text-file-loading
+  "raylib [core] example - text file loading, ported to jank.
+
+  Loads a text file, word-wraps every line to the window width and lets you
+  scroll through it with the mouse wheel; a little scrollbar on the right
+  shows how far you've read. ESC quits.
+  Based on raylib/examples/core/core_text_file_loading.c
+
+  jank-native notes:
+  - LoadFileText returns an owned `char *` that jank's `str` copies into a
+    jank string (then UnloadFileText frees it). The C word-wraps by mutating
+    that char buffer in place (writing '\\n', temporarily null-terminating to
+    call MeasureText); jank strings are immutable, so the wrap is
+    reimplemented cleanly: `clojure.string/split-lines` splits into lines and
+    each line is greedily packed onto sub-lines using MeasureText on ordinary
+    substrings. Same visual result, no in-place mutation.
+  - jank ships the full clojure.core seq API and clojure.string; `:require`
+    coexists with a C++ `:include` in one ns form (jank's own shell.jank does
+    this). So this uses str/split-lines, str/split (regex) and filterv rather
+    than hand-rolled scanners. `into` flattens the per-line wraps.
+  - The C scrolls a Camera2D; a plain y-offset subtracted from each line's
+    position is identical here and avoids BeginMode2D."
+  (:require [clojure.string :as str])
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def FONT-SIZE 20)
+(def LINE-H 30)                        ; per wrapped line (fontSize + 10)
+(def TEXT-TOP 45)                      ; text starts below the header
+(def WRAP-W (- WIDTH 20))
+(def FILE "../jank-raylib-sys/raylib/examples/core/resources/text_file.txt")
+
+(defn- wrap-line
+  "Greedily word-wrap one line to WRAP-W; returns a vector of sub-lines.
+  An empty line stays one empty sub-line so paragraph gaps survive."
+  [line]
+  (let [words (filterv (fn [w] (not= w "")) (str/split line #"\s+"))
+        nw (count words)]
+    (if (= nw 0)
+      [""]
+      (loop [wi 0 cur "" acc []]
+        (if (< wi nw)
+          (let [w (nth words wi)
+                trial (if (= cur "") w (str cur " " w))]
+            (if (> (cpp/MeasureText trial FONT-SIZE) WRAP-W)
+              (if (= cur "")
+                (recur (inc wi) "" (conj acc w))     ; lone word wider than the box
+                (recur (inc wi) w (conj acc cur)))   ; wrap: emit cur, start line with w
+              (recur (inc wi) trial acc)))
+          (if (= cur "") acc (conj acc cur)))))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - text file loading (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [ctext (cpp/LoadFileText FILE)
+        text  (str ctext)
+        _     (cpp/UnloadFileText ctext)
+        lines (str/split-lines text)
+        ;; flatten every source line's wrapped sub-lines into one vector
+        display (loop [li 0 acc []]
+                  (if (< li (count lines))
+                    (recur (inc li) (into acc (wrap-line (nth lines li))))
+                    acc))
+        total (count display)
+        total-h (* total LINE-H)
+        visible-h (- HEIGHT TEXT-TOP)
+        max-scroll (max 0 (- total-h visible-h))]
+
+    (loop [scroll 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [scroll (- scroll (* (+ 0.0 (cpp/GetMouseWheelMove)) FONT-SIZE 1.5))
+              scroll (cond (< scroll 0.0) 0.0
+                           (> scroll (+ 0.0 max-scroll)) (+ 0.0 max-scroll)
+                           :else scroll)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; text body (scrolled), only drawing visible lines
+          (loop [i 0]
+            (when (< i total)
+              (let [y (- (+ TEXT-TOP (* i LINE-H)) scroll)]
+                (when (and (> y (- TEXT-TOP LINE-H)) (< y HEIGHT))
+                  (cpp/DrawText (nth display i) 10 (int y) FONT-SIZE cpp/DARKGRAY)))
+              (recur (inc i))))
+
+          ;; header on top (covers text scrolled above TEXT-TOP)
+          (cpp/DrawRectangle 0 0 WIDTH TEXT-TOP cpp/RAYWHITE)
+          (cpp/DrawLine 0 TEXT-TOP WIDTH TEXT-TOP cpp/LIGHTGRAY)
+          (cpp/DrawText "text_file.txt  -  scroll with the mouse wheel" 10 12 20 cpp/MAROON)
+
+          ;; scrollbar thumb
+          (when (> max-scroll 0)
+            (let [thumb-h (max 20.0 (* (+ 0.0 visible-h) (/ (+ 0.0 visible-h) (+ 0.0 total-h))))
+                  frac (/ scroll (+ 0.0 max-scroll))
+                  thumb-y (+ TEXT-TOP (* frac (- (+ 0.0 visible-h) thumb-h)))]
+              (cpp/DrawRectangle (- WIDTH 6) (int thumb-y) 5 (int thumb-h) cpp/GRAY)))
+
+          (cpp/EndDrawing)
+
+          (recur scroll)))))
+
+  (cpp/CloseWindow))

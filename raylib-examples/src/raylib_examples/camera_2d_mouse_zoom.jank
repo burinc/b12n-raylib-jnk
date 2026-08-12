@@ -1,0 +1,113 @@
+(ns raylib-examples.camera-2d-mouse-zoom
+  "raylib [core] example - 2d camera mouse zoom, ported to jank.
+
+  Pan a 2D world by dragging with the LEFT button and zoom toward the
+  cursor: mode [1] zooms with the mouse WHEEL, mode [2] zooms by
+  holding RIGHT and moving. The camera keeps the world point under the
+  cursor fixed while zooming. Q quits.
+  Based on raylib/examples/core/core_2d_camera_mouse_zoom.c
+  (jank-native: the C mutates camera.target/.offset/.zoom in place;
+  here the Camera2D is rebuilt each frame from tracked scalars, twice
+  when needed - once post-pan for the GetScreenToWorld2D query, once
+  final for drawing. GetMouseDelta's native Vector2 return is avoided
+  by threading the previous mouse position and subtracting; the world
+  point from GetScreenToWorld2D is read via .-x/.-y inside a local so
+  no native value escapes. Uses rlgl matrix ops for the tilted grid.)"
+  (:include "raylib.h" "rlgl.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn clamp-zoom [zr]
+  ;; nth forces a boxed jank real so the comparisons + literal branches
+  ;; below never mix a native f64 with jank reals.
+  (let [z (nth [zr] 0)]
+    (if (< z 0.125) 0.125 (if (> z 64.0) 64.0 z))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - 2d camera mouse zoom (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [target-x target-y offset-x offset-y zoom zmode prev-mx prev-my].
+  (loop [tx 0.0 ty 0.0 ox 0.0 oy 0.0 zoom 1.0 zmode 0 pmx 0.0 pmy 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+            zmode (if (cpp/IsKeyPressed cpp/KEY_ONE) 0
+                      (if (cpp/IsKeyPressed cpp/KEY_TWO) 1 zmode))
+
+            ;; --- pan (LEFT drag), using a hand-computed mouse delta ---
+            dx (- mx pmx)
+            dy (- my pmy)
+            panning (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT)
+            tx (if panning (+ tx (* dx (/ -1.0 zoom))) tx)
+            ty (if panning (+ ty (* dy (/ -1.0 zoom))) ty)
+
+            ;; Intermediate camera (post-pan) for the world-point query.
+            cam-mid (cpp/Camera2D (cpp/Vector2 (cpp/float ox) (cpp/float oy))
+                                  (cpp/Vector2 (cpp/float tx) (cpp/float ty))
+                                  (cpp/float 0.0) (cpp/float zoom))
+
+            ;; --- decide whether this frame recenters on the cursor ---
+            wheel (+ 0.0 (cpp/GetMouseWheelMove))
+            wheel-zoom? (and (= zmode 0) (not (= wheel 0.0)))
+            right-press? (and (= zmode 1) (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_RIGHT))
+            right-down? (and (= zmode 1) (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_RIGHT))
+            recenter? (or wheel-zoom? right-press?)
+
+            ;; On recenter, offset := mouse, target := world point under
+            ;; the mouse. The native Vector2 stays inside this let; only
+            ;; jank reals escape in the vector.
+            otxy (if recenter?
+                   (let [wp (cpp/GetScreenToWorld2D (cpp/GetMousePosition) cam-mid)]
+                     [mx my (nth [(+ 0.0 (.-x wp))] 0) (nth [(+ 0.0 (.-y wp))] 0)])
+                   [ox oy tx ty])
+            ox (nth otxy 0)
+            oy (nth otxy 1)
+            tx (nth otxy 2)
+            ty (nth otxy 3)
+
+            ;; --- apply the zoom increment (log-scaled for even feel) ---
+            zoom (if wheel-zoom?
+                   (clamp-zoom (cpp/exp (+ (cpp/log zoom) (* 0.2 wheel))))
+                   (if right-down?
+                     (clamp-zoom (cpp/exp (+ (cpp/log zoom) (* 0.005 dx))))
+                     zoom))
+
+            ;; Final camera for drawing.
+            camera (cpp/Camera2D (cpp/Vector2 (cpp/float ox) (cpp/float oy))
+                                 (cpp/Vector2 (cpp/float tx) (cpp/float ty))
+                                 (cpp/float 0.0) (cpp/float zoom))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode2D camera)
+
+        ;; A 3D grid rotated flat into the XY plane, via the rlgl stack.
+        (cpp/rlPushMatrix)
+        (cpp/rlTranslatef (cpp/float 0.0) (cpp/float (* 25.0 50.0)) (cpp/float 0.0))
+        (cpp/rlRotatef (cpp/float 90.0) (cpp/float 1.0) (cpp/float 0.0) (cpp/float 0.0))
+        (cpp/DrawGrid 100 (cpp/float 50.0))
+        (cpp/rlPopMatrix)
+
+        (cpp/DrawCircle (int (/ WIDTH 2)) (int (/ HEIGHT 2)) (cpp/float 50.0) cpp/MAROON)
+
+        (cpp/EndMode2D)
+
+        ;; Mouse reference + coords (DrawText instead of the C's DrawTextEx).
+        (cpp/DrawCircleV (cpp/GetMousePosition) (cpp/float 4.0) cpp/DARKGRAY)
+        (cpp/DrawText (str "[" (int mx) ", " (int my) "]") (- (int mx) 44) (- (int my) 24) 20 cpp/BLACK)
+
+        (cpp/DrawText "[1][2] Select mouse zoom mode (Wheel or Move) - Q quits" 20 20 20 cpp/DARKGRAY)
+        (if (= zmode 0)
+          (cpp/DrawText "Mouse left button drag to move, mouse wheel to zoom" 20 50 20 cpp/DARKGRAY)
+          (cpp/DrawText "Mouse left button drag to move, mouse press and move to zoom" 20 50 20 cpp/DARKGRAY))
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur tx ty ox oy zoom zmode mx my)))))
+
+  (cpp/CloseWindow))

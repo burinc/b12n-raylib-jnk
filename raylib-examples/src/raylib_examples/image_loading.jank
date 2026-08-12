@@ -1,0 +1,42 @@
+(ns raylib-examples.image-loading
+  "raylib [textures] example - image loading, ported to jank.
+
+  The two-step image path: LoadImage reads a PNG into CPU RAM, then
+  LoadTextureFromImage uploads it to GPU VRAM and the Image is freed.
+  (Contrast with logo-texture, which uses the one-step LoadTexture.)
+  Q quits.
+  Based on raylib/examples/textures/textures_image_loading.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def LOGO "../jank-raylib-sys/raylib/examples/textures/resources/raylib_logo.png")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - image loading (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Textures must load after InitWindow (needs the OpenGL context).
+  (let [image (cpp/LoadImage LOGO)
+        texture (cpp/LoadTextureFromImage image)
+        _ (cpp/UnloadImage image)
+        tx (int (- (quot WIDTH 2) (quot (int (+ 0.0 (.-width texture))) 2)))
+        ty (int (- (quot HEIGHT 2) (quot (int (+ 0.0 (.-height texture))) 2)))]
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawTexture texture tx ty cpp/WHITE)
+        (cpp/DrawText "this IS a texture loaded from an image! (Q quits)" 260 370 10 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur))))
+
+    (cpp/UnloadTexture texture))
+
+  (cpp/CloseWindow))

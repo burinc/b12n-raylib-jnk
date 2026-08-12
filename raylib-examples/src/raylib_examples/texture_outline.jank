@@ -1,0 +1,84 @@
+(ns raylib-examples.texture-outline
+  "raylib [shaders] example - texture outline, ported to jank.
+
+  A fragment shader draws a red outline around the fudesumi sprite's
+  alpha edge; the mouse wheel grows/shrinks the outline thickness (a
+  float uniform updated every frame). ESC quits.
+  Based on raylib/examples/shaders/shaders_texture_outline.c
+
+  jank-native notes:
+  - FIRST shader-uniform proof: SetShaderValue takes const void*, which
+    jank can't form, so values stage through a cpp/raw static float[4]
+    via an element setter (double param, cast to float in the shim) and
+    a jank_set_uniform wrapper passes the buffer pointer + uniform-type
+    enum. All shim calls live in -main (cpp/raw statics are per-fn -
+    see the interop guide).
+  - GetShaderLocation returns an int (boxed with int); the
+    SHADER_UNIFORM_* enum constants pass straight through the shim's
+    int param."
+  (:include "raylib.h"))
+
+;; Uniform staging buffer (float/vec2/vec4 all fit in 4 floats). Only
+;; -main touches these statics.
+(cpp/raw "static float jank_uf_buf[4] = { 0 };
+static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
+static void jank_set_uniform(Shader s, int loc, int type) {
+  SetShaderValue(s, loc, jank_uf_buf, type);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - texture outline (jank)")
+
+  (let [texture (cpp/LoadTexture (str RES "fudesumi.png"))
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/outline.fs"))
+        tw (+ 0.0 (.-width texture))
+        th (+ 0.0 (.-height texture))
+        size-loc (int (cpp/GetShaderLocation shader "outlineSize"))
+        color-loc (int (cpp/GetShaderLocation shader "outlineColor"))
+        tsize-loc (int (cpp/GetShaderLocation shader "textureSize"))]
+    ;; constant uniforms: normalized RED outline color + the texture size
+    (cpp/jank_uf_set 0 1.0)
+    (cpp/jank_uf_set 1 0.0)
+    (cpp/jank_uf_set 2 0.0)
+    (cpp/jank_uf_set 3 1.0)
+    (cpp/jank_set_uniform shader color-loc cpp/SHADER_UNIFORM_VEC4)
+    (cpp/jank_uf_set 0 tw)
+    (cpp/jank_uf_set 1 th)
+    (cpp/jank_set_uniform shader tsize-loc cpp/SHADER_UNIFORM_VEC2)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [outline-size] (mouse wheel, min 1px).
+    (loop [osize 2.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [o (+ osize (+ 0.0 (cpp/GetMouseWheelMove)))
+              osize (if (< o 1.0) 1.0 o)]
+
+          (cpp/jank_uf_set 0 osize)
+          (cpp/jank_set_uniform shader size-loc cpp/SHADER_UNIFORM_FLOAT)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginShaderMode shader)
+          (cpp/DrawTexture texture (int (- 400.0 (/ tw 2.0))) -30 cpp/WHITE)
+          (cpp/EndShaderMode)
+
+          (cpp/DrawText "Shader-based\ntexture\noutline" 10 10 20 cpp/GRAY)
+          (cpp/DrawText "Scroll mouse wheel to\nchange outline size" 10 72 20 cpp/GRAY)
+          (cpp/DrawText (str "Outline size: " (int osize) " px") 10 120 20 cpp/MAROON)
+          (cpp/DrawFPS 710 10)
+
+          (cpp/EndDrawing)
+
+          (recur osize))))
+
+    (cpp/UnloadTexture texture)
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,233 @@
+(ns raylib-examples.tiled-drawing
+  "raylib [textures] example - tiled drawing, ported to jank.
+
+  Tile a chosen sub-pattern of a texture across a panel, with live
+  scale (UP/DOWN), rotation (LEFT/RIGHT) and a click-to-pick pattern
+  and color. SPACE resets, Q quits.
+  Based on raylib/examples/textures/textures_tiled_drawing.c
+  (jank-native: the C's DrawTextureTiled is an in-example helper, not
+  a raylib API. It is reimplemented INLINE in the frame loop rather
+  than as a fn, because a native Texture2D passed as a jank fn
+  parameter is boxed to object_ref and the cpp call then rejects it -
+  natives must stay let-locals / inline call args. Patterns and
+  colors are jank vectors of data; the window is fixed-size.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def PATTERN "../jank-raylib-sys/raylib/examples/textures/resources/patterns.png")
+(def OPT-WIDTH 220)
+(def MARGIN 8)
+
+;; [x y w h] of each pattern inside patterns.png (as reals).
+(def PATTERNS
+  [[3.0 3.0 66.0 66.0]
+   [75.0 3.0 100.0 100.0]
+   [3.0 75.0 66.0 66.0]
+   [7.0 156.0 50.0 50.0]
+   [85.0 106.0 90.0 45.0]
+   [75.0 154.0 100.0 60.0]])
+
+;; The clickable pattern rects on screen (texture drawn at 10,48).
+(def PATTERN-HIT
+  (mapv (fn [p] [(+ 10.0 (nth p 0)) (+ 48.0 (nth p 1)) (nth p 2) (nth p 3)]) PATTERNS))
+
+;; Packed RGBA of BLACK MAROON ORANGE BLUE PURPLE BEIGE LIME RED DARKGRAY SKYBLUE.
+(defn pack [r g b] (+ (* r 16777216) (* g 65536) (* b 256) 255))
+(def COLORS
+  [(pack 0 0 0) (pack 190 33 55) (pack 255 161 0) (pack 0 121 241) (pack 200 122 255)
+   (pack 211 176 131) (pack 0 158 47) (pack 230 41 55) (pack 80 80 80) (pack 102 191 255)])
+
+;; Color swatch rects: two rows of five, 32x16.
+(def COLOR-RECS
+  (vec (for [i (range 10)]
+         [(+ 10.0 (* 40.0 (mod i 5))) (if (< i 5) 286.0 310.0) 32.0 16.0])))
+
+(defn pick [mx my rects current]
+  ;; Index of the first rect containing (mx,my), else the current value.
+  (loop [i 0]
+    (if (>= i (count rects))
+      current
+      (let [r (nth rects i)]
+        (if (and (>= mx (nth r 0)) (< mx (+ (nth r 0) (nth r 2)))
+                 (>= my (nth r 1)) (< my (+ (nth r 1) (nth r 3))))
+          i
+          (recur (inc i)))))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - tiled drawing (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [tex (cpp/LoadTexture PATTERN)]
+    (cpp/SetTextureFilter tex cpp/TEXTURE_FILTER_BILINEAR)
+
+    ;; Thread [active-pattern active-color scale rotation].
+    (loop [ap 0 ac 0 scale 1.0 rotation 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mx (+ 0.0 (cpp/GetMouseX))
+              my (+ 0.0 (cpp/GetMouseY))
+              clicked (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+              ap (if clicked (pick mx my PATTERN-HIT ap) ap)
+              ac (if clicked (pick mx my COLOR-RECS ac) ac)
+
+              scale (if (cpp/IsKeyPressed cpp/KEY_UP) (+ scale 0.25) scale)
+              scale (if (cpp/IsKeyPressed cpp/KEY_DOWN) (- scale 0.25) scale)
+              scale (if (> scale 10.0) 10.0 (if (<= scale 0.0) 0.25 scale))
+
+              rotation (if (cpp/IsKeyPressed cpp/KEY_LEFT) (- rotation 25.0) rotation)
+              rotation (if (cpp/IsKeyPressed cpp/KEY_RIGHT) (+ rotation 25.0) rotation)
+              reset? (cpp/IsKeyPressed cpp/KEY_SPACE)
+              scale (if reset? 1.0 scale)
+              rotation (if reset? 0.0 rotation)
+
+              pat (nth PATTERNS ap)
+              ;; Source pattern + fixed destination panel.
+              sx (nth pat 0) sy (nth pat 1) sw (nth pat 2) sh (nth pat 3)
+              dx (+ 0.0 (+ OPT-WIDTH MARGIN))
+              dy (+ 0.0 MARGIN)
+              dw (- (- WIDTH OPT-WIDTH) (* 2.0 MARGIN))
+              dh (- HEIGHT (* 2.0 MARGIN))
+              tw (int (* sw scale))
+              th (int (* sh scale))
+              tint (cpp/GetColor (nth COLORS ac))
+              o (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+              rot (cpp/float rotation)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; The tiled area (inlined DrawTextureTiled; tex is captured).
+          (when (and (> scale 0.0) (not (= sw 0.0)) (not (= sh 0.0)))
+            (cond
+              ;; One tile.
+              (and (< dw tw) (< dh th))
+              (cpp/DrawTexturePro tex
+                                  (cpp/Rectangle (cpp/float sx) (cpp/float sy)
+                                                 (cpp/float (* (/ dw tw) sw)) (cpp/float (* (/ dh th) sh)))
+                                  (cpp/Rectangle (cpp/float dx) (cpp/float dy) (cpp/float dw) (cpp/float dh))
+                                  o rot tint)
+
+              ;; One vertical column.
+              (<= dw tw)
+              (let [last-dy (loop [dyy 0]
+                              (if (< (+ dyy th) dh)
+                                (do
+                                  (cpp/DrawTexturePro tex
+                                                      (cpp/Rectangle (cpp/float sx) (cpp/float sy)
+                                                                     (cpp/float (* (/ dw tw) sw)) (cpp/float sh))
+                                                      (cpp/Rectangle (cpp/float dx) (cpp/float (+ dy dyy))
+                                                                     (cpp/float dw) (cpp/float (+ 0.0 th)))
+                                                      o rot tint)
+                                  (recur (+ dyy th)))
+                                dyy))]
+                (when (< last-dy dh)
+                  (cpp/DrawTexturePro tex
+                                      (cpp/Rectangle (cpp/float sx) (cpp/float sy)
+                                                     (cpp/float (* (/ dw tw) sw)) (cpp/float (* (/ (- dh last-dy) th) sh)))
+                                      (cpp/Rectangle (cpp/float dx) (cpp/float (+ dy last-dy))
+                                                     (cpp/float dw) (cpp/float (- dh last-dy)))
+                                      o rot tint)))
+
+              ;; One horizontal row.
+              (<= dh th)
+              (let [last-dx (loop [dxx 0]
+                              (if (< (+ dxx tw) dw)
+                                (do
+                                  (cpp/DrawTexturePro tex
+                                                      (cpp/Rectangle (cpp/float sx) (cpp/float sy)
+                                                                     (cpp/float sw) (cpp/float (* (/ dh th) sh)))
+                                                      (cpp/Rectangle (cpp/float (+ dx dxx)) (cpp/float dy)
+                                                                     (cpp/float (+ 0.0 tw)) (cpp/float dh))
+                                                      o rot tint)
+                                  (recur (+ dxx tw)))
+                                dxx))]
+                (when (< last-dx dw)
+                  (cpp/DrawTexturePro tex
+                                      (cpp/Rectangle (cpp/float sx) (cpp/float sy)
+                                                     (cpp/float (* (/ (- dw last-dx) tw) sw)) (cpp/float (* (/ dh th) sh)))
+                                      (cpp/Rectangle (cpp/float (+ dx last-dx)) (cpp/float dy)
+                                                     (cpp/float (- dw last-dx)) (cpp/float dh))
+                                      o rot tint)))
+
+              ;; Both directions: full tiles, then the trailing edge column/row.
+              :else
+              (let [last-dx (loop [dxx 0]
+                              (if (< (+ dxx tw) dw)
+                                (do
+                                  (let [last-dy (loop [dyy 0]
+                                                  (if (< (+ dyy th) dh)
+                                                    (do
+                                                      (cpp/DrawTexturePro tex
+                                                                          (cpp/Rectangle (cpp/float sx) (cpp/float sy)
+                                                                                         (cpp/float sw) (cpp/float sh))
+                                                                          (cpp/Rectangle (cpp/float (+ dx dxx)) (cpp/float (+ dy dyy))
+                                                                                         (cpp/float (+ 0.0 tw)) (cpp/float (+ 0.0 th)))
+                                                                          o rot tint)
+                                                      (recur (+ dyy th)))
+                                                    dyy))]
+                                    (when (< last-dy dh)
+                                      (cpp/DrawTexturePro tex
+                                                          (cpp/Rectangle (cpp/float sx) (cpp/float sy)
+                                                                         (cpp/float sw) (cpp/float (* (/ (- dh last-dy) th) sh)))
+                                                          (cpp/Rectangle (cpp/float (+ dx dxx)) (cpp/float (+ dy last-dy))
+                                                                         (cpp/float (+ 0.0 tw)) (cpp/float (- dh last-dy)))
+                                                          o rot tint)))
+                                  (recur (+ dxx tw)))
+                                dxx))]
+                (when (< last-dx dw)
+                  (let [last-dy (loop [dyy 0]
+                                  (if (< (+ dyy th) dh)
+                                    (do
+                                      (cpp/DrawTexturePro tex
+                                                          (cpp/Rectangle (cpp/float sx) (cpp/float sy)
+                                                                         (cpp/float (* (/ (- dw last-dx) tw) sw)) (cpp/float sh))
+                                                          (cpp/Rectangle (cpp/float (+ dx last-dx)) (cpp/float (+ dy dyy))
+                                                                         (cpp/float (- dw last-dx)) (cpp/float (+ 0.0 th)))
+                                                          o rot tint)
+                                      (recur (+ dyy th)))
+                                    dyy))]
+                    (when (< last-dy dh)
+                      (cpp/DrawTexturePro tex
+                                          (cpp/Rectangle (cpp/float sx) (cpp/float sy)
+                                                         (cpp/float (* (/ (- dw last-dx) tw) sw)) (cpp/float (* (/ (- dh last-dy) th) sh)))
+                                          (cpp/Rectangle (cpp/float (+ dx last-dx)) (cpp/float (+ dy last-dy))
+                                                         (cpp/float (- dw last-dx)) (cpp/float (- dh last-dy)))
+                                          o rot tint)))))))
+
+          ;; Options panel.
+          (cpp/DrawRectangle MARGIN MARGIN (- OPT-WIDTH MARGIN) (- HEIGHT (* 2 MARGIN))
+                             (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.5)))
+
+          (cpp/DrawText "Select Pattern" 10 38 10 cpp/BLACK)
+          (cpp/DrawTexture tex 10 48 cpp/BLACK)
+          (cpp/DrawRectangle (int (+ 10.0 sx)) (int (+ 48.0 sy)) (int sw) (int sh)
+                             (cpp/Fade cpp/DARKBLUE (cpp/float 0.3)))
+
+          (cpp/DrawText "Select Color" 10 274 10 cpp/BLACK)
+          (loop [i 0]
+            (when (< i 10)
+              (let [r (nth COLOR-RECS i)]
+                (cpp/DrawRectangle (int (nth r 0)) (int (nth r 1)) (int (nth r 2)) (int (nth r 3))
+                                   (cpp/GetColor (nth COLORS i)))
+                (when (= ac i)
+                  (cpp/DrawRectangleLinesEx (cpp/Rectangle (cpp/float (nth r 0)) (cpp/float (nth r 1))
+                                                           (cpp/float (nth r 2)) (cpp/float (nth r 3)))
+                                            (cpp/float 3.0) (cpp/Fade cpp/WHITE (cpp/float 0.5)))))
+              (recur (inc i))))
+
+          (cpp/DrawText "Scale (UP/DOWN to change)" 10 346 10 cpp/BLACK)
+          (cpp/DrawText (str scale "x") 10 358 20 cpp/BLACK)
+          (cpp/DrawText "Rotation (LEFT/RIGHT to change)" 10 388 10 cpp/BLACK)
+          (cpp/DrawText (str (int rotation) " degrees") 10 400 20 cpp/BLACK)
+          (cpp/DrawText "Press [SPACE] to reset - Q quits" 10 430 10 cpp/DARKBLUE)
+          (cpp/DrawText (str (cpp/GetFPS) " FPS") 10 10 20 cpp/BLACK)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur ap ac scale rotation)))))
+
+    (cpp/UnloadTexture tex))
+
+  (cpp/CloseWindow))

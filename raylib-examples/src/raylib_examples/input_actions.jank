@@ -1,0 +1,92 @@
+(ns raylib-examples.input-actions
+  "raylib [core] example - input actions, ported to jank.
+
+  Decodes input as abstract ACTIONS instead of raw keys, so a binding
+  can map to a key AND a gamepad button at once and be remapped freely.
+  Move the square with the movement action (WASD by default), SPACE
+  fires (recentres + flashes blue for one frame), TAB swaps to the
+  arrow-key set. ESC quits.
+  Based on raylib/examples/core/core_input_actions.c
+
+  jank-native notes: the C original keeps bindings in a native
+  `ActionInput[]` struct array mutated by SetActions* functions. jank
+  can't hold native values in a collection, but the bindings are just
+  int key/button IDs, so each keyset is a plain jank map
+  {action -> {:key K :button B}} - two immutable maps swapped by TAB,
+  no mutable array. The square position can't be a native Vector2 in
+  loop state (rule 2), so it's tracked as jank reals and the Vector2 is
+  built inline at DrawRectangleV."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SIZE 40.0)
+(def GAMEPAD 0)
+
+;; WASD + left-hand gamepad face buttons
+(def default-keys
+  {:up    {:key cpp/KEY_W     :button cpp/GAMEPAD_BUTTON_LEFT_FACE_UP}
+   :down  {:key cpp/KEY_S     :button cpp/GAMEPAD_BUTTON_LEFT_FACE_DOWN}
+   :left  {:key cpp/KEY_A     :button cpp/GAMEPAD_BUTTON_LEFT_FACE_LEFT}
+   :right {:key cpp/KEY_D     :button cpp/GAMEPAD_BUTTON_LEFT_FACE_RIGHT}
+   :fire  {:key cpp/KEY_SPACE :button cpp/GAMEPAD_BUTTON_RIGHT_FACE_DOWN}})
+
+;; arrow keys + right-hand gamepad face buttons
+(def cursor-keys
+  {:up    {:key cpp/KEY_UP    :button cpp/GAMEPAD_BUTTON_RIGHT_FACE_UP}
+   :down  {:key cpp/KEY_DOWN  :button cpp/GAMEPAD_BUTTON_RIGHT_FACE_DOWN}
+   :left  {:key cpp/KEY_LEFT  :button cpp/GAMEPAD_BUTTON_RIGHT_FACE_LEFT}
+   :right {:key cpp/KEY_RIGHT :button cpp/GAMEPAD_BUTTON_RIGHT_FACE_RIGHT}
+   :fire  {:key cpp/KEY_SPACE :button cpp/GAMEPAD_BUTTON_LEFT_FACE_DOWN}})
+
+(defn- action-down? [keyset action]
+  (let [b (get keyset action)]
+    (or (cpp/IsKeyDown (:key b))
+        (cpp/IsGamepadButtonDown GAMEPAD (:button b)))))
+
+(defn- action-pressed? [keyset action]
+  (let [b (get keyset action)]
+    (or (cpp/IsKeyPressed (:key b))
+        (cpp/IsGamepadButtonPressed GAMEPAD (:button b)))))
+
+(defn- action-released? [keyset action]
+  (let [b (get keyset action)]
+    (or (cpp/IsKeyReleased (:key b))
+        (cpp/IsGamepadButtonReleased GAMEPAD (:button b)))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - input actions (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; state: square x/y (reals) and which keyset is active
+  (loop [px 400.0 py 200.0 default? true]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [ks (if default? default-keys cursor-keys)
+            px (cond-> px
+                 (action-down? ks :left)  (- 2)
+                 (action-down? ks :right) (+ 2))
+            py (cond-> py
+                 (action-down? ks :up)    (- 2)
+                 (action-down? ks :down)  (+ 2))
+            fire? (action-pressed? ks :fire)
+            px (if fire? (/ (- WIDTH SIZE) 2) px)
+            py (if fire? (/ (- HEIGHT SIZE) 2) py)
+            release? (action-released? ks :fire)
+            default? (if (cpp/IsKeyPressed cpp/KEY_TAB) (not default?) default?)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/GRAY)
+        (cpp/DrawRectangleV (cpp/Vector2 (cpp/float px) (cpp/float py))
+                            (cpp/Vector2 (cpp/float SIZE) (cpp/float SIZE))
+                            (if release? cpp/BLUE cpp/RED))
+        (cpp/DrawText (if default?
+                        "Current input set: WASD (default)"
+                        "Current input set: Arrow keys")
+                      10 10 20 cpp/WHITE)
+        (cpp/DrawText "Use TAB key to toggle the Actions keyset" 10 50 20 cpp/GREEN)
+        (cpp/EndDrawing)
+
+        (recur px py default?))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,208 @@
+(ns raylib-examples.camera-2d-platformer
+  "raylib [core] example - 2d camera platformer, ported to jank.
+
+  A tiny platformer: LEFT/RIGHT move the red player, SPACE jumps,
+  mouse wheel zooms, C cycles five camera-follow modes, R resets
+  position + zoom, Q quits.
+  Based on raylib/examples/core/core_2d_camera_platformer.c
+  (jank-native: the camera is threaded as plain scalars [target offset
+  zoom] and, since rotation is always 0 here, the raymath and
+  GetWorldToScreen2D/GetScreenToWorld2D calls reduce to
+  screen = (world - target)*zoom + offset, done in jank math.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def HALF-W 400.0)
+(def HALF-H 225.0)
+(def GRAV 400.0)
+(def JUMP-SPD 350.0)
+(def HOR-SPD 200.0)
+
+;; The level: one non-blocking backdrop slab + four blocking platforms.
+(def ITEMS
+  [{:x 0.0   :y 0.0   :w 1000.0 :h 400.0 :block false}
+   {:x 0.0   :y 400.0 :w 1000.0 :h 200.0 :block true}
+   {:x 300.0 :y 200.0 :w 400.0  :h 10.0  :block true}
+   {:x 250.0 :y 300.0 :w 100.0  :h 10.0  :block true}
+   {:x 650.0 :y 300.0 :w 100.0  :h 10.0  :block true}])
+
+;; [min-x min-y max-x max-y] over all items (the C recomputes this per frame).
+(def BOUNDS
+  (loop [i 0 mnx 1000.0 mny 1000.0 mxx -1000.0 mxy -1000.0]
+    (if (< i (count ITEMS))
+      (let [it (nth ITEMS i)]
+        (recur (inc i)
+               (min mnx (:x it)) (min mny (:y it))
+               (max mxx (+ (:x it) (:w it))) (max mxy (+ (:y it) (:h it)))))
+      [mnx mny mxx mxy])))
+
+(def DESCRIPTIONS
+  ["Follow player center"
+   "Follow player center, but clamp to map edges"
+   "Follow player center; smoothed"
+   "Follow player center horizontally; update player center vertically after landing"
+   "Player push camera on getting too close to screen edge"])
+
+;; --- player ------------------------------------------------------------
+
+(defn update-player
+  "One physics step. Returns [px py speed can-jump?]."
+  [px py spd jump? delta]
+  (let [px (if (cpp/IsKeyDown cpp/KEY_LEFT)  (- px (* HOR-SPD delta)) px)
+        px (if (cpp/IsKeyDown cpp/KEY_RIGHT) (+ px (* HOR-SPD delta)) px)
+        jumping? (and (cpp/IsKeyDown cpp/KEY_SPACE) jump?)
+        spd   (if jumping? (- JUMP-SPD) spd)
+        jump? (if jumping? false jump?)
+        ;; A blocking platform whose top edge the player crosses this frame.
+        floor-y (loop [i 0]
+                  (if (< i (count ITEMS))
+                    (let [it (nth ITEMS i)]
+                      (if (and (:block it)
+                               (<= (:x it) px)
+                               (>= (+ (:x it) (:w it)) px)
+                               (>= (:y it) py)
+                               (<= (:y it) (+ py (* spd delta))))
+                        (:y it)
+                        (recur (inc i))))
+                    nil))]
+    (if floor-y
+      [px floor-y 0.0 true]
+      [px (+ py (* spd delta)) (+ spd (* GRAV delta)) false])))
+
+;; --- camera modes ------------------------------------------------------
+;; Each returns [target-x target-y offset-x offset-y]; mode 3 also returns
+;; its evening-out state. With rotation 0 the transforms are
+;;   screen = (world - target)*zoom + offset
+;;   world  = (screen - offset)/zoom + target
+
+(defn cam-center [px py]
+  [px py HALF-W HALF-H])
+
+(defn cam-inside-map [px py zoom]
+  (let [mnx (nth BOUNDS 0) mny (nth BOUNDS 1)
+        mxx (nth BOUNDS 2) mxy (nth BOUNDS 3)
+        maxsx (+ (* (- mxx px) zoom) HALF-W)
+        maxsy (+ (* (- mxy py) zoom) HALF-H)
+        minsx (+ (* (- mnx px) zoom) HALF-W)
+        minsy (+ (* (- mny py) zoom) HALF-H)
+        ox (if (< maxsx WIDTH)  (- WIDTH  (- maxsx HALF-W)) HALF-W)
+        oy (if (< maxsy HEIGHT) (- HEIGHT (- maxsy HALF-H)) HALF-H)
+        ox (if (> minsx 0.0) (- HALF-W minsx) ox)
+        oy (if (> minsy 0.0) (- HALF-H minsy) oy)]
+    [px py ox oy]))
+
+(defn cam-smooth [px py tx ty delta]
+  (let [dx (- px tx) dy (- py ty)
+        len (cpp/sqrt (+ (* dx dx) (* dy dy)))]
+    (if (> len 10.0)
+      (let [speed (max (* 0.8 len) 30.0)
+            f (/ (* speed delta) len)]
+        [(+ tx (* dx f)) (+ ty (* dy f)) HALF-W HALF-H])
+      [tx ty HALF-W HALF-H])))
+
+(defn cam-even-out
+  "Returns [tx ty ox oy evening-out? even-out-target]."
+  [px py spd jump? ty delta evening? etarget]
+  (if evening?
+    (if (> etarget ty)
+      (let [ty (+ ty (* 700.0 delta))]
+        (if (> ty etarget)
+          [px etarget HALF-W HALF-H false etarget]
+          [px ty HALF-W HALF-H true etarget]))
+      (let [ty (- ty (* 700.0 delta))]
+        (if (< ty etarget)
+          [px etarget HALF-W HALF-H false etarget]
+          [px ty HALF-W HALF-H true etarget])))
+    (if (and jump? (= spd 0.0) (not (= py ty)))
+      [px ty HALF-W HALF-H true py]
+      [px ty HALF-W HALF-H false etarget])))
+
+(defn cam-bounds-push [px py tx ty ox oy zoom]
+  (let [;; the 0.2-of-screen bbox corners, in screen space...
+        bminsx (* 0.4 WIDTH)  bminsy (* 0.4 HEIGHT)
+        bmaxsx (* 0.6 WIDTH)  bmaxsy (* 0.6 HEIGHT)
+        ;; ...converted to world space with the incoming camera
+        wminx (+ (/ (- bminsx ox) zoom) tx)
+        wminy (+ (/ (- bminsy oy) zoom) ty)
+        wmaxx (+ (/ (- bmaxsx ox) zoom) tx)
+        wmaxy (+ (/ (- bmaxsy oy) zoom) ty)
+        tx (if (< px wminx) px tx)
+        ty (if (< py wminy) py ty)
+        tx (if (> px wmaxx) (+ wminx (- px wmaxx)) tx)
+        ty (if (> py wmaxy) (+ wminy (- py wmaxy)) ty)]
+    [tx ty bminsx bminsy]))
+
+;; --- main --------------------------------------------------------------
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - 2d camera platformer (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [player-x player-y speed can-jump?
+  ;;         cam-target-x cam-target-y cam-offset-x cam-offset-y zoom
+  ;;         camera-mode evening-out? even-out-target].
+  (loop [px 400.0 py 280.0 spd 0.0 jump? false
+         tx 400.0 ty 280.0 ox HALF-W oy HALF-H zoom 1.0
+         mode 0 evening? false etarget 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [delta (+ 0.0 (cpp/GetFrameTime))
+            [px py spd jump?] (update-player px py spd jump? delta)
+
+            zoom (+ zoom (* (+ 0.0 (cpp/GetMouseWheelMove)) 0.05))
+            zoom (if (> zoom 3.0) 3.0 (if (< zoom 0.25) 0.25 zoom))
+
+            reset? (cpp/IsKeyPressed cpp/KEY_R)
+            zoom (if reset? 1.0 zoom)
+            px (if reset? 400.0 px)
+            py (if reset? 280.0 py)
+
+            mode (if (cpp/IsKeyPressed cpp/KEY_C) (int (mod (inc mode) 5)) mode)
+
+            cam (cond
+                  (= mode 0) (conj (cam-center px py) evening? etarget)
+                  (= mode 1) (conj (cam-inside-map px py zoom) evening? etarget)
+                  (= mode 2) (conj (cam-smooth px py tx ty delta) evening? etarget)
+                  (= mode 3) (cam-even-out px py spd jump? ty delta evening? etarget)
+                  :else      (conj (cam-bounds-push px py tx ty ox oy zoom) evening? etarget))
+            [tx ty ox oy evening? etarget] cam]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/LIGHTGRAY)
+
+        (cpp/BeginMode2D (cpp/Camera2D (cpp/Vector2 (cpp/float ox) (cpp/float oy))
+                                       (cpp/Vector2 (cpp/float tx) (cpp/float ty))
+                                       (cpp/float 0.0) (cpp/float zoom)))
+
+        (loop [i 0]
+          (when (< i (count ITEMS))
+            (let [it (nth ITEMS i)]
+              (cpp/DrawRectangleRec
+               (cpp/Rectangle (cpp/float (:x it)) (cpp/float (:y it))
+                              (cpp/float (:w it)) (cpp/float (:h it)))
+               (if (:block it) cpp/GRAY cpp/LIGHTGRAY)))
+            (recur (inc i))))
+
+        (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float (- px 20.0)) (cpp/float (- py 40.0))
+                                             (cpp/float 40.0) (cpp/float 40.0))
+                              cpp/RED)
+        (cpp/DrawCircleV (cpp/Vector2 (cpp/float px) (cpp/float py)) (cpp/float 5.0) cpp/GOLD)
+
+        (cpp/EndMode2D)
+
+        (cpp/DrawText "Controls:" 20 20 10 cpp/BLACK)
+        (cpp/DrawText "- Right/Left to move" 40 40 10 cpp/DARKGRAY)
+        (cpp/DrawText "- Space to jump" 40 60 10 cpp/DARKGRAY)
+        (cpp/DrawText "- Mouse Wheel to Zoom in-out" 40 80 10 cpp/DARKGRAY)
+        (cpp/DrawText "- R to reset position + zoom, Q to quit" 40 100 10 cpp/DARKGRAY)
+        (cpp/DrawText "- C to change camera mode" 40 120 10 cpp/DARKGRAY)
+        (cpp/DrawText "Current camera mode:" 20 140 10 cpp/BLACK)
+        (cpp/DrawText (nth DESCRIPTIONS mode) 40 160 10 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur px py spd jump? tx ty ox oy zoom mode evening? etarget)))))
+
+  (cpp/CloseWindow))

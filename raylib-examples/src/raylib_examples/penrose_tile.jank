@@ -1,0 +1,127 @@
+(ns raylib-examples.penrose-tile
+  "raylib [shapes] example - penrose tile, ported to jank.
+
+  A Penrose tiling grown with an L-system and drawn with a turtle.
+  UP/DOWN change the number of generations, Q quits.
+  Based on raylib/examples/shapes/shapes_penrose_tile.c
+  (jank-native: the production string is handled as a vector of one-char
+  string tokens - no char literals - via subs/count/reduce; the turtle
+  stack is a jank vector)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def PI 3.141592653589793)
+(def DEG2RAD (/ PI 180.0))
+(def THETA 36.0)
+(def MAX-GEN 4)
+(def BASE-LEN 460.0)
+
+(def AXIOM  "[X]++[X]++[X]++[X]++[X]")
+(def RULE-W "YF++ZF4-XF[-YF4-WF]++")
+(def RULE-X "+YF--ZF[3-WF--XF]+")
+(def RULE-Y "-WF++XF[+++YF++ZF]-")
+(def RULE-Z "--YF++++WF[+ZF++++XF]--XF")
+
+(def DIGITS {"0" 0 "1" 1 "2" 2 "3" 3 "4" 4 "5" 5 "6" 6 "7" 7 "8" 8 "9" 9})
+
+;; A string -> vector of one-character string tokens.
+(defn tokenize [s]
+  (loop [i 0 acc []]
+    (if (< i (count s))
+      (recur (inc i) (conj acc (subs s i (inc i))))
+      acc)))
+
+(def T-W (tokenize RULE-W))
+(def T-X (tokenize RULE-X))
+(def T-Y (tokenize RULE-Y))
+(def T-Z (tokenize RULE-Z))
+
+;; One L-system rewrite pass: expand W/X/Y/Z into their rules, drop F,
+;; keep everything else.
+(defn build-step [tokens]
+  (reduce (fn [acc t]
+            (cond (= t "W") (into acc T-W)
+                  (= t "X") (into acc T-X)
+                  (= t "Y") (into acc T-Y)
+                  (= t "Z") (into acc T-Z)
+                  (= t "F") acc
+                  :else     (conj acc t)))
+          []
+          tokens))
+
+(defn build-production [gen]
+  (loop [i 0 toks (tokenize AXIOM)]
+    (if (< i gen) (recur (inc i) (build-step toks)) toks)))
+
+;; drawLength = BASE-LEN*(gen/MAX-GEN), halved once per generation.
+(defn draw-len-for [gen]
+  (loop [i 0 len (* BASE-LEN (/ (+ 0.0 gen) MAX-GEN))]
+    (if (< i gen) (recur (inc i) (* len 0.5)) len)))
+
+;; Walk the first `steps` tokens with a turtle, drawing each F segment.
+(defn draw-lsystem [tokens steps draw-len]
+  (let [cx (/ WIDTH 2.0)
+        cy (/ HEIGHT 2.0)]
+    (loop [i 0 ox 0.0 oy 0.0 angle -90.0 stack [] repeats 1]
+      (when (< i steps)
+        (let [t (nth tokens i)]
+          (cond
+            (= t "F")
+            (let [rad (* DEG2RAD angle)
+                  nx  (+ ox (* draw-len (cpp/cos rad)))
+                  ny  (+ oy (* draw-len (cpp/sin rad)))]
+              (cpp/DrawLineEx (cpp/Vector2 (cpp/float (+ ox cx)) (cpp/float (+ oy cy)))
+                              (cpp/Vector2 (cpp/float (+ nx cx)) (cpp/float (+ ny cy)))
+                              (cpp/float 2.0) (cpp/Fade cpp/BLACK (cpp/float 0.2)))
+              (recur (inc i) nx ny angle stack 1))
+            (= t "+") (recur (inc i) ox oy (+ angle (* THETA repeats)) stack 1)
+            (= t "-") (recur (inc i) ox oy (- angle (* THETA repeats)) stack 1)
+            (= t "[") (recur (inc i) ox oy angle (conj stack {:x ox :y oy :a angle}) repeats)
+            (= t "]") (if (> (count stack) 0)
+                        (let [top (nth stack (dec (count stack)))]
+                          (recur (inc i) (:x top) (:y top) (:a top)
+                                 (subvec stack 0 (dec (count stack))) repeats))
+                        (recur (inc i) ox oy angle stack repeats))
+            :else (let [d (get DIGITS t)]
+                    (recur (inc i) ox oy angle stack (if d d repeats)))))))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - penrose tile (jank)")
+  (cpp/SetTargetFPS 120)
+
+  ;; Thread [gen reveal-steps tokens draw-len]. The production only
+  ;; rebuilds when the generation count changes.
+  (loop [gen 0 steps 0 tokens [] draw-len 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [new-gen (cond (cpp/IsKeyPressed cpp/KEY_UP)   (if (< gen MAX-GEN) (inc gen) gen)
+                          (cpp/IsKeyPressed cpp/KEY_DOWN) (if (> gen 0) (dec gen) gen)
+                          :else gen)
+            changed  (not (= new-gen gen))
+            tokens   (if changed (build-production new-gen) tokens)
+            draw-len (if changed (draw-len-for new-gen) draw-len)
+            steps    (if changed 0 steps)
+            gen      new-gen
+            ;; Reveal 12 more tokens each frame, up to the full production.
+            grown    (+ steps 12)
+            n        (count tokens)
+            steps    (if (> grown n) n grown)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (when (> gen 0)
+          (draw-lsystem tokens steps draw-len))
+
+        (cpp/DrawText "penrose l-system" 10 10 20 cpp/DARKGRAY)
+        (cpp/DrawText "press UP or DOWN to change generations - Q quits" 10 30 20 cpp/DARKGRAY)
+        (cpp/DrawText (str "generations: " gen) 10 50 20 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur gen steps tokens draw-len)))))
+
+  (cpp/CloseWindow))

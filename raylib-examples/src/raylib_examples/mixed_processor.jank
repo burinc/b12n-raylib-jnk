@@ -1,0 +1,109 @@
+(ns raylib-examples.mixed-processor
+  "raylib [audio] example - mixed processor, ported to jank.
+
+  A DSP callback on the whole audio mix: every frame of the country
+  song (and any coin SPACE plays over it) passes through a distortion
+  that raises samples to an adjustable exponent, while a rolling
+  volume histogram draws on screen. LEFT/RIGHT change the distortion.
+  ESC quits.
+  Based on raylib/examples/audio/audio_mixed_processor.c
+
+  jank-native notes:
+  - FIRST AUDIO CALLBACK: jank cannot form C function pointers, but a
+    callback DEFINED in the cpp/raw block is ordinary C - a sibling
+    wrapper attaches ITS pointer with AttachAudioMixedProcessor. The
+    callback runs on the audio thread against C statics (exponent +
+    the 400-entry volume history); jank tunes the exponent through a
+    setter and reads the history per column for the plot."
+  (:require [clojure.string :as string])
+  (:include "raylib.h" "math.h"))
+
+;; The audio-thread DSP callback + its tuning/readout statics.
+(cpp/raw "static float jank_exponent = 1.0f;
+static float jank_average_volume[400] = { 0.0f };
+
+static void jank_process_audio(void *buffer, unsigned int frames) {
+  float *samples = (float *)buffer;
+  float average = 0.0f;
+  for (unsigned int frame = 0; frame < frames; frame++) {
+    float *left = &samples[frame*2 + 0], *right = &samples[frame*2 + 1];
+    *left = powf(fabsf(*left), jank_exponent)*((*left < 0.0f)? -1.0f : 1.0f);
+    *right = powf(fabsf(*right), jank_exponent)*((*right < 0.0f)? -1.0f : 1.0f);
+    average += fabsf(*left)/frames;
+    average += fabsf(*right)/frames;
+  }
+  for (int i = 0; i < 399; i++) jank_average_volume[i] = jank_average_volume[i + 1];
+  jank_average_volume[399] = average;
+}
+static void jank_attach_processor(void) { AttachAudioMixedProcessor(jank_process_audio); }
+static void jank_detach_processor(void) { DetachAudioMixedProcessor(jank_process_audio); }
+static void jank_set_exponent(double e) { jank_exponent = (float)e; }
+static double jank_avg_volume(int i) { return (double)jank_average_volume[i]; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/audio/resources/")
+
+(defn- fmt2
+  "The C's %.2f, via trimming str two digits past the dot."
+  [v]
+  (let [s (str v)
+        dot (string/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - mixed processor (jank)")
+
+  (cpp/InitAudioDevice)
+  (cpp/jank_attach_processor)
+
+  (let [music (cpp/LoadMusicStream (str RES "country.mp3"))
+        sound (cpp/LoadSound (str RES "coin.wav"))]
+
+    (cpp/PlayMusicStream music)
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [distortion-exponent].
+    (loop [exponent 1.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateMusicStream music)
+
+        (let [exponent (cond (cpp/IsKeyPressed cpp/KEY_LEFT) (- exponent 0.05)
+                             (cpp/IsKeyPressed cpp/KEY_RIGHT) (+ exponent 0.05)
+                             :else exponent)
+              exponent (if (< exponent 0.5) 0.5 (if (> exponent 3.0) 3.0 exponent))]
+
+          (cpp/jank_set_exponent exponent)
+
+          (when (cpp/IsKeyPressed cpp/KEY_SPACE)
+            (cpp/PlaySound sound))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawText "MUSIC SHOULD BE PLAYING!" 255 150 20 cpp/LIGHTGRAY)
+          (cpp/DrawText (str "EXPONENT = " (fmt2 exponent)) 215 180 20 cpp/LIGHTGRAY)
+
+          ;; the rolling average-volume histogram, fed by the callback
+          (cpp/DrawRectangle 199 199 402 34 cpp/LIGHTGRAY)
+          (loop [i 0]
+            (when (< i 400)
+              (cpp/DrawLine (+ 201 i)
+                            (- 232 (int (* (+ 0.0 (cpp/jank_avg_volume (int i))) 32.0)))
+                            (+ 201 i) 232 cpp/MAROON)
+              (recur (inc i))))
+          (cpp/DrawRectangleLines 199 199 402 34 cpp/GRAY)
+
+          (cpp/DrawText "PRESS SPACE TO PLAY OTHER SOUND" 200 250 20 cpp/LIGHTGRAY)
+          (cpp/DrawText "USE LEFT AND RIGHT ARROWS TO ALTER DISTORTION" 140 280 20 cpp/LIGHTGRAY)
+
+          (cpp/EndDrawing)
+          (recur exponent))))
+
+    (cpp/UnloadMusicStream music)
+    (cpp/UnloadSound sound))
+
+  (cpp/jank_detach_processor)
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

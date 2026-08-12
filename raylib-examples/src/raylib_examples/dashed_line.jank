@@ -1,0 +1,81 @@
+(ns raylib-examples.dashed-line
+  "raylib [shapes] example - dashed line, ported to jank.
+
+  A dashed line runs from a fixed point to the mouse. UP/DOWN change the
+  dash length, LEFT/RIGHT the gap, C cycles the color, Q quits.
+  Based on raylib/examples/shapes/shapes_dashed_line.c. raylib's own
+  DrawLineDashed is an example-local helper, so the dashes are drawn here
+  as DrawLineEx segments (jank-native: C sqrt, Vector2 built inline)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SX 20.0)              ; fixed start point
+(def SY 50.0)
+(def N-COLORS 8)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - dashed line (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [dash 25.0 blank 15.0 ci 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [dash  (if (cpp/IsKeyDown cpp/KEY_UP) (+ dash 1.0) dash)
+            dash  (if (and (cpp/IsKeyDown cpp/KEY_DOWN) (> dash 1.0)) (- dash 1.0) dash)
+            blank (if (cpp/IsKeyDown cpp/KEY_RIGHT) (+ blank 1.0) blank)
+            blank (if (and (cpp/IsKeyDown cpp/KEY_LEFT) (> blank 1.0)) (- blank 1.0) blank)
+            ci    (if (cpp/IsKeyPressed cpp/KEY_C)
+                    (if (>= (+ ci 1) N-COLORS) 0 (+ ci 1))
+                    ci)
+            mx    (+ 0.0 (cpp/GetMouseX))
+            my    (+ 0.0 (cpp/GetMouseY))
+            dx    (- mx SX)
+            dy    (- my SY)
+            len   (cpp/sqrt (+ (* dx dx) (* dy dy)))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        ;; Walk the line in dash+gap steps, drawing one segment per step.
+        (when (> len 0.0)
+          ;; A native Color can't be returned from a fn, so resolve the
+          ;; current color inline as a let-local via a nested if.
+          (let [nx  (/ dx len)
+                ny  (/ dy len)
+                seg (+ dash blank)
+                col (if (= ci 0) cpp/RED
+                      (if (= ci 1) cpp/ORANGE
+                        (if (= ci 2) cpp/GOLD
+                          (if (= ci 3) cpp/GREEN
+                            (if (= ci 4) cpp/BLUE
+                              (if (= ci 5) cpp/VIOLET
+                                (if (= ci 6) cpp/PINK cpp/BLACK)))))))]
+            (loop [d 0.0]
+              (when (< d len)
+                ;; clamp the dash end to len; `min` rejects cpp/sqrt's raw
+                ;; double, but `<` handles it, so pick with an if.
+                (let [dash-end (+ d dash)
+                      de       (if (< dash-end len) dash-end len)]
+                  (cpp/DrawLineEx (cpp/Vector2 (cpp/float (+ SX (* nx d)))
+                                               (cpp/float (+ SY (* ny d))))
+                                  (cpp/Vector2 (cpp/float (+ SX (* nx de)))
+                                               (cpp/float (+ SY (* ny de))))
+                                  (cpp/float 2.0) col))
+                (recur (+ d seg))))))
+
+        ;; UI panel.
+        (cpp/DrawRectangle 5 5 265 95 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+        (cpp/DrawRectangleLines 5 5 265 95 cpp/BLUE)
+        (cpp/DrawText "CONTROLS:" 15 15 10 cpp/BLACK)
+        (cpp/DrawText "UP/DOWN: dash length" 15 35 10 cpp/BLACK)
+        (cpp/DrawText "LEFT/RIGHT: gap length" 15 55 10 cpp/BLACK)
+        (cpp/DrawText "C: cycle color   Q: quit" 15 75 10 cpp/BLACK)
+        (cpp/DrawText (str "Dash: " (int dash) " | Gap: " (int blank)) 15 115 10 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur dash blank ci)))))
+
+  (cpp/CloseWindow))

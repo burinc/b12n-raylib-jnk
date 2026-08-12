@@ -1,0 +1,120 @@
+(ns raylib-examples.raw-stream
+  "raylib [audio] example - raw stream, ported to jank.
+
+  A sine wave GENERATED sample-by-sample into a raw 44.1kHz mono
+  float audio stream: UP/DOWN change the frequency (switched at zero
+  crossings so it never clicks), LEFT/RIGHT pan, and the same wave is
+  plotted on screen. ESC quits.
+  Based on raylib/examples/audio/audio_raw_stream.c
+
+  jank-native notes:
+  - FIRST RAW AUDIO STREAM: LoadAudioStream binds as a let-local like
+    any create-once native; IsAudioStreamProcessed gates the refill.
+  - The 4096-sample buffer fill (with the oscillator's index/
+    frequency/start-time state) lives in a C shim - UpdateAudioStream
+    needs the float* - returning the possibly-switched frequency;
+    jank threads only the requested frequency and pan.
+  - The waveform plot is jank cpp/sin math, one DrawLineV per column."
+  (:require [clojure.string :as string])
+  (:include "raylib.h" "math.h"))
+
+;; The oscillator + stream refill (UpdateAudioStream needs the float*).
+(cpp/raw "#define JANK_BUFFER_SIZE 4096
+#define JANK_SAMPLE_RATE 44100
+static float jank_buffer[JANK_BUFFER_SIZE];
+static int jank_sine_index = 0;
+static int jank_sine_frequency = 440;
+static double jank_sine_start_time = 0.0;
+
+/* refill the stream; the frequency only switches at zero crossings */
+static int jank_fill_stream(AudioStream stream, int newFrequency) {
+  for (int i = 0; i < JANK_BUFFER_SIZE; i++) {
+    int wavelength = JANK_SAMPLE_RATE/jank_sine_frequency;
+    jank_buffer[i] = sin(2*PI*jank_sine_index/wavelength);
+    jank_sine_index++;
+    if (jank_sine_index >= wavelength) {
+      jank_sine_frequency = newFrequency;
+      jank_sine_index = 0;
+      jank_sine_start_time = GetTime();
+    }
+  }
+  UpdateAudioStream(stream, jank_buffer, JANK_BUFFER_SIZE);
+  return jank_sine_frequency;
+}
+static double jank_get_sine_start(void) { return jank_sine_start_time; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SAMPLE-RATE 44100)
+
+(defn- fmt2
+  "The C's %.2f, via trimming str two digits past the dot."
+  [v]
+  (let [s (str v)
+        dot (string/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - raw stream (jank)")
+
+  (cpp/InitAudioDevice)
+  (cpp/SetAudioStreamBufferSizeDefault 4096)
+
+  ;; 44.1kHz, 32-bit float samples, mono
+  (let [stream (cpp/LoadAudioStream SAMPLE-RATE 32 1)]
+    (cpp/SetAudioStreamPan stream (cpp/float 0.0))
+    (cpp/PlayAudioStream stream)
+
+    (cpp/SetTargetFPS 30)
+
+    ;; Thread [current-frequency requested-frequency pan].
+    (loop [freq 440
+           new-freq 440
+           pan 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [new-freq (cond (cpp/IsKeyDown cpp/KEY_UP) (min 12500 (+ new-freq 10))
+                             (cpp/IsKeyDown cpp/KEY_DOWN) (max 20 (- new-freq 10))
+                             :else new-freq)
+              pan' (cond (cpp/IsKeyDown cpp/KEY_LEFT) (max -1.0 (- pan 0.01))
+                         (cpp/IsKeyDown cpp/KEY_RIGHT) (min 1.0 (+ pan 0.01))
+                         :else pan)
+              _ (when (not= pan' pan)
+                  (cpp/SetAudioStreamPan stream (cpp/float pan')))
+              freq (if (cpp/IsAudioStreamProcessed stream)
+                     (int (cpp/jank_fill_stream stream (int new-freq)))
+                     freq)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawText (str "sine frequency: " freq) (- WIDTH 220) 10 20 cpp/RED)
+          (cpp/DrawText (str "pan: " (fmt2 pan')) (- WIDTH 220) 30 20 cpp/RED)
+          (cpp/DrawText "Up/down to change frequency" 10 10 20 cpp/DARKGRAY)
+          (cpp/DrawText "Left/right to pan" 10 30 20 cpp/DARKGRAY)
+
+          ;; plot the same sine as the one streaming to the speakers
+          (let [window-start (* (- (+ 0.0 (cpp/GetTime)) (+ 0.0 (cpp/jank_get_sine_start)))
+                                SAMPLE-RATE)
+                window-size (* 0.1 SAMPLE-RATE)
+                wavelength (int (quot SAMPLE-RATE freq))]
+            (loop [i 0]
+              (when (< i WIDTH)
+                (let [t0 (+ window-start (/ (* i window-size) WIDTH))
+                      t1 (+ window-start (/ (* (inc i) window-size) WIDTH))
+                      pi2 6.283185307179586]
+                  (cpp/DrawLineV
+                   (cpp/Vector2 (cpp/float (+ 0.0 i))
+                                (cpp/float (+ 250.0 (* 50.0 (cpp/sin (/ (* pi2 t0) wavelength))))))
+                   (cpp/Vector2 (cpp/float (+ 1.0 i))
+                                (cpp/float (+ 250.0 (* 50.0 (cpp/sin (/ (* pi2 t1) wavelength))))))
+                   cpp/RED))
+                (recur (inc i)))))
+
+          (cpp/EndDrawing)
+          (recur freq new-freq pan'))))
+
+    (cpp/UnloadAudioStream stream))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

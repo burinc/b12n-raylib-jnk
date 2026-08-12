@@ -1,0 +1,239 @@
+(ns raylib-examples.splines-drawing
+  "raylib [shapes] example - splines drawing, ported to jank.
+
+  Draggable spline points with four spline types. Keys 1-4 pick
+  LINEAR / BSPLINE / CATMULLROM / BEZIER, LEFT mouse drags a point (or
+  a gold bezier control handle), RIGHT mouse adds a point at the end,
+  hold A/S for thickness, H toggles the point helpers, Q quits.
+  Based on raylib/examples/shapes/shapes_splines_drawing.c
+  (jank-native: the array-taking DrawSpline* calls become per-segment
+  DrawSplineSegment* calls with by-value Vector2s - the same
+  decomposition the C shows commented out - so joints are not
+  thickness-compensated; the raygui dropdown/slider/checkbox become
+  keys; a control handle is identified as [segment-index :s|:e]
+  instead of a Vector2*.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-POINTS 32)
+
+(defn adj
+  "Adjust v by step while dn/up are held, clamped to lo..hi."
+  [v dn up step lo hi]
+  (let [v (if dn (- v step) v)
+        v (if up (+ v step) v)]
+    (if (< v lo) lo (if (> v hi) hi v))))
+
+(defn init-controls
+  "One bezier control pair per segment, offset +/-50 in x like the C."
+  [points]
+  (loop [i 0 acc []]
+    (if (< i (- (count points) 1))
+      (let [p (nth points i) q (nth points (inc i))]
+        (recur (inc i)
+               (conj acc {:sx (+ (:x p) 50.0) :sy (:y p)
+                          :ex (- (:x q) 50.0) :ey (:y q)})))
+      acc)))
+
+(defn find-focused-point
+  "Index of the point within 8px of the mouse, or -1."
+  [points mx my]
+  (loop [i 0]
+    (if (< i (count points))
+      (let [p (nth points i)]
+        (if (cpp/CheckCollisionPointCircle
+             (cpp/Vector2 (cpp/float mx) (cpp/float my))
+             (cpp/Vector2 (cpp/float (:x p)) (cpp/float (:y p)))
+             (cpp/float 8.0))
+          i
+          (recur (inc i))))
+      -1)))
+
+(defn find-focused-cp
+  "The control handle within 6px of the mouse as [segment :s|:e], or nil."
+  [controls mx my]
+  (loop [i 0]
+    (if (< i (count controls))
+      (let [c (nth controls i)]
+        (if (cpp/CheckCollisionPointCircle
+             (cpp/Vector2 (cpp/float mx) (cpp/float my))
+             (cpp/Vector2 (cpp/float (:sx c)) (cpp/float (:sy c)))
+             (cpp/float 6.0))
+          [i :s]
+          (if (cpp/CheckCollisionPointCircle
+               (cpp/Vector2 (cpp/float mx) (cpp/float my))
+               (cpp/Vector2 (cpp/float (:ex c)) (cpp/float (:ey c)))
+               (cpp/float 6.0))
+            [i :e]
+            (recur (inc i)))))
+      nil)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - splines drawing (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [initial [{:x 50.0 :y 400.0} {:x 160.0 :y 220.0} {:x 340.0 :y 380.0}
+                 {:x 520.0 :y 60.0} {:x 710.0 :y 260.0}]]
+    ;; Thread [points controls selected-point focused-point
+    ;;         selected-cp focused-cp spline-type thickness helpers?].
+    (loop [points initial controls (init-controls initial)
+           sel -1 foc -1 sel-cp nil foc-cp nil
+           stype 0 thick 8.0 helpers? true]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mx (+ 0.0 (cpp/GetMouseX))
+              my (+ 0.0 (cpp/GetMouseY))
+              lmb-press (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+              lmb-rel   (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT)
+
+              ;; RIGHT click appends a point + its segment's control pair.
+              add? (and (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_RIGHT)
+                        (< (count points) MAX-POINTS))
+              controls (if add?
+                         (let [lp (nth points (- (count points) 1))]
+                           (conj controls {:sx (+ (:x lp) 50.0) :sy (:y lp)
+                                           :ex (- mx 50.0) :ey my}))
+                         controls)
+              points (if add? (conj points {:x mx :y my}) points)
+
+              ;; Point focus / selection / drag.
+              scan? (and (= sel -1) (or (not (= stype 3)) (nil? sel-cp)))
+              foc (if scan? (find-focused-point points mx my) foc)
+              sel (if (and scan? lmb-press) foc sel)
+              points (if (>= sel 0) (assoc points sel {:x mx :y my}) points)
+              sel (if (and (>= sel 0) lmb-rel) -1 sel)
+
+              ;; Bezier control-handle focus / selection / drag.
+              cp-scan? (and (= stype 3) (= foc -1) (nil? sel-cp))
+              foc-cp (if cp-scan? (find-focused-cp controls mx my) foc-cp)
+              sel-cp (if (and cp-scan? lmb-press) foc-cp sel-cp)
+              controls (if (and (= stype 3) (= foc -1) (not (nil? sel-cp)))
+                         (let [i (nth sel-cp 0)
+                               c (nth controls i)]
+                           (assoc controls i
+                                  (if (= (nth sel-cp 1) :s)
+                                    (assoc c :sx mx :sy my)
+                                    (assoc c :ex mx :ey my))))
+                         controls)
+              sel-cp (if (and (not (nil? sel-cp)) lmb-rel) nil sel-cp)
+
+              ;; Spline type keys; leaving bezier clears handle selection.
+              stype (if (cpp/IsKeyPressed cpp/KEY_ONE) 0
+                      (if (cpp/IsKeyPressed cpp/KEY_TWO) 1
+                        (if (cpp/IsKeyPressed cpp/KEY_THREE) 2
+                          (if (cpp/IsKeyPressed cpp/KEY_FOUR) 3 stype))))
+              sel-cp (if (not (= stype 3)) nil sel-cp)
+
+              thick (adj thick (cpp/IsKeyDown cpp/KEY_A) (cpp/IsKeyDown cpp/KEY_S) 0.5 1.0 40.0)
+              helpers? (if (cpp/IsKeyPressed cpp/KEY_H) (not helpers?) helpers?)
+              n (count points)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; The spline, per segment (by-value segment APIs).
+          (when (= stype 0)
+            (loop [i 0]
+              (when (< i (- n 1))
+                (let [p (nth points i) q (nth points (inc i))]
+                  (cpp/DrawSplineSegmentLinear
+                   (cpp/Vector2 (cpp/float (:x p)) (cpp/float (:y p)))
+                   (cpp/Vector2 (cpp/float (:x q)) (cpp/float (:y q)))
+                   (cpp/float thick) cpp/RED))
+                (recur (inc i)))))
+          (when (= stype 1)
+            (loop [i 0]
+              (when (< i (- n 3))
+                (let [a (nth points i) b (nth points (+ i 1))
+                      c (nth points (+ i 2)) d (nth points (+ i 3))]
+                  (cpp/DrawSplineSegmentBasis
+                   (cpp/Vector2 (cpp/float (:x a)) (cpp/float (:y a)))
+                   (cpp/Vector2 (cpp/float (:x b)) (cpp/float (:y b)))
+                   (cpp/Vector2 (cpp/float (:x c)) (cpp/float (:y c)))
+                   (cpp/Vector2 (cpp/float (:x d)) (cpp/float (:y d)))
+                   (cpp/float thick) cpp/RED))
+                (recur (inc i)))))
+          (when (= stype 2)
+            (loop [i 0]
+              (when (< i (- n 3))
+                (let [a (nth points i) b (nth points (+ i 1))
+                      c (nth points (+ i 2)) d (nth points (+ i 3))]
+                  (cpp/DrawSplineSegmentCatmullRom
+                   (cpp/Vector2 (cpp/float (:x a)) (cpp/float (:y a)))
+                   (cpp/Vector2 (cpp/float (:x b)) (cpp/float (:y b)))
+                   (cpp/Vector2 (cpp/float (:x c)) (cpp/float (:y c)))
+                   (cpp/Vector2 (cpp/float (:x d)) (cpp/float (:y d)))
+                   (cpp/float thick) cpp/RED))
+                (recur (inc i)))))
+          (when (= stype 3)
+            (loop [i 0]
+              (when (< i (- n 1))
+                (let [p (nth points i) q (nth points (inc i))
+                      c (nth controls i)]
+                  (cpp/DrawSplineSegmentBezierCubic
+                   (cpp/Vector2 (cpp/float (:x p)) (cpp/float (:y p)))
+                   (cpp/Vector2 (cpp/float (:sx c)) (cpp/float (:sy c)))
+                   (cpp/Vector2 (cpp/float (:ex c)) (cpp/float (:ey c)))
+                   (cpp/Vector2 (cpp/float (:x q)) (cpp/float (:y q)))
+                   (cpp/float thick) cpp/RED))
+                (recur (inc i))))
+            ;; Control handles: gold dots, green when focused, gray stems.
+            (loop [i 0]
+              (when (< i (- n 1))
+                (let [p (nth points i) q (nth points (inc i))
+                      c (nth controls i)]
+                  (cpp/DrawCircleV (cpp/Vector2 (cpp/float (:sx c)) (cpp/float (:sy c)))
+                                   (cpp/float 6.0) cpp/GOLD)
+                  (cpp/DrawCircleV (cpp/Vector2 (cpp/float (:ex c)) (cpp/float (:ey c)))
+                                   (cpp/float 6.0) cpp/GOLD)
+                  (when (= foc-cp [i :s])
+                    (cpp/DrawCircleV (cpp/Vector2 (cpp/float (:sx c)) (cpp/float (:sy c)))
+                                     (cpp/float 8.0) cpp/GREEN))
+                  (when (= foc-cp [i :e])
+                    (cpp/DrawCircleV (cpp/Vector2 (cpp/float (:ex c)) (cpp/float (:ey c)))
+                                     (cpp/float 8.0) cpp/GREEN))
+                  (cpp/DrawLineV (cpp/Vector2 (cpp/float (:x p)) (cpp/float (:y p)))
+                                 (cpp/Vector2 (cpp/float (:sx c)) (cpp/float (:sy c)))
+                                 cpp/GRAY)
+                  (cpp/DrawLineV (cpp/Vector2 (cpp/float (:ex c)) (cpp/float (:ey c)))
+                                 (cpp/Vector2 (cpp/float (:x q)) (cpp/float (:y q)))
+                                 cpp/GRAY))
+                (recur (inc i)))))
+
+          ;; Point helpers: hollow circles + coordinates.
+          (when helpers?
+            (loop [i 0]
+              (when (< i n)
+                (let [p (nth points i)]
+                  (cpp/DrawCircleLinesV
+                   (cpp/Vector2 (cpp/float (:x p)) (cpp/float (:y p)))
+                   (cpp/float (if (= foc i) 12.0 8.0))
+                   (if (= foc i) cpp/BLUE cpp/DARKBLUE))
+                  (when (and (or (= stype 1) (= stype 2)) (< i (- n 1)))
+                    (let [q (nth points (inc i))]
+                      (cpp/DrawLineV (cpp/Vector2 (cpp/float (:x p)) (cpp/float (:y p)))
+                                     (cpp/Vector2 (cpp/float (:x q)) (cpp/float (:y q)))
+                                     cpp/GRAY)))
+                  (cpp/DrawText (str "[" (int (:x p)) ", " (int (:y p)) "]")
+                                (int (:x p)) (int (+ (:y p) 10.0)) 10 cpp/BLACK))
+                (recur (inc i)))))
+
+          ;; Config panel, as text.
+          (cpp/DrawText (str "Spline type: "
+                             (if (= stype 0) "LINEAR"
+                               (if (= stype 1) "BSPLINE"
+                                 (if (= stype 2) "CATMULLROM" "BEZIER")))
+                             "  (1-4)")
+                        12 10 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "Spline thickness: " (int thick) "  (A/S)") 12 30 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "[H] Point helpers: " (if helpers? "ON" "OFF")) 12 50 10 cpp/DARKGRAY)
+          (cpp/DrawText "LEFT drag point/handle - RIGHT add point - Q quit" 12 70 10 cpp/DARKGRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur points controls sel foc sel-cp foc-cp stype thick helpers?)))))
+
+  (cpp/CloseWindow)))

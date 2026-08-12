@@ -1,0 +1,86 @@
+(ns raylib-examples.vertex-displacement
+  "raylib [shaders] example - vertex displacement, ported to jank.
+
+  A 50x50 plane mesh whose VERTICES ride animated waves: the vertex
+  shader displaces them by scrolling Perlin-noise lookups, the
+  fragment shader colors by height (water / sand / grass). Free
+  camera: WASD move, mouse look. ESC quits.
+  Based on raylib/examples/shaders/shaders_vertex_displacement.c
+
+  jank-native notes:
+  - The Perlin noise texture binds to sampler slot 1 ONCE before the
+    loop through raw rlgl calls (rlEnableShader + rlActiveTextureSlot
+    + rlEnableTexture + rlSetUniformSampler); the .-id field reads
+    feed the rlgl calls directly.
+  - GenImagePerlinNoise is a plain call; the material shader write is
+    the usual (cpp/& model) shim; the time FLOAT uniform rides the
+    jank_rlights.h setter toolbox (location hoisted out of the loop,
+    unlike the C's per-frame lookup)."
+  (:include "raylib.h" "rlgl.h" "jank_rlights.h"))
+
+(cpp/raw "static void jank_model_set_shader(Model* m, Shader s) {
+  m->materials[0].shader = s;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - vertex displacement (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 20.0) (cpp/float 5.0) (cpp/float -20.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 60.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        shader (cpp/LoadShader (str RES "shaders/glsl330/vertex_displacement.vs")
+                               (str RES "shaders/glsl330/vertex_displacement.fs"))
+        perlin-image (cpp/GenImagePerlinNoise 512 512 0 0 (cpp/float 1.0))
+        perlin-map (cpp/LoadTextureFromImage perlin-image)
+        _ (cpp/UnloadImage perlin-image)
+        perlin-loc (int (cpp/GetShaderLocation shader "perlinNoiseMap"))
+        time-loc (int (cpp/GetShaderLocation shader "time"))
+        plane-model (cpp/LoadModelFromMesh (cpp/GenMeshPlane (cpp/float 50.0) (cpp/float 50.0) 50 50))]
+
+    ;; bind the noise texture to sampler slot 1, once
+    (cpp/rlEnableShader (.-id shader))
+    (cpp/rlActiveTextureSlot 1)
+    (cpp/rlEnableTexture (.-id perlin-map))
+    (cpp/rlSetUniformSampler perlin-loc 1)
+
+    (cpp/jank_model_set_shader (cpp/& plane-model) shader)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [elapsed-seconds].
+    (loop [time 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FREE)
+
+        (let [time (+ time (+ 0.0 (cpp/GetFrameTime)))]
+          (cpp/jank_rl_set_float shader time-loc time)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/BeginShaderMode shader)
+          (cpp/DrawModel plane-model
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/EndShaderMode)
+          (cpp/EndMode3D)
+
+          (cpp/DrawText "Vertex displacement" 10 10 20 cpp/DARKGRAY)
+          (cpp/DrawFPS 10 40)
+
+          (cpp/EndDrawing)
+          (recur time))))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadModel plane-model)
+    (cpp/UnloadTexture perlin-map))
+
+  (cpp/CloseWindow))

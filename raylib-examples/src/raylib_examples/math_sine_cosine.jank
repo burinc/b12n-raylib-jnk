@@ -1,0 +1,217 @@
+(ns raylib-examples.math-sine-cosine
+  "raylib [shapes] example - math sine cosine, ported to jank.
+
+  A unit-circle visualization: sine, cosine, tangent and cotangent
+  drawn live on a rotating angle, with the sine/cosine waves plotted
+  in a mini graph. SPACE pauses, hold LEFT/RIGHT to scrub the angle,
+  Q quits.
+  Based on raylib/examples/shapes/shapes_math_sine_cosine.c
+  (jank-native: DrawSplineLinear needs a Vector2* array, which jank
+  can't build, so the waves draw as per-segment DrawLineEx lines over
+  the same 36 precomputed points; raymath's Clamp/Wrap are inline jank
+  math; the raygui angle slider/pause toggle become keys; the degree
+  sign in labels becomes 'deg' to keep the source ASCII.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def DEG2RAD 0.017453292519943295)
+(def N-WAVE 36)
+(def CX 370.0)                       ; WIDTH/2 - 30
+(def CY 225.0)
+(def RADIUS 130.0)
+(def GX 20.0)                        ; wave graph rect
+(def GY 330.0)                       ; HEIGHT - 120
+(def GW 200.0)
+(def GH 100.0)
+
+(defn fmt2
+  "A real formatted with exactly two decimals (handles negatives)."
+  [x]
+  (let [neg? (< x 0.0)
+        ax   (if neg? (- 0.0 x) x)
+        c    (int (+ (* ax 100.0) 0.5))
+        whole (int (quot c 100))
+        frac  (int (mod c 100))
+        frac  (str (if (< frac 10) "0" "") frac)]
+    (str (if neg? "-" "") whole "." frac)))
+
+;; The 36 wave sample points as {:x :y} maps, y flipped like the C.
+(defn wave-points [f]
+  (loop [i 0 acc []]
+    (if (< i N-WAVE)
+      (let [t (/ (+ 0.0 i) (- N-WAVE 1))
+            a (* t 360.0 DEG2RAD)]
+        (recur (inc i)
+               (conj acc {:x (+ GX (* t GW))
+                          :y (- (+ GY (/ GH 2.0)) (+ 0.0 (* (f a) (/ GH 2.0))))})))
+      acc)))
+
+(defn draw-wave
+  "DrawSplineLinear replacement: consecutive segments through pts.
+  Takes a color id (0 red / 1 blue) - a native Color can't cross a
+  jank fn boundary, so it resolves inline here."
+  [pts cid]
+  (loop [i 0]
+    (when (< i (- (count pts) 1))
+      (let [p (nth pts i) q (nth pts (inc i))]
+        (cpp/DrawLineEx (cpp/Vector2 (cpp/float (:x p)) (cpp/float (:y p)))
+                        (cpp/Vector2 (cpp/float (:x q)) (cpp/float (:y q)))
+                        (cpp/float 1.0) (if (= cid 0) cpp/RED cpp/BLUE)))
+      (recur (inc i))))
+  nil)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - math sine cosine (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [sine-pts (wave-points (fn [a] (+ 0.0 (cpp/sin a))))
+        cos-pts  (wave-points (fn [a] (+ 0.0 (cpp/cos a))))]
+    ;; Thread [angle paused?].
+    (loop [angle 0.0 paused? false]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [paused? (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not paused?) paused?)
+              ;; Scrub with LEFT/RIGHT; advance 1 deg/frame when running.
+              angle (if (cpp/IsKeyDown cpp/KEY_RIGHT) (+ angle 2.0) angle)
+              angle (if (cpp/IsKeyDown cpp/KEY_LEFT) (- angle 2.0) angle)
+              ar   (* angle DEG2RAD)
+              cosr (+ 0.0 (cpp/cos ar))
+              sinr (+ 0.0 (cpp/sin ar))
+              px   (+ CX (* cosr RADIUS))
+              py   (- CY (* sinr RADIUS))
+              ;; Clamp/Wrap from raymath, done inline.
+              tang (let [t (+ 0.0 (cpp/tan ar))]
+                     (if (< t -10.0) -10.0 (if (> t 10.0) 10.0 t)))
+              cotan (if (> (+ 0.0 (cpp/fabs tang)) 0.001)
+                      (let [ct (/ 1.0 tang)]
+                        (if (< ct (- 0.0 RADIUS)) (- 0.0 RADIUS)
+                          (if (> ct RADIUS) RADIUS ct)))
+                      0.0)
+              tpy  (- CY (* tang RADIUS))
+              cpx  (+ CX (* cotan RADIUS))
+              next-angle (let [a (+ angle (if paused? 0.0 1.0))
+                               a (if (>= a 360.0) (- a 360.0) a)]
+                           (if (< a 0.0) (+ a 360.0) a))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; Cotangent (orange), partly behind the side panel like the C.
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float CX) (cpp/float (- CY RADIUS)))
+                          (cpp/Vector2 (cpp/float cpx) (cpp/float (- CY RADIUS)))
+                          (cpp/float 2.0) cpp/ORANGE)
+          (cpp/DrawLineDashed (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                              (cpp/Vector2 (cpp/float cpx) (cpp/float (- CY RADIUS)))
+                              10 4 cpp/ORANGE)
+
+          ;; Side panel background.
+          (cpp/DrawLine 580 0 580 HEIGHT
+                        (cpp/GetColor (+ (* 218 16777216) (* 218 65536) (* 218 256) 255)))
+          (cpp/DrawRectangle 580 0 (- WIDTH 580) HEIGHT
+                             (cpp/GetColor (+ (* 232 16777216) (* 232 65536) (* 232 256) 255)))
+
+          ;; Base circle and axes.
+          (cpp/DrawCircleLinesV (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                                (cpp/float RADIUS) cpp/GRAY)
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float CX) (cpp/float (- CY RADIUS)))
+                          (cpp/Vector2 (cpp/float CX) (cpp/float (+ CY RADIUS)))
+                          (cpp/float 1.0) cpp/GRAY)
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float (- CX RADIUS)) (cpp/float CY))
+                          (cpp/Vector2 (cpp/float (+ CX RADIUS)) (cpp/float CY))
+                          (cpp/float 1.0) cpp/GRAY)
+
+          ;; Wave graph axes + labels.
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float GX) (cpp/float GY))
+                          (cpp/Vector2 (cpp/float GX) (cpp/float (+ GY GH)))
+                          (cpp/float 2.0) cpp/GRAY)
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float (+ GX GW)) (cpp/float GY))
+                          (cpp/Vector2 (cpp/float (+ GX GW)) (cpp/float (+ GY GH)))
+                          (cpp/float 2.0) cpp/GRAY)
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float GX) (cpp/float (+ GY (/ GH 2.0))))
+                          (cpp/Vector2 (cpp/float (+ GX GW)) (cpp/float (+ GY (/ GH 2.0))))
+                          (cpp/float 2.0) cpp/GRAY)
+          (cpp/DrawText "1" 12 330 6 cpp/GRAY)
+          (cpp/DrawText "0" 12 374 6 cpp/GRAY)
+          (cpp/DrawText "-1" 8 422 6 cpp/GRAY)
+          (cpp/DrawText "0" 18 434 6 cpp/GRAY)
+          (cpp/DrawText "360" 212 434 6 cpp/GRAY)
+
+          ;; Sine (red, vertical) + its wave.
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                          (cpp/Vector2 (cpp/float CX) (cpp/float py))
+                          (cpp/float 2.0) cpp/RED)
+          (cpp/DrawLineDashed (cpp/Vector2 (cpp/float px) (cpp/float CY))
+                              (cpp/Vector2 (cpp/float px) (cpp/float py))
+                              10 4 cpp/RED)
+          (cpp/DrawText (str "Sine " (fmt2 sinr)) 640 190 6 cpp/RED)
+          (cpp/DrawCircleV (cpp/Vector2 (cpp/float (+ GX (* (/ angle 360.0) GW)))
+                                        (cpp/float (+ GY (* (+ (- 0.0 sinr) 1.0) (/ GH 2.0)))))
+                           (cpp/float 4.0) cpp/RED)
+          (draw-wave sine-pts 0)
+
+          ;; Cosine (blue, horizontal) + its wave.
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                          (cpp/Vector2 (cpp/float px) (cpp/float CY))
+                          (cpp/float 2.0) cpp/BLUE)
+          (cpp/DrawLineDashed (cpp/Vector2 (cpp/float CX) (cpp/float py))
+                              (cpp/Vector2 (cpp/float px) (cpp/float py))
+                              10 4 cpp/BLUE)
+          (cpp/DrawText (str "Cosine " (fmt2 cosr)) 640 210 6 cpp/BLUE)
+          (cpp/DrawCircleV (cpp/Vector2 (cpp/float (+ GX (* (/ angle 360.0) GW)))
+                                        (cpp/float (+ GY (* (+ (- 0.0 cosr) 1.0) (/ GH 2.0)))))
+                           (cpp/float 4.0) cpp/BLUE)
+          (draw-wave cos-pts 1)
+
+          ;; Tangent (purple) and cotangent value (orange).
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float (+ CX RADIUS)) (cpp/float CY))
+                          (cpp/Vector2 (cpp/float (+ CX RADIUS)) (cpp/float tpy))
+                          (cpp/float 2.0) cpp/PURPLE)
+          (cpp/DrawLineDashed (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                              (cpp/Vector2 (cpp/float (+ CX RADIUS)) (cpp/float tpy))
+                              10 4 cpp/PURPLE)
+          (cpp/DrawText (str "Tangent " (fmt2 tang)) 640 230 6 cpp/PURPLE)
+          (cpp/DrawText (str "Cotangent " (fmt2 cotan)) 640 250 6 cpp/ORANGE)
+
+          ;; Related angles as sector arcs.
+          (cpp/DrawCircleSectorLines (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                                     (cpp/float (* RADIUS 0.6)) (cpp/float (- 0.0 angle))
+                                     (cpp/float -90.0) 36 cpp/BEIGE)
+          (cpp/DrawText (str "Complementary " (int (- 90.0 angle)) " deg") 640 150 6 cpp/BEIGE)
+          (cpp/DrawCircleSectorLines (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                                     (cpp/float (* RADIUS 0.5)) (cpp/float (- 0.0 angle))
+                                     (cpp/float -180.0) 36 cpp/DARKBLUE)
+          (cpp/DrawText (str "Supplementary " (int (- 180.0 angle)) " deg") 640 130 6 cpp/DARKBLUE)
+          (cpp/DrawCircleSectorLines (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                                     (cpp/float (* RADIUS 0.4)) (cpp/float (- 0.0 angle))
+                                     (cpp/float -360.0) 36 cpp/PINK)
+          (cpp/DrawText (str "Explementary " (int (- 360.0 angle)) " deg") 640 170 6 cpp/PINK)
+
+          ;; Current angle: arc, radius line, endpoint.
+          (cpp/DrawCircleSectorLines (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                                     (cpp/float (* RADIUS 0.7)) (cpp/float (- 0.0 angle))
+                                     (cpp/float 0.0) 36 cpp/LIME)
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                          (cpp/Vector2 (cpp/float px) (cpp/float py))
+                          (cpp/float 2.0) cpp/BLACK)
+          (cpp/DrawCircleV (cpp/Vector2 (cpp/float px) (cpp/float py))
+                           (cpp/float 4.0) cpp/BLACK)
+
+          ;; The controls panel, as text.
+          (cpp/DrawText (str "Angle: " (int angle) " deg  (LEFT/RIGHT scrub)") 620 40 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "[SPACE] " (if paused? "Resume" "Pause")) 620 70 10 cpp/DARKGRAY)
+          (cpp/DrawText "[Q] quit" 620 90 10 cpp/DARKGRAY)
+          (cpp/DrawRectangleLines 620 110 140 170 cpp/GRAY)
+          (cpp/DrawText "Angle Values" 630 104 10 cpp/GRAY)
+
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur next-angle paused?)))))
+
+    nil)
+
+  (cpp/CloseWindow))

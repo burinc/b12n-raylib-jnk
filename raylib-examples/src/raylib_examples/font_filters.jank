@@ -1,0 +1,77 @@
+(ns raylib-examples.font-filters
+  "raylib [text] example - font filters, ported to jank.
+
+  A big TTF word scaled by the mouse wheel, with the font atlas's
+  texture filter switchable between POINT (1), BILINEAR (2) and
+  TRILINEAR (3); LEFT/RIGHT slide the text. Q quits.
+  Based on raylib/examples/text/text_font_filters.c
+  (jank-native: SetTextureFilter is called on (.-texture font) read
+  inline - GL keys the filter by texture id so it affects the real
+  atlas even though the field read is a by-value copy. Two features
+  are dropped: GenTextureMipmaps(&font.texture) needs an address-of a
+  struct field jank can't form - so TRILINEAR looks like BILINEAR,
+  which the C notes is true in 2D anyway - and the drag-drop dynamic
+  font load needs a FilePathList pointer array.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/text/resources/")
+(def MSG "Loaded Font")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - font filters (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [font (cpp/LoadFontEx (str RES "KAISG.ttf") 96 cpp/nullptr 0)]
+    (cpp/SetTextureFilter (.-texture font) cpp/TEXTURE_FILTER_POINT)
+
+    ;; Thread [font-size pos-x filter-mode].
+    (loop [fsize (nth [(+ 0.0 (.-baseSize font))] 0) px 40.0 mode 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [fsize (+ fsize (* 4.0 (+ 0.0 (cpp/GetMouseWheelMove))))
+
+              _ (when (cpp/IsKeyPressed cpp/KEY_ONE)
+                  (cpp/SetTextureFilter (.-texture font) cpp/TEXTURE_FILTER_POINT))
+              _ (when (cpp/IsKeyPressed cpp/KEY_TWO)
+                  (cpp/SetTextureFilter (.-texture font) cpp/TEXTURE_FILTER_BILINEAR))
+              _ (when (cpp/IsKeyPressed cpp/KEY_THREE)
+                  (cpp/SetTextureFilter (.-texture font) cpp/TEXTURE_FILTER_TRILINEAR))
+              mode (if (cpp/IsKeyPressed cpp/KEY_ONE) 0
+                       (if (cpp/IsKeyPressed cpp/KEY_TWO) 1
+                           (if (cpp/IsKeyPressed cpp/KEY_THREE) 2 mode)))
+
+              px (if (cpp/IsKeyDown cpp/KEY_LEFT) (- px 10.0)
+                     (if (cpp/IsKeyDown cpp/KEY_RIGHT) (+ px 10.0) px))
+
+              ts (cpp/MeasureTextEx font MSG (cpp/float fsize) (cpp/float 0.0))
+              tw (int (+ 0.0 (.-x ts)))
+              th (int (+ 0.0 (.-y ts)))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawText "Use mouse wheel to change font size" 20 20 10 cpp/GRAY)
+          (cpp/DrawText "Use KEY_RIGHT and KEY_LEFT to move text" 20 40 10 cpp/GRAY)
+          (cpp/DrawText "Use 1, 2, 3 to change texture filter (Q quits)" 20 60 10 cpp/GRAY)
+
+          (cpp/DrawTextEx font MSG
+                          (cpp/Vector2 (cpp/float px) (cpp/float (- (/ HEIGHT 2.0) 80.0)))
+                          (cpp/float fsize) (cpp/float 0.0) cpp/BLACK)
+
+          (cpp/DrawRectangle 0 (- HEIGHT 80) WIDTH 80 cpp/LIGHTGRAY)
+          (cpp/DrawText (str "Font size: " (int fsize)) 20 (- HEIGHT 50) 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "Text size: [" tw ", " th "]") 20 (- HEIGHT 30) 10 cpp/DARKGRAY)
+          (cpp/DrawText "CURRENT TEXTURE FILTER:" 250 400 20 cpp/GRAY)
+          (cpp/DrawText (if (= mode 0) "POINT" (if (= mode 1) "BILINEAR" "TRILINEAR"))
+                        570 400 20 cpp/BLACK)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur fsize px mode)))))
+
+    (cpp/UnloadFont font))
+
+  (cpp/CloseWindow))

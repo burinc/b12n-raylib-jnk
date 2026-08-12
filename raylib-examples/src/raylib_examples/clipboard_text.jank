@@ -1,0 +1,109 @@
+(ns raylib-examples.clipboard-text
+  "raylib [core] example - clipboard text, ported to jank.
+
+  Type into the box, then use the system clipboard: CTRL+C copies, CTRL+X
+  cuts, CTRL+V pastes (from THIS app or any other application), CTRL+R
+  drops in a random sample string, and CTRL+D clears. The current
+  clipboard contents are shown in the lower box. ESC quits.
+  Based on raylib/examples/core/core_clipboard_text.c
+
+  jank-native notes:
+  - The C is a raygui showcase (GuiTextBox / GuiButton / GuiLabel). Per the
+    repo's raygui-to-keyboard pattern the buttons become CTRL shortcuts and
+    the text box becomes a jank-managed string edited with GetCharPressed +
+    BACKSPACE (the input-box technique). CTRL+letter combos don't emit a
+    character through GetCharPressed, so command keys never pollute the
+    buffer.
+  - GetClipboardText returns a native `const char *` that jank's `str` folds
+    straight into a jank string (proven in monitor-detector); a jank string
+    passes straight back to SetClipboardText's `const char *` param. The
+    pointer can be NULL on an empty/unset clipboard, so a one-line cpp/raw
+    shim (`jank_clip`) coalesces NULL to \"\" before it reaches `str`."
+  (:include "raylib.h"))
+
+;; GetClipboardText can return NULL; fold NULL to \"\" so `str` never sees it.
+(cpp/raw "static const char* jank_clip() { const char* s = GetClipboardText(); return s ? s : \"\"; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-CHARS 255)
+
+;; Characters 32..126 in code order (the input-box ASCII table).
+(def ASCII " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")
+
+(def SAMPLES
+  ["Hello from raylib!"
+   "The quick brown fox jumps over the lazy dog"
+   "Clipboard operations are useful!"
+   "raylib is a simple and easy-to-use library"
+   "Copy and paste me!"])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - clipboard text (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [buf clip fc]: the edit buffer, the last-read clipboard text
+  ;; (for display) and a caret-blink frame counter.
+  (loop [buf "Hello from raylib!" clip "" fc 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [ctrl? (or (cpp/IsKeyDown cpp/KEY_LEFT_CONTROL)
+                      (cpp/IsKeyDown cpp/KEY_RIGHT_CONTROL))
+
+            ;; Drain this frame's typed characters into the buffer.
+            buf (loop [nm buf]
+                  (let [key (int (cpp/GetCharPressed))]
+                    (if (> key 0)
+                      (recur (if (and (>= key 32) (<= key 126)
+                                      (< (count nm) MAX-CHARS))
+                               (str nm (subs ASCII (- key 32) (- key 31)))
+                               nm))
+                      nm)))
+            buf (if (and (cpp/IsKeyPressed cpp/KEY_BACKSPACE) (> (count buf) 0))
+                  (subs buf 0 (- (count buf) 1))
+                  buf)
+
+            ;; CTRL shortcuts (mirror the C buttons + quick shortcuts).
+            copy? (and ctrl? (cpp/IsKeyPressed cpp/KEY_C))
+            cut?  (and ctrl? (cpp/IsKeyPressed cpp/KEY_X))
+            paste? (and ctrl? (cpp/IsKeyPressed cpp/KEY_V))
+            rand? (and ctrl? (cpp/IsKeyPressed cpp/KEY_R))
+            clear? (and ctrl? (cpp/IsKeyPressed cpp/KEY_D))
+
+            ;; copy/cut push the buffer to the clipboard; paste pulls it back.
+            _ (when (or copy? cut?) (cpp/SetClipboardText buf))
+            clip (if (or copy? cut? paste?) (str (cpp/jank_clip)) clip)
+            buf (cond cut? ""
+                      clear? ""
+                      paste? clip
+                      rand? (nth SAMPLES (int (cpp/GetRandomValue 0 (- (count SAMPLES) 1))))
+                      :else buf)
+            fc (+ fc 1)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "Use the KEY SHORTCUTS:" 50 20 20 cpp/DARKGRAY)
+        (cpp/DrawText "[CTRL+X] CUT  [CTRL+C] COPY  [CTRL+V] PASTE  [CTRL+R] RANDOM  [CTRL+D] CLEAR"
+                      50 55 18 cpp/MAROON)
+
+        ;; edit box
+        (cpp/DrawRectangle 50 120 652 40 cpp/LIGHTGRAY)
+        (cpp/DrawRectangleLines 50 120 652 40 cpp/DARKGRAY)
+        (cpp/DrawText buf 58 130 20 cpp/BLACK)
+        ;; blinking caret after the text
+        (when (= (int (mod (int (quot fc 20)) 2)) 0)
+          (cpp/DrawText "_" (int (+ 60.0 (+ 0.0 (cpp/MeasureText buf 20)))) 132 20 cpp/MAROON))
+
+        ;; clipboard status box
+        (cpp/DrawText "Clipboard current text data:" 50 220 20 cpp/GRAY)
+        (cpp/DrawRectangleLines 50 260 700 40 cpp/LIGHTGRAY)
+        (cpp/DrawText clip 58 270 20 cpp/DARKGRAY)
+        (cpp/DrawText "Try copying text from other applications and pasting here!"
+                      50 330 20 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (recur buf clip fc))))
+
+  (cpp/CloseWindow))

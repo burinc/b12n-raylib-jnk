@@ -1,0 +1,68 @@
+(ns raylib-examples.waving-cubes
+  "raylib [models] example - waving cubes, ported to jank.
+
+  A 15x15x15 lattice of rainbow cubes breathing and waving in 3D
+  while the camera circles the scene. Q quits.
+  Based on raylib/examples/models/models_waving_cubes.c
+  (jank-native: the camera is rebuilt inline each frame from the
+  accumulated time (the per-frame Camera3D pattern); cube hues come
+  from ColorFromHSV inline. 3375 cubes of per-frame jank math also
+  make this an informal throughput benchmark - watch the FPS.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def BLOCKS 15)
+(def HALF 7.5)
+(def CAM-R 40.0)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - waving cubes (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread the accumulated time.
+  (loop [t 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [t (+ t (+ 0.0 (cpp/GetFrameTime)))
+            scale (* 0.7 (+ 2.0 (+ 0.0 (cpp/sin t))))
+            scale (nth [scale] 0)
+            cx (* CAM-R (cpp/cos (* t 0.3)))
+            cz (* CAM-R (cpp/sin (* t 0.3)))
+            camera (cpp/Camera3D (cpp/Vector3 (cpp/float cx) (cpp/float 20.0) (cpp/float cz))
+                                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                 (cpp/float 70.0)
+                                 cpp/CAMERA_PERSPECTIVE)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/DrawGrid 10 (cpp/float 5.0))
+
+        (doseq [x (range BLOCKS)
+                y (range BLOCKS)
+                z (range BLOCKS)]
+          (let [bs (/ (+ x (+ y z)) 30.0)
+                scatter (+ 0.0 (cpp/sin (+ (* bs 20.0) (* t 4.0))))
+                px (+ (* (- x HALF) (* scale 3.0)) scatter)
+                py (+ (* (- y HALF) (* scale 2.0)) scatter)
+                pz (+ (* (- z HALF) (* scale 3.0)) scatter)
+                size (* (- 2.4 scale) bs)
+                hue (+ 0.0 (mod (* (+ x (+ y z)) 18) 360))]
+            (cpp/DrawCube (cpp/Vector3 (cpp/float px) (cpp/float py) (cpp/float pz))
+                          (cpp/float size) (cpp/float size) (cpp/float size)
+                          (cpp/ColorFromHSV (cpp/float hue) (cpp/float 0.75) (cpp/float 0.9)))))
+
+        (cpp/EndMode3D)
+
+        (cpp/DrawFPS 10 10)
+        (cpp/DrawText "Q to quit" 10 40 10 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur t)))))
+
+  (cpp/CloseWindow))

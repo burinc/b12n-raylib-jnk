@@ -1,0 +1,114 @@
+(ns raylib-examples.rounded-rectangle-shader
+  "raylib [shaders] example - rounded rectangle, ported to jank.
+
+  A signed-distance-field rounded rectangle drawn entirely in a
+  fragment shader (Inigo Quilez's SDF, MIT). Four panels demonstrate
+  the fill color, the drop shadow, the inner border, and all three
+  combined. This is a static scene - no controls beyond ESC/Q to quit.
+  Based on raylib/examples/shaders/shaders_rounded_rectangle.c
+
+  jank-native notes:
+  - First VEC4 uniforms: colors and the corner-radius/rectangle vectors
+    all ship as 4-float SetShaderValue calls. Rather than the mandelbrot
+    static float[4] + index-setter dance, this port adds tiny per-type C
+    setters (jank_set_vec4 / jank_set_vec2 / jank_set_float) that build
+    the array in C from scalar args, so each uniform is one cpp/ call.
+  - The shader samples the 'rectangle' uniform in bottom-left origin, so
+    each panel's y is flipped (HEIGHT - y - h) exactly as the C does.
+  - Panels are plain jank data (a vector of maps); the draw loop doseqs
+    over them and resolves the native Shader inline from the -main let,
+    never passing it into a jank fn (which would box a native value)."
+  (:include "raylib.h"))
+
+;; Per-type uniform setters: build the small float array in C from
+;; scalar args so each uniform push is a single cpp/ call from -main.
+(cpp/raw "static void jank_set_vec4(Shader s, int loc, double a, double b, double c, double d) {
+  float v[4] = { (float)a, (float)b, (float)c, (float)d };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC4);
+}
+static void jank_set_vec2(Shader s, int loc, double a, double b) {
+  float v[2] = { (float)a, (float)b };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}
+static void jank_set_float(Shader s, int loc, double a) {
+  float v = (float)a;
+  SetShaderValue(s, loc, &v, SHADER_UNIFORM_FLOAT);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+;; Normalized (0..1) RGBA of the raylib named colors the C uses.
+(def BLUE-N     [0.0 0.474509 0.945098 1.0])   ; BLUE     {0,121,241,255}
+(def DARKBLUE-N [0.0 0.321568 0.674509 1.0])   ; DARKBLUE {0,82,172,255}
+(def SKYBLUE-N  [0.4 0.749019 1.0      1.0])   ; SKYBLUE  {102,191,255,255}
+(def ZERO-N     [0.0 0.0 0.0 0.0])             ; transparent: aspect disabled
+
+;; Each panel: screen-space rect (pre-flip), the three color slots, its
+;; label, and the padding of the outline box + label around the rect.
+(def PANELS
+  [{:x 50  :y 70  :w 110 :h 60  :color BLUE-N :shadow ZERO-N     :border ZERO-N    :pad 20 :label "Rounded rectangle"}
+   {:x 50  :y 200 :w 110 :h 60  :color ZERO-N :shadow DARKBLUE-N :border ZERO-N    :pad 20 :label "Rounded rectangle shadow"}
+   {:x 50  :y 330 :w 110 :h 60  :color ZERO-N :shadow ZERO-N     :border SKYBLUE-N :pad 20 :label "Rounded rectangle border"}
+   {:x 240 :y 80  :w 500 :h 300 :color BLUE-N :shadow DARKBLUE-N :border SKYBLUE-N :pad 30 :label "Rectangle with all three combined"}])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - rounded rectangle (jank)")
+
+  (let [shader (cpp/LoadShader (str RES "shaders/glsl330/base.vs")
+                               (str RES "shaders/glsl330/rounded_rectangle.fs"))
+        rect-loc (int (cpp/GetShaderLocation shader "rectangle"))
+        radius-loc (int (cpp/GetShaderLocation shader "radius"))
+        color-loc (int (cpp/GetShaderLocation shader "color"))
+        shadow-radius-loc (int (cpp/GetShaderLocation shader "shadowRadius"))
+        shadow-offset-loc (int (cpp/GetShaderLocation shader "shadowOffset"))
+        shadow-scale-loc (int (cpp/GetShaderLocation shader "shadowScale"))
+        shadow-color-loc (int (cpp/GetShaderLocation shader "shadowColor"))
+        border-thickness-loc (int (cpp/GetShaderLocation shader "borderThickness"))
+        border-color-loc (int (cpp/GetShaderLocation shader "borderColor"))]
+    (cpp/SetTargetFPS 60)
+
+    ;; Constant uniforms: corner radius, shadow shape, border thickness.
+    (cpp/jank_set_vec4 shader radius-loc 5.0 10.0 15.0 20.0)
+    (cpp/jank_set_float shader shadow-radius-loc 20.0)
+    (cpp/jank_set_vec2 shader shadow-offset-loc 0.0 -5.0)
+    (cpp/jank_set_float shader shadow-scale-loc 0.95)
+    (cpp/jank_set_float shader border-thickness-loc 5.0)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (when (cpp/IsKeyPressed cpp/KEY_Q)
+          (cpp/CloseWindow))
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (doseq [p PANELS]
+          (let [x (:x p) y (:y p) w (:w p) h (:h p) pad (:pad p)
+                color (:color p) shadow (:shadow p) border (:border p)
+                ;; Shader samples bottom-left origin: flip the y.
+                fy (- HEIGHT y h)]
+            ;; Outline box + label around the rounded rect.
+            (cpp/DrawRectangleLines (int (- x pad)) (int (- y pad))
+                                    (int (+ w (* 2 pad))) (int (+ h (* 2 pad)))
+                                    cpp/DARKGRAY)
+            (cpp/DrawText (:label p) (int (- x pad)) (int (- y (+ pad 15))) 10 cpp/DARKGRAY)
+
+            ;; Per-panel uniforms, then a full-screen shader pass.
+            (cpp/jank_set_vec4 shader rect-loc (+ 0.0 x) (+ 0.0 fy) (+ 0.0 w) (+ 0.0 h))
+            (cpp/jank_set_vec4 shader color-loc (nth color 0) (nth color 1) (nth color 2) (nth color 3))
+            (cpp/jank_set_vec4 shader shadow-color-loc (nth shadow 0) (nth shadow 1) (nth shadow 2) (nth shadow 3))
+            (cpp/jank_set_vec4 shader border-color-loc (nth border 0) (nth border 1) (nth border 2) (nth border 3))
+            (cpp/BeginShaderMode shader)
+            (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/WHITE)
+            (cpp/EndShaderMode)))
+
+        (cpp/DrawText "(c) Rounded rectangle SDF by Inigo Quilez. MIT License."
+                      (- WIDTH 300) (- HEIGHT 20) 10 cpp/BLACK)
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

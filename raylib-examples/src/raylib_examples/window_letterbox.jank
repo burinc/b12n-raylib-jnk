@@ -1,0 +1,92 @@
+(ns raylib-examples.window-letterbox
+  "raylib [core] example - window letterbox, ported to jank.
+
+  The game renders at a fixed 640x480 into an offscreen RenderTexture,
+  which is scaled and letterboxed into whatever size you drag the
+  (resizable) window to. SPACE recolors the bars, Q quits. The mouse
+  readouts show the raw window coordinates vs the virtual (game-space)
+  coordinates.
+  Based on raylib/examples/core/core_window_letterbox.c
+  (jank-native: bar colors are packed RGBA hex ints resolved through
+  GetColor, and SetConfigFlags is called once per flag since it ORs
+  into the internal state - no bitwise op needed.)"
+  (:include "raylib.h" "math.h"))
+
+(def GAME-W 640)
+(def GAME-H 480)
+
+;; Ten random bar colors as packed 0xRRGGBBAA ints (a native Color can't
+;; be stored in a jank vector).
+(defn make-colors []
+  (loop [i 0 acc []]
+    (if (< i 10)
+      (let [r (int (cpp/GetRandomValue 100 250))
+            g (int (cpp/GetRandomValue 50 150))
+            b (int (cpp/GetRandomValue 10 100))]
+        (recur (inc i) (conj acc (+ (* r 16777216) (* g 65536) (* b 256) 255))))
+      acc)))
+
+(defn -main [& args]
+  ;; SetConfigFlags ORs each call into the accumulated flags.
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_RESIZABLE)
+  (cpp/SetConfigFlags cpp/FLAG_VSYNC_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow 800 450 "raylib [core] example - window letterbox (jank)")
+  (cpp/SetWindowMinSize 320 240)
+  (cpp/SetTargetFPS 60)
+
+  (let [target (cpp/LoadRenderTexture GAME-W GAME-H)]
+    (cpp/SetTextureFilter (.-texture target) cpp/TEXTURE_FILTER_BILINEAR)
+
+    ;; Thread [bar-colors].
+    (loop [colors (make-colors)]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [sw    (+ 0.0 (cpp/GetScreenWidth))
+              sh    (+ 0.0 (cpp/GetScreenHeight))
+              scale (min (/ sw GAME-W) (/ sh GAME-H))
+
+              colors (if (cpp/IsKeyPressed cpp/KEY_SPACE) (make-colors) colors)
+
+              mx (+ 0.0 (cpp/GetMouseX))
+              my (+ 0.0 (cpp/GetMouseY))
+              ;; Virtual mouse: window coords mapped into the 640x480 game
+              ;; screen, clamped to its bounds.
+              vx (/ (- mx (* (- sw (* GAME-W scale)) 0.5)) scale)
+              vy (/ (- my (* (- sh (* GAME-H scale)) 0.5)) scale)
+              vx (max 0.0 (min (+ 0.0 GAME-W) vx))
+              vy (max 0.0 (min (+ 0.0 GAME-H) vy))]
+
+          ;; Draw the game at its fixed resolution into the render texture.
+          (cpp/BeginTextureMode target)
+          (cpp/ClearBackground cpp/RAYWHITE)
+          (loop [i 0]
+            (when (< i 10)
+              (cpp/DrawRectangle 0 (* (int (/ GAME-H 10)) i) GAME-W (int (/ GAME-H 10))
+                                 (cpp/GetColor (nth colors i)))
+              (recur (inc i))))
+          (cpp/DrawText "If executed inside a window,\nyou can resize the window,\nand see the screen scaling!"
+                        10 25 20 cpp/WHITE)
+          (cpp/DrawText (str "Default Mouse: [" (int mx) " , " (int my) "]") 350 25 20 cpp/GREEN)
+          (cpp/DrawText (str "Virtual Mouse: [" (int vx) " , " (int vy) "]") 350 55 20 cpp/YELLOW)
+          (cpp/EndTextureMode)
+
+          ;; Blit it scaled + centered (letterboxed) into the real window.
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/BLACK)
+          (cpp/DrawTexturePro (.-texture target)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 GAME-W)) (cpp/float (- 0.0 GAME-H)))
+                              (cpp/Rectangle (cpp/float (* (- sw (* GAME-W scale)) 0.5))
+                                             (cpp/float (* (- sh (* GAME-H scale)) 0.5))
+                                             (cpp/float (* GAME-W scale))
+                                             (cpp/float (* GAME-H scale)))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              (cpp/float 0.0) cpp/WHITE)
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur colors)))))
+
+    (cpp/UnloadRenderTexture target))
+
+  (cpp/CloseWindow))

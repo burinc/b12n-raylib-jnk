@@ -1,0 +1,185 @@
+(ns raylib-examples.unicode-ranges
+  "raylib [text] example - unicode ranges, ported to jank.
+
+  Multilingual test strings (English/Spanish/Greek/Russian/Chinese/
+  Japanese) drawn with NotoSansTC. The font starts with the basic ASCII
+  range; keys 1-4 rebuild it with progressively larger unicode ranges
+  (European -> +Greek -> +Cyrillic -> +CJK), 0 resets to ASCII. The
+  growing atlas is shown scaled on the right. Range 4 requests ~40k CJK
+  codepoints and takes a while (the C warns the same). ESC quits.
+  Based on raylib/examples/text/text_unicode_ranges.c
+
+  jank-native notes:
+  - The Font is unloaded + reloaded at runtime, so it parks in a cpp/raw
+    static (the viewport-scaling frame-crossing pattern). CRITICAL: every
+    shim call that touches that static lives in -main, because cpp/raw
+    statics are duplicated PER JANK FN - a helper fn writing the 'same'
+    static writes its own private copy (see the interop guide). That is
+    why the C's AddCodepointRange is inlined into -main's rebuild block
+    instead of being a jank helper fn.
+  - The rebuild copies the font's current glyph values via the
+    struct-array subscript (cpp/aget (.-glyphs font) (cpp/int i)) +
+    .-value reads - the first committed load-bearing GlyphInfo aget -
+    then appends the new range through the static-buffer element-setter
+    (the codepoints-loading technique) and reloads with LoadFontEx.
+  - raylib keeps only codepoints actually present in the font
+    (WARNING: 'Requested codepoints glyphs found: [x/y]'), so glyph
+    counts reflect NotoSansTC's real coverage, exactly like the C.
+  - The C's switch falls through case 4 -> 3 -> 2 -> 1 (each range mode
+    includes the ones below); the port makes that explicit with
+    cumulative vectors of [start stop] pairs.
+  - The multilingual literals are UTF-8 in-source (proven in
+    codepoints-loading); comments stay ASCII."
+  (:include "raylib.h"))
+
+;; Frame-crossing, runtime-reloaded Font + a codepoint scratch buffer big
+;; enough for the full CJK cascade (~41k codepoints). Only -main calls
+;; these (per-fn static duplication - see the docstring).
+(cpp/raw "static Font jank_font;
+static int jank_cp_buf[65536] = { 0 };
+static void jank_cp_set(int i, int v) { jank_cp_buf[i] = v; }
+static void jank_font_load_default(const char* path) {
+  UnloadFont(jank_font);
+  jank_font = LoadFont(path);
+}
+static void jank_font_reload(const char* path, int count) {
+  UnloadFont(jank_font);
+  jank_font = LoadFontEx(path, 32, jank_cp_buf, count);
+}
+static void jank_font_unload(void) { UnloadFont(jank_font); }
+static Font jank_font_get(void) { return jank_font; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def FONT-PATH "../jank-raylib-sys/raylib/examples/text/resources/NotoSansTC-Regular.ttf")
+
+;; [start stop] codepoint pairs per range group (the C's AddCodepointRange
+;; call sites, in call order).
+(def EUROPEAN [[0xc0 0x17f] [0x180 0x24f]])
+(def GREEK [[0x370 0x3ff] [0x1f00 0x1fff]])
+(def CYRILLIC [[0x400 0x4ff] [0x500 0x52f] [0x2de0 0x2dff] [0xa640 0xa69f]])
+(def CJK [[0x4e00 0x9fff] [0x3400 0x4dbf] [0x3000 0x303f] [0x3040 0x309f]
+          [0x30a0 0x30ff] [0x31f0 0x31ff] [0xff00 0xffef] [0xac00 0xd7af]
+          [0x1100 0x11ff]])
+
+(defn- ranges-for
+  "The C switch's fallthrough, made explicit: mode N adds its group plus
+  every group below it. Pure jank - safe as a helper fn."
+  [r]
+  (cond (= r 1) EUROPEAN
+        (= r 2) (into GREEK EUROPEAN)
+        (= r 3) (into (into CYRILLIC GREEK) EUROPEAN)
+        (= r 4) (into (into (into CJK CYRILLIC) GREEK) EUROPEAN)
+        :else []))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - unicode ranges (jank)")
+  (cpp/jank_font_load_default FONT-PATH)
+  (let [f0 (cpp/jank_font_get)]
+    (cpp/SetTextureFilter (.-texture f0) cpp/TEXTURE_FILTER_BILINEAR))
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [selected-range previously-built-range].
+  (loop [range 0 prev 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [;; rebuild first (like the C's update), then read the keys, so
+            ;; the GENERATING overlay shows for the frame before the
+            ;; blocking rebuild. The whole rebuild is inline in -main so
+            ;; every access hits -main's copy of the cpp/raw statics.
+            _ (when (not= range prev)
+                (cpp/jank_font_load_default FONT-PATH)
+                (let [rs (ranges-for range)]
+                  (loop [ri 0]
+                    (when (< ri (count rs))
+                      ;; the C's AddCodepointRange, inlined: copy current
+                      ;; glyph values, append start..stop, reload
+                      (let [pr (nth rs ri)
+                            start (nth pr 0)
+                            stop (nth pr 1)
+                            font (cpp/jank_font_get)
+                            cur (int (+ 0.0 (.-glyphCount font)))
+                            glyphs (.-glyphs font)]
+                        (loop [i 0]
+                          (when (< i cur)
+                            (let [g (cpp/aget glyphs (cpp/int i))]
+                              (cpp/jank_cp_set i (int (.-value g))))
+                            (recur (inc i))))
+                        (loop [c start i cur]
+                          (when (<= c stop)
+                            (cpp/jank_cp_set i c)
+                            (recur (inc c) (inc i))))
+                        (cpp/jank_font_reload FONT-PATH (+ cur (- stop start) 1)))
+                      (recur (inc ri)))))
+                (let [f (cpp/jank_font_get)]
+                  (cpp/SetTextureFilter (.-texture f) cpp/TEXTURE_FILTER_BILINEAR)))
+            prev range
+            range (cond (cpp/IsKeyPressed cpp/KEY_ZERO) 0
+                        (cpp/IsKeyPressed cpp/KEY_ONE) 1
+                        (cpp/IsKeyPressed cpp/KEY_TWO) 2
+                        (cpp/IsKeyPressed cpp/KEY_THREE) 3
+                        (cpp/IsKeyPressed cpp/KEY_FOUR) 4
+                        :else range)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "ADD CODEPOINTS: [1][2][3][4]" 20 20 20 cpp/MAROON)
+
+        (let [font (cpp/jank_font_get)
+              tex (.-texture font)
+              tw (+ 0.0 (.-width tex))
+              th (+ 0.0 (.-height tex))
+              nglyphs (int (+ 0.0 (.-glyphCount font)))
+              scale (/ 380.0 tw)]
+
+          ;; multilingual test strings
+          (cpp/DrawTextEx font "> English: Hello World!"
+                          (cpp/Vector2 (cpp/float 50.0) (cpp/float 70.0))
+                          (cpp/float 32.0) (cpp/float 1.0) cpp/DARKGRAY)
+          (cpp/DrawTextEx font "> Español: Hola mundo!"
+                          (cpp/Vector2 (cpp/float 50.0) (cpp/float 120.0))
+                          (cpp/float 32.0) (cpp/float 1.0) cpp/DARKGRAY)
+          (cpp/DrawTextEx font "> Ελληνικά: Γειά σου κόσμε!"
+                          (cpp/Vector2 (cpp/float 50.0) (cpp/float 170.0))
+                          (cpp/float 32.0) (cpp/float 1.0) cpp/DARKGRAY)
+          (cpp/DrawTextEx font "> Русский: Привет мир!"
+                          (cpp/Vector2 (cpp/float 50.0) (cpp/float 220.0))
+                          (cpp/float 32.0) (cpp/float 0.0) cpp/DARKGRAY)
+          (cpp/DrawTextEx font "> 中文: 你好世界!"
+                          (cpp/Vector2 (cpp/float 50.0) (cpp/float 270.0))
+                          (cpp/float 32.0) (cpp/float 1.0) cpp/DARKGRAY)
+          (cpp/DrawTextEx font "> 日本語: こんにちは世界!"
+                          (cpp/Vector2 (cpp/float 50.0) (cpp/float 320.0))
+                          (cpp/float 32.0) (cpp/float 1.0) cpp/DARKGRAY)
+
+          ;; the atlas, scaled into a 380px box
+          (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float 400.0) (cpp/float 16.0)
+                                               (cpp/float (* tw scale)) (cpp/float (* th scale)))
+                                cpp/BLACK)
+          (cpp/DrawTexturePro tex
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float tw) (cpp/float th))
+                              (cpp/Rectangle (cpp/float 400.0) (cpp/float 16.0)
+                                             (cpp/float (* tw scale)) (cpp/float (* th scale)))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              (cpp/float 0.0) cpp/WHITE)
+          (cpp/DrawRectangleLines 400 16 380 380 cpp/RED)
+
+          (cpp/DrawText (str "ATLAS SIZE: " (int tw) "x" (int th) " px") 20 380 20 cpp/BLUE)
+          (cpp/DrawText (str "CODEPOINTS GLYPHS LOADED: " nglyphs) 20 410 20 cpp/LIME))
+
+        (cpp/DrawText "Font: Noto Sans TC. License: SIL Open Font License 1.1"
+                      (- WIDTH 300) (- HEIGHT 20) 10 cpp/GRAY)
+
+        (when (not= prev range)
+          (cpp/DrawRectangle 0 0 WIDTH HEIGHT (cpp/Fade cpp/WHITE (cpp/float 0.8)))
+          (cpp/DrawRectangle 0 125 WIDTH 200 cpp/GRAY)
+          (cpp/DrawText "GENERATING FONT ATLAS..." 120 210 40 cpp/BLACK))
+
+        (cpp/EndDrawing)
+
+        (recur range prev))))
+
+  (cpp/jank_font_unload)
+  (cpp/CloseWindow))

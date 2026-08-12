@@ -1,0 +1,86 @@
+(ns raylib-examples.input-virtual-controls
+  "raylib [core] example - input virtual controls, ported to jank.
+
+  An on-screen D-pad: press one of the four arrow buttons (touch, or
+  mouse-down on desktop) to move the maroon player circle. The nearest
+  button to the input point within its radius is the pressed one. Q
+  quits.
+  Based on raylib/examples/core/core_input_virtual_controls.c
+  (jank-native: the C example's buttonPositions / arrowTris arrays are
+  compile-time constant data, kept here as plain jank vectors of coords;
+  the per-button label Color is selected by index with nested `if`
+  forms - the native-value-by-index rule - not stored in a collection.
+  Only the player position lives in loop state, as jank reals.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def BUTTON-RADIUS 30)
+(def PLAYER-SPEED 75.0)
+
+;; Button centres: Up, Left, Right, Down (padPosition 100,350; 1.5*radius offset).
+(def BX [100 55 145 100])
+(def BY [305 350 350 395])
+
+;; Each button's arrow triangle as [ax ay bx by cx cy], winding copied from C.
+(def TRIS [[100 293 91 314 109 314]    ; Up
+           [64 341 43 350 64 359]      ; Left
+           [157 350 136 341 136 359]   ; Right
+           [91 386 100 407 109 386]])  ; Down
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - input virtual controls (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; player position (reals); starts at screen centre.
+  (loop [px 400.0 py 225.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [tcount (cpp/GetTouchPointCount)
+            pos (if (> tcount 0) (cpp/GetTouchPosition 0) (cpp/GetMousePosition))
+            ix (int (+ 0.0 (.-x pos)))
+            iy (int (+ 0.0 (.-y pos)))
+            active? (or (> tcount 0)
+                        (and (= tcount 0) (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT)))
+            ;; nearest button within radius (Manhattan distance), else -1
+            pressed (if active?
+                      (loop [i 0]
+                        (if (< i 4)
+                          (let [bx (nth BX i) by (nth BY i)
+                                d (+ (max (- bx ix) (- ix bx))
+                                     (max (- by iy) (- iy by)))]
+                            (if (< d BUTTON-RADIUS) i (recur (inc i))))
+                          -1))
+                      -1)
+            step (* PLAYER-SPEED (+ 0.0 (cpp/GetFrameTime)))
+            px (if (= pressed 2) (+ px step) (if (= pressed 1) (- px step) px))
+            py (if (= pressed 0) (- py step) (if (= pressed 3) (+ py step) py))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        ;; world: the player
+        (cpp/DrawCircleV (cpp/Vector2 (cpp/float px) (cpp/float py)) (cpp/float 50.0) cpp/MAROON)
+
+        ;; GUI: four D-pad buttons + arrows
+        (loop [i 0]
+          (when (< i 4)
+            (let [bx (nth BX i) by (nth BY i) t (nth TRIS i)]
+              (cpp/DrawCircleV (cpp/Vector2 (cpp/float (+ 0.0 bx)) (cpp/float (+ 0.0 by)))
+                               (cpp/float (+ 0.0 BUTTON-RADIUS))
+                               (if (= i pressed) cpp/DARKGRAY cpp/BLACK))
+              (cpp/DrawTriangle
+               (cpp/Vector2 (cpp/float (+ 0.0 (nth t 0))) (cpp/float (+ 0.0 (nth t 1))))
+               (cpp/Vector2 (cpp/float (+ 0.0 (nth t 2))) (cpp/float (+ 0.0 (nth t 3))))
+               (cpp/Vector2 (cpp/float (+ 0.0 (nth t 4))) (cpp/float (+ 0.0 (nth t 5))))
+               (if (= i 0) cpp/YELLOW (if (= i 1) cpp/BLUE (if (= i 2) cpp/RED cpp/GREEN)))))
+            (recur (inc i))))
+
+        (cpp/DrawText "move the player with D-Pad buttons (Q quits)" 10 10 20 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur px py)))))
+
+  (cpp/CloseWindow))

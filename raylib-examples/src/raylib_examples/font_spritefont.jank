@@ -1,0 +1,64 @@
+(ns raylib-examples.font-spritefont
+  "raylib [text] example - font spritefont, ported to jank.
+
+  Three colored sprite fonts, each loaded straight from a PNG atlas
+  with LoadFont and drawn centered with DrawTextEx (each with its own
+  glyph spacing). Q quits.
+  Based on raylib/examples/text/text_font_spritefont.c
+  (jank-native: sprite fonts load from a .png the same as any Font;
+  the three center positions are computed once before the loop from
+  MeasureTextEx's Vector2 (read via .-x, nth-boxed) and .-baseSize.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/text/resources/")
+(def MSG1 "THIS IS A custom SPRITE FONT...")
+(def MSG2 "...and this is ANOTHER CUSTOM font...")
+(def MSG3 "...and a THIRD one! GREAT! :D")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - font spritefont (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [font1 (cpp/LoadFont (str RES "custom_mecha.png"))
+        font2 (cpp/LoadFont (str RES "custom_alagard.png"))
+        font3 (cpp/LoadFont (str RES "custom_jupiter_crash.png"))
+        bs1 (nth [(+ 0.0 (.-baseSize font1))] 0)
+        bs2 (nth [(+ 0.0 (.-baseSize font2))] 0)
+        bs3 (nth [(+ 0.0 (.-baseSize font3))] 0)
+        w1 (nth [(+ 0.0 (.-x (cpp/MeasureTextEx font1 MSG1 (cpp/float bs1) (cpp/float -3.0))))] 0)
+        w2 (nth [(+ 0.0 (.-x (cpp/MeasureTextEx font2 MSG2 (cpp/float bs2) (cpp/float -2.0))))] 0)
+        w3 (nth [(+ 0.0 (.-x (cpp/MeasureTextEx font3 MSG3 (cpp/float bs3) (cpp/float 2.0))))] 0)
+        px1 (- (/ WIDTH 2.0) (/ w1 2.0))
+        py1 (- (- (/ HEIGHT 2.0) (/ bs1 2.0)) 80.0)
+        px2 (- (/ WIDTH 2.0) (/ w2 2.0))
+        py2 (- (- (/ HEIGHT 2.0) (/ bs2 2.0)) 10.0)
+        px3 (- (/ WIDTH 2.0) (/ w3 2.0))
+        py3 (+ (- (/ HEIGHT 2.0) (/ bs3 2.0)) 50.0)]
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawTextEx font1 MSG1 (cpp/Vector2 (cpp/float px1) (cpp/float py1))
+                        (cpp/float bs1) (cpp/float -3.0) cpp/WHITE)
+        (cpp/DrawTextEx font2 MSG2 (cpp/Vector2 (cpp/float px2) (cpp/float py2))
+                        (cpp/float bs2) (cpp/float -2.0) cpp/WHITE)
+        (cpp/DrawTextEx font3 MSG3 (cpp/Vector2 (cpp/float px3) (cpp/float py3))
+                        (cpp/float bs3) (cpp/float 2.0) cpp/WHITE)
+
+        (cpp/DrawText "Q to quit" 10 10 10 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur))))
+
+    (cpp/UnloadFont font1)
+    (cpp/UnloadFont font2)
+    (cpp/UnloadFont font3))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,246 @@
+(ns raylib-examples.top-down-lights
+  "raylib [shapes] example - top down lights, ported to jank.
+
+  Top-down 2D lighting: lights cast shadow volumes off boxes into a
+  blended alpha mask over a checkerboard floor. Drag to move light 1,
+  RIGHT-click adds a light (up to 16), L toggles the shadow-volume
+  debug view, Q quits.
+  Based on raylib/examples/shapes/shapes_top_down_lights.c
+  (jank-native: the C caches one mask RenderTexture per light and
+  re-renders only dirty ones; native handles can't live in a jank
+  vector, so this port keeps ONE scratch mask reused per light plus
+  the global mask, and rebuilds all lights whenever any is dirty.
+  Shadow quads come from a pure fn of light position + boxes;
+  DrawTriangleFan (a Vector2* API) becomes paired DrawTriangles drawn
+  in both windings so variable quad winding survives backface culling.
+  A light dragged inside a box contributes nothing (the C shows its
+  stale mask). F1 is L here - macOS eats F1.)"
+  (:include "raylib.h" "rlgl.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-LIGHTS 16)
+;; GL blend constants from the C: GL_SRC_ALPHA, GL_MIN, GL_MAX.
+(def SRC-ALPHA 770)
+(def BMIN 32775)
+(def BMAX 32776)
+
+(defn make-boxes
+  "Five fixed boxes (some off-screen, as in the C) + fifteen random."
+  []
+  (loop [i 5 acc [{:x 150.0 :y 80.0 :w 40.0 :h 40.0}
+                  {:x 1200.0 :y 700.0 :w 40.0 :h 40.0}
+                  {:x 200.0 :y 600.0 :w 40.0 :h 40.0}
+                  {:x 1000.0 :y 50.0 :w 40.0 :h 40.0}
+                  {:x 500.0 :y 350.0 :w 40.0 :h 40.0}]]
+    (if (< i 20)
+      (recur (inc i)
+             (conj acc {:x (+ 0.0 (cpp/GetRandomValue 0 WIDTH))
+                        :y (+ 0.0 (cpp/GetRandomValue 0 HEIGHT))
+                        :w (+ 0.0 (cpp/GetRandomValue 10 100))
+                        :h (+ 0.0 (cpp/GetRandomValue 10 100))}))
+      acc)))
+
+(defn shadow-quad
+  "One edge's shadow volume: the edge projected away from the light by
+  2x its radius (ComputeShadowVolumeForEdge)."
+  [lx ly r sx sy ex ey]
+  (let [ext (* r 2.0)
+        sdx (- sx lx) sdy (- sy ly)
+        slen (+ 0.0 (cpp/sqrt (+ (* sdx sdx) (* sdy sdy))))
+        edx (- ex lx) edy (- ey ly)
+        elen (+ 0.0 (cpp/sqrt (+ (* edx edx) (* edy edy))))
+        spx (+ sx (* (/ sdx (if (> slen 0.0) slen 1.0)) ext))
+        spy (+ sy (* (/ sdy (if (> slen 0.0) slen 1.0)) ext))
+        epx (+ ex (* (/ edx (if (> elen 0.0) elen 1.0)) ext))
+        epy (+ ey (* (/ edy (if (> elen 0.0) elen 1.0)) ext))]
+    {:x0 sx :y0 sy :x1 ex :y1 ey :x2 epx :y2 epy :x3 spx :y3 spy}))
+
+(defn shadows-for
+  "All shadow quads for a light over the boxes, or :valid? false when
+  the light sits inside a box (UpdateLight)."
+  [light boxes]
+  (let [lx (:x light) ly (:y light) r (:r light)
+        bx1 (- lx r) by1 (- ly r) bw (* r 2.0)]
+    (loop [i 0 quads []]
+      (if (< i (count boxes))
+        (let [b (nth boxes i)]
+          (if (and (>= lx (:x b)) (<= lx (+ (:x b) (:w b)))
+                   (>= ly (:y b)) (<= ly (+ (:y b) (:h b))))
+            {:valid? false :quads []}
+            (if (not (and (< bx1 (+ (:x b) (:w b))) (> (+ bx1 bw) (:x b))
+                          (< by1 (+ (:y b) (:h b))) (> (+ by1 bw) (:y b))))
+              (recur (inc i) quads)
+              (let [x1 (:x b) y1 (:y b)
+                    x2 (+ x1 (:w b)) y2 (+ y1 (:h b))
+                    quads (if (> ly y1) (conj quads (shadow-quad lx ly r x1 y1 x2 y1)) quads)
+                    quads (if (< lx x2) (conj quads (shadow-quad lx ly r x2 y1 x2 y2)) quads)
+                    quads (if (< ly y2) (conj quads (shadow-quad lx ly r x2 y2 x1 y2)) quads)
+                    quads (if (> lx x1) (conj quads (shadow-quad lx ly r x1 y2 x1 y1)) quads)
+                    ;; the box itself
+                    quads (conj quads {:x0 x1 :y0 y1 :x1 x1 :y1 y2
+                                       :x2 x2 :y2 y2 :x3 x2 :y3 y1})]
+                (recur (inc i) quads)))))
+        {:valid? true :quads quads}))))
+
+(defn draw-quad
+  "A quad as two triangles, each in both windings (color id 0 white /
+  1 dark purple) - fan winding varies with shadow direction."
+  [q cid]
+  (loop [t 0]
+    (when (< t 2)
+      (let [ax (:x0 q) ay (:y0 q)
+            bx (if (= t 0) (:x1 q) (:x2 q)) by (if (= t 0) (:y1 q) (:y2 q))
+            cx (if (= t 0) (:x2 q) (:x3 q)) cy (if (= t 0) (:y2 q) (:y3 q))]
+        (cpp/DrawTriangle (cpp/Vector2 (cpp/float ax) (cpp/float ay))
+                          (cpp/Vector2 (cpp/float bx) (cpp/float by))
+                          (cpp/Vector2 (cpp/float cx) (cpp/float cy))
+                          (if (= cid 0) cpp/WHITE cpp/DARKPURPLE))
+        (cpp/DrawTriangle (cpp/Vector2 (cpp/float cx) (cpp/float cy))
+                          (cpp/Vector2 (cpp/float bx) (cpp/float by))
+                          (cpp/Vector2 (cpp/float ax) (cpp/float ay))
+                          (if (= cid 0) cpp/WHITE cpp/DARKPURPLE)))
+      (recur (inc t))))
+  nil)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - top down lights (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [boxes (make-boxes)
+        img (cpp/GenImageChecked 64 64 32 32 cpp/DARKBROWN cpp/DARKGRAY)
+        bg (cpp/LoadTextureFromImage img)
+        gmask (cpp/LoadRenderTexture WIDTH HEIGHT)
+        smask (cpp/LoadRenderTexture WIDTH HEIGHT)]
+    (cpp/UnloadImage img)
+
+    ;; Thread [lights show-debug? dirty?].
+    (loop [lights [{:x 600.0 :y 400.0 :r 300.0}] show? false dirty? true]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mx (+ 0.0 (cpp/GetMouseX))
+              my (+ 0.0 (cpp/GetMouseY))
+              drag? (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT)
+              lights (if drag?
+                       (assoc lights 0 (assoc (nth lights 0) :x mx :y my))
+                       lights)
+              add? (and (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_RIGHT)
+                        (< (count lights) MAX-LIGHTS))
+              lights (if add? (conj lights {:x mx :y my :r 200.0}) lights)
+              dirty? (or dirty? drag? add?)
+              show? (if (cpp/IsKeyPressed cpp/KEY_L) (not show?) show?)]
+
+          ;; Rebuild the global light mask: render each light into the
+          ;; scratch mask, then MIN-merge its alpha into the global one.
+          (when dirty?
+            (cpp/BeginTextureMode gmask)
+            (cpp/ClearBackground cpp/BLACK)
+            (cpp/EndTextureMode)
+            (loop [i 0]
+              (when (< i (count lights))
+                (let [l (nth lights i)
+                      sh (shadows-for l boxes)]
+                  (when (:valid? sh)
+                    ;; The light's own mask: radial alpha gradient with
+                    ;; the shadow quads forced back to full alpha.
+                    (cpp/BeginTextureMode smask)
+                    (cpp/ClearBackground cpp/WHITE)
+                    (cpp/rlSetBlendFactors SRC-ALPHA SRC-ALPHA BMIN)
+                    (cpp/rlSetBlendMode cpp/BLEND_CUSTOM)
+                    (cpp/DrawCircleGradient (cpp/Vector2 (cpp/float (:x l)) (cpp/float (:y l)))
+                                            (cpp/float (:r l))
+                                            (cpp/ColorAlpha cpp/WHITE (cpp/float 0.0))
+                                            cpp/WHITE)
+                    (cpp/rlDrawRenderBatchActive)
+                    (cpp/rlSetBlendMode cpp/BLEND_ALPHA)
+                    (cpp/rlSetBlendFactors SRC-ALPHA SRC-ALPHA BMAX)
+                    (cpp/rlSetBlendMode cpp/BLEND_CUSTOM)
+                    (loop [s 0]
+                      (when (< s (count (:quads sh)))
+                        (draw-quad (nth (:quads sh) s) 0)
+                        (recur (inc s))))
+                    (cpp/rlDrawRenderBatchActive)
+                    (cpp/rlSetBlendMode cpp/BLEND_ALPHA)
+                    (cpp/EndTextureMode)
+
+                    ;; MIN-merge into the global mask.
+                    (cpp/BeginTextureMode gmask)
+                    (cpp/rlSetBlendFactors SRC-ALPHA SRC-ALPHA BMIN)
+                    (cpp/rlSetBlendMode cpp/BLEND_CUSTOM)
+                    (cpp/DrawTextureRec (.-texture smask)
+                                        (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                                       (cpp/float (+ 0.0 WIDTH))
+                                                       (cpp/float (- 0.0 HEIGHT)))
+                                        (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                        cpp/WHITE)
+                    (cpp/rlDrawRenderBatchActive)
+                    (cpp/rlSetBlendMode cpp/BLEND_ALPHA)
+                    (cpp/EndTextureMode)))
+                (recur (inc i)))))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/BLACK)
+
+          ;; Checkerboard floor (the source rect tiles the 64x64 texture).
+          (cpp/DrawTextureRec bg
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 WIDTH)) (cpp/float (+ 0.0 HEIGHT)))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              cpp/WHITE)
+
+          ;; The blended light mask over it.
+          (cpp/DrawTextureRec (.-texture gmask)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 WIDTH)) (cpp/float (- 0.0 HEIGHT)))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              (cpp/ColorAlpha cpp/WHITE (cpp/float (if show? 0.75 1.0))))
+
+          ;; Light markers.
+          (loop [i 0]
+            (when (< i (count lights))
+              (let [l (nth lights i)]
+                (cpp/DrawCircle (int (:x l)) (int (:y l)) (cpp/float 10.0)
+                                (if (= i 0) cpp/YELLOW cpp/WHITE)))
+              (recur (inc i))))
+
+          ;; Debug view: light 1's shadow volumes + the boxes.
+          (when show?
+            (let [sh (shadows-for (nth lights 0) boxes)
+                  l0 (nth lights 0)]
+              (loop [s 0]
+                (when (< s (count (:quads sh)))
+                  (draw-quad (nth (:quads sh) s) 1)
+                  (recur (inc s))))
+              (loop [b 0]
+                (when (< b (count boxes))
+                  (let [bx (nth boxes b)]
+                    (when (cpp/CheckCollisionRecs
+                           (cpp/Rectangle (cpp/float (:x bx)) (cpp/float (:y bx))
+                                          (cpp/float (:w bx)) (cpp/float (:h bx)))
+                           (cpp/Rectangle (cpp/float (- (:x l0) (:r l0)))
+                                          (cpp/float (- (:y l0) (:r l0)))
+                                          (cpp/float (* (:r l0) 2.0))
+                                          (cpp/float (* (:r l0) 2.0))))
+                      (cpp/DrawRectangleRec
+                       (cpp/Rectangle (cpp/float (:x bx)) (cpp/float (:y bx))
+                                      (cpp/float (:w bx)) (cpp/float (:h bx)))
+                       cpp/PURPLE))
+                    (cpp/DrawRectangleLines (int (:x bx)) (int (:y bx))
+                                            (int (:w bx)) (int (:h bx)) cpp/DARKBLUE))
+                  (recur (inc b))))))
+
+          (cpp/DrawText (str "(L) " (if show? "Hide" "Show") " Shadow Volumes") 10 50 10 cpp/GREEN)
+          (cpp/DrawFPS (- WIDTH 80) 10)
+          (cpp/DrawText "Drag to move light #1" 10 10 10 cpp/DARKGREEN)
+          (cpp/DrawText "Right click to add new light, Q quits" 10 30 10 cpp/DARKGREEN)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur lights show? false)))))
+
+    (cpp/UnloadTexture bg)
+    (cpp/UnloadRenderTexture gmask)
+    (cpp/UnloadRenderTexture smask))
+
+  (cpp/CloseWindow))

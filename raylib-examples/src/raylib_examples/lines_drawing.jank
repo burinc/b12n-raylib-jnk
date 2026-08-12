@@ -1,0 +1,82 @@
+(ns raylib-examples.lines-drawing
+  "raylib [shapes] example - lines drawing (a paint canvas), ported to jank.
+
+  Click-drag with the LEFT button to paint (the hue shifts as you move),
+  RIGHT button to erase, MIDDLE button to clear. Mouse wheel changes the
+  brush size. Q quits. Based on raylib/examples/shapes/shapes_lines_drawing.c
+
+  jank-native note: the paint persists on an offscreen RenderTexture. The
+  canvas is bound in a let OUTSIDE the frame loop - a native struct stays
+  usable inside the loop as long as it's not threaded through recur."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - lines drawing (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [canvas (cpp/LoadRenderTexture WIDTH HEIGHT)]
+    ;; Start with a clean white canvas.
+    (cpp/BeginTextureMode canvas)
+    (cpp/ClearBackground cpp/RAYWHITE)
+    (cpp/EndTextureMode)
+
+    ;; Thread [prev-x prev-y thickness hue show-hint?].
+    (loop [px 0.0 py (/ HEIGHT 2.0) thick 8.0 hue 0.0 hint true]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mx    (+ 0.0 (cpp/GetMouseX))
+              my    (+ 0.0 (cpp/GetMouseY))
+              left  (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT)
+              right (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_RIGHT)
+              hint  (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT) false hint)
+              dist  (cpp/hypot (- mx px) (- my py))
+              hue   (if left
+                      (let [h (+ hue (/ dist 3.0))] (if (>= h 360.0) (- h 360.0) h))
+                      hue)
+              thick (+ thick (+ 0.0 (cpp/GetMouseWheelMove)))
+              thick (if (< thick 1.0) 1.0 (if (> thick 500.0) 500.0 thick))]
+
+          ;; Clear on middle click.
+          (when (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_MIDDLE)
+            (cpp/BeginTextureMode canvas)
+            (cpp/ClearBackground cpp/RAYWHITE)
+            (cpp/EndTextureMode))
+
+          ;; Paint (or erase) onto the canvas. Circles cap the stroke ends.
+          (when (or left right)
+            (let [col (if left
+                        (cpp/ColorFromHSV (cpp/float hue) (cpp/float 1.0) (cpp/float 1.0))
+                        cpp/RAYWHITE)
+                  r   (cpp/float (/ thick 2.0))]
+              (cpp/BeginTextureMode canvas)
+              (cpp/DrawCircle (int px) (int py) r col)
+              (cpp/DrawCircle (int mx) (int my) r col)
+              (cpp/DrawLineEx (cpp/Vector2 (cpp/float px) (cpp/float py))
+                              (cpp/Vector2 (cpp/float mx) (cpp/float my)) (cpp/float thick) col)
+              (cpp/EndTextureMode)))
+
+          (cpp/BeginDrawing)
+          ;; Blit the canvas (source height negative to flip the RT upright).
+          (cpp/DrawTextureRec (.-texture canvas)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0) (cpp/float (+ 0.0 WIDTH)) (cpp/float (- 0.0 HEIGHT)))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              cpp/WHITE)
+
+          (when-not left
+            (cpp/DrawCircleLines (int mx) (int my) (cpp/float (/ thick 2.0))
+                                 (cpp/Fade cpp/GRAY (cpp/float 0.5))))
+          (when hint
+            (cpp/DrawText "Try clicking and dragging! (RIGHT erase, MIDDLE clear, wheel size, Q quit)"
+                          40 215 20 cpp/LIGHTGRAY))
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur mx my thick hue hint)))))
+
+    (cpp/UnloadRenderTexture canvas))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,136 @@
+(ns raylib-examples.cel-shading
+  "raylib [shaders] example - cel shading, ported to jank.
+
+  A GLB car model toon-shaded with quantized light bands plus an
+  inverted-hull silhouette outline, under one white directional light
+  spinning against the orbital camera. Z toggles cel shading, C the
+  outline, Q/E change the band count. ESC quits.
+  Based on raylib/examples/shaders/shaders_cel_shading.c
+
+  jank-native notes:
+  - First GLB LoadModel (the format beyond OBJ). The model's default
+    shader is read back through a Shader-returning shim so Z can
+    restore it; swapping shaders on the material reuses the
+    (cpp/& model) write shim per press and per outline pass.
+  - The spinning light uses jank_rlights.h's jank_rl_set_light_pos +
+    jank_rl_update_light; its indicator sphere position is the same
+    sin/cos math on the jank side.
+  - rlSetCullFace takes the RL_CULL_FACE_* enum directly (rlgl.h).
+  - The C's Clamp reduces to nested ifs; numBands is re-sent per
+    frame, matching the C."
+  (:include "raylib.h" "rlgl.h" "math.h" "jank_rlights.h"))
+
+;; Material shader read-back + write (no jank spelling for either).
+(cpp/raw "static Shader jank_model_get_shader(Model* m) {
+  return m->materials[0].shader;
+}
+static void jank_model_set_shader(Model* m, Shader s) {
+  m->materials[0].shader = s;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - cel shading (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 9.0) (cpp/float 6.0) (cpp/float 9.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModel (str RES "models/old_car_new.glb"))
+        cel-shader (cpp/LoadShader (str RES "shaders/glsl330/cel.vs")
+                                   (str RES "shaders/glsl330/cel.fs"))
+        view-loc (int (cpp/GetShaderLocation cel-shader "viewPos"))
+        default-shader (cpp/jank_model_get_shader (cpp/& model))
+        num-bands-loc (int (cpp/GetShaderLocation cel-shader "numBands"))
+        outline-shader (cpp/LoadShader (str RES "shaders/glsl330/outline_hull.vs")
+                                       (str RES "shaders/glsl330/outline_hull.fs"))
+        outline-thickness-loc (int (cpp/GetShaderLocation outline-shader "outlineThickness"))]
+
+    (cpp/jank_rl_shader_set_loc (cpp/& cel-shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (cpp/jank_model_set_shader (cpp/& model) cel-shader)
+
+    ;; one white directional light, spun per frame below
+    (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_DIRECTIONAL)
+                              50.0 50.0 50.0 0.0 0.0 0.0
+                              255 255 255 255 cel-shader)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [cel-enabled? outline-enabled? num-bands].
+    (loop [cel? true
+           outline? true
+           num-bands 10.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+        (cpp/jank_rl_push_view_pos cel-shader view-loc (cpp/& camera))
+
+        (let [cel? (if (cpp/IsKeyPressed cpp/KEY_Z) (not cel?) cel?)
+              _ (when (cpp/IsKeyPressed cpp/KEY_Z)
+                  (if cel?
+                    (cpp/jank_model_set_shader (cpp/& model) cel-shader)
+                    (cpp/jank_model_set_shader (cpp/& model) default-shader)))
+              outline? (if (cpp/IsKeyPressed cpp/KEY_C) (not outline?) outline?)
+              ;; press or hold-to-repeat (native bools boxed one at a time)
+              e? (if (cpp/IsKeyPressed cpp/KEY_E) true
+                     (if (cpp/IsKeyPressedRepeat cpp/KEY_E) true false))
+              q? (if (cpp/IsKeyPressed cpp/KEY_Q) true
+                     (if (cpp/IsKeyPressedRepeat cpp/KEY_Q) true false))
+              num-bands (cond e? (+ num-bands 1.0)
+                              q? (- num-bands 1.0)
+                              :else num-bands)
+              num-bands (if (> num-bands 20.0) 20.0 (if (< num-bands 2.0) 2.0 num-bands))
+              t (+ 0.0 (cpp/GetTime))
+              light-x (* (cpp/sin (* t -0.3)) 5.0)
+              light-z (* (cpp/cos (* t -0.3)) 5.0)]
+
+          (cpp/jank_rl_set_float cel-shader num-bands-loc num-bands)
+
+          ;; spin the light against the camera orbit
+          (cpp/jank_rl_set_light_pos 0 light-x 5.0 light-z)
+          (cpp/jank_rl_update_light cel-shader 0)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+
+          (when outline?
+            ;; outline pass: cull front faces, draw extruded back faces
+            (cpp/jank_rl_set_float outline-shader outline-thickness-loc 0.005)
+            (cpp/rlSetCullFace cpp/RL_CULL_FACE_FRONT)
+            (cpp/jank_model_set_shader (cpp/& model) outline-shader)
+            (cpp/DrawModel model
+                           (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 0.75) cpp/WHITE)
+            (if cel?
+              (cpp/jank_model_set_shader (cpp/& model) cel-shader)
+              (cpp/jank_model_set_shader (cpp/& model) default-shader))
+            (cpp/rlSetCullFace cpp/RL_CULL_FACE_BACK))
+
+          (cpp/DrawModel model
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 0.75) cpp/WHITE)
+          (cpp/DrawSphereEx (cpp/Vector3 (cpp/float light-x) (cpp/float 5.0) (cpp/float light-z))
+                            (cpp/float 0.2) 50 50 cpp/YELLOW)
+          (cpp/DrawGrid 10 (cpp/float 10.0))
+
+          (cpp/EndMode3D)
+
+          (cpp/DrawFPS 10 10)
+          (cpp/DrawText "[Z] Toggle cel shading  [C] Toggle outline  [Q/E] Toon bands"
+                        10 40 20 cpp/DARKGRAY)
+
+          (cpp/EndDrawing)
+          (recur cel? outline? num-bands))))
+
+    (cpp/UnloadModel model)
+    (cpp/UnloadShader cel-shader)
+    (cpp/UnloadShader outline-shader))
+
+  (cpp/CloseWindow))

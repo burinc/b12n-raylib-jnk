@@ -1,0 +1,93 @@
+(ns raylib-examples.palette-switch
+  "raylib [shaders] example - palette switch, ported to jank.
+
+  Eight horizontal bands whose gray values 0..7 are palette indices;
+  the palette_switch fragment shader maps each index to a color from
+  an 8-color palette uniform. LEFT/RIGHT switch between three
+  palettes (3-BIT RGB, AMMO-8, RKBV). ESC quits.
+  Based on raylib/examples/shaders/shaders_palette_switch.c
+
+  jank-native notes:
+  - First ARRAY uniform (SetShaderValueV, 8 x ivec3): the per-type
+    scalar-setter pattern cannot take 24 components as args, so this
+    revives the static staging buffer - an int[24] filled through an
+    index setter from a flat jank vector, then one SetShaderValueV
+    call with the element count. Restaged every frame, matching the C.
+  - The C's (Color){i,i,i,255} band colors become cpp/GetColor with a
+    packed RGBA int built from the palette index."
+  (:include "raylib.h"))
+
+;; ivec3-array uniform staging; only -main touches these (per-fn static rule).
+(cpp/raw "static int jank_ui_buf[24] = { 0 };
+static void jank_ui_set(int i, int v) { jank_ui_buf[i] = v; }
+static void jank_set_uniform_v(Shader s, int loc, int type, int count) {
+  SetShaderValueV(s, loc, jank_ui_buf, type, count);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(def COLORS-PER-PALETTE 8)
+
+;; 8 RGB triplets per palette, flattened (matching the C's int arrays).
+(def palettes
+  [;; 3-BIT RGB
+   [0 0 0, 255 0 0, 0 255 0, 0 0 255, 0 255 255, 255 0 255, 255 255 0, 255 255 255]
+   ;; AMMO-8 (GameBoy-like)
+   [4 12 6, 17 35 24, 30 58 41, 48 93 66, 77 128 97, 137 162 87, 190 220 127, 238 255 204]
+   ;; RKBV (2-strip film)
+   [21 25 26, 138 76 88, 217 98 117, 230 184 193, 69 107 115, 75 151 166, 165 189 194, 255 245 247]])
+
+(def palette-names ["3-BIT RGB" "AMMO-8 (GameBoy-like)" "RKBV (2-strip film)"])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - palette switch (jank)")
+
+  (let [shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/palette_switch.fs"))
+        palette-loc (int (cpp/GetShaderLocation shader "palette"))
+        line-height (int (quot HEIGHT COLORS-PER-PALETTE))]
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [current-palette-index].
+    (loop [current 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [current (cond (cpp/IsKeyPressed cpp/KEY_RIGHT) (inc current)
+                            (cpp/IsKeyPressed cpp/KEY_LEFT) (dec current)
+                            :else current)
+              current (int (mod current (count palettes)))
+              pal (nth palettes current)]
+
+          ;; stage the 24 ints, send as 8 ivec3 (re-sent per frame, like the C)
+          (loop [i 0]
+            (when (< i 24)
+              (cpp/jank_ui_set (int i) (int (nth pal i)))
+              (recur (inc i))))
+          (cpp/jank_set_uniform_v shader palette-loc
+                                  cpp/SHADER_UNIFORM_IVEC3 COLORS-PER-PALETTE)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginShaderMode shader)
+          ;; bands encode the palette index in their RGB components
+          (loop [i 0]
+            (when (< i COLORS-PER-PALETTE)
+              (cpp/DrawRectangle 0 (int (* line-height i)) WIDTH line-height
+                                 (cpp/GetColor (+ (* i 16777216) (* i 65536) (* i 256) 255)))
+              (recur (inc i))))
+          (cpp/EndShaderMode)
+
+          (cpp/DrawText "< >" 10 10 30 cpp/DARKBLUE)
+          (cpp/DrawText "CURRENT PALETTE:" 60 15 20 cpp/RAYWHITE)
+          (cpp/DrawText (nth palette-names current) 300 15 20 cpp/RED)
+          (cpp/DrawFPS 700 15)
+
+          (cpp/EndDrawing)
+          (recur current))))
+
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

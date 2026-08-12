@@ -1,0 +1,93 @@
+(ns raylib-examples.model-loading
+  "raylib [models] example - loading, ported to jank.
+
+  The castle OBJ model loaded from disk with its diffuse texture,
+  orbited by an auto camera over a big grid. LEFT CLICK the castle to
+  toggle its green selection bounding box (a ray-pick against the
+  mesh bounds). ESC quits.
+  Based on raylib/examples/models/models_loading.c
+
+  jank-native notes:
+  - First LoadModel FROM FILE (the OBJ path): it returns a Model that
+    binds as an outer-let local exactly like texture-tiling's
+    LoadModelFromMesh one - zero wrapper changes.
+  - GetMeshBoundingBox(model.meshes[0]) reads a struct array; kept as
+    a one-line C shim through (cpp/& model) (a struct-array cpp/aget
+    would probably also work per the guide's GlyphInfo probe, but the
+    shim is certain). The material texture write reuses
+    texture-tiling's shim.
+  - Ray-pick selection is proven ground: (.-hit (GetRayCollisionBox
+    (GetScreenToWorldRay mouse camera) bounds)) as in picking-3d.
+  - Simplification vs the C: the drag&drop model/texture-swap path is
+    dropped (a runtime-replaced Model needs the cpp/raw static
+    pattern; drop_files already demos dropped-file handling)."
+  (:include "raylib.h"))
+
+;; Material field write + mesh-bounds read (no jank spelling for
+;; struct-array member access on the Model).
+(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}
+static BoundingBox jank_model_bounds(Model* m) {
+  return GetMeshBoundingBox(m->meshes[0]);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - loading (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 50.0) (cpp/float 50.0) (cpp/float 50.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 12.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModel (str RES "models/obj/castle.obj"))
+        texture (cpp/LoadTexture (str RES "models/obj/castle_diffuse.png"))
+        bounds (cpp/jank_model_bounds (cpp/& model))]
+
+    (cpp/jank_model_set_texture (cpp/& model) texture)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [selected?].
+    (loop [selected? false]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (let [selected? (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+                          (if (.-hit (cpp/GetRayCollisionBox
+                                      (cpp/GetScreenToWorldRay (cpp/GetMousePosition) camera)
+                                      bounds))
+                            (not selected?)
+                            false)
+                          selected?)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawModel model
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/DrawGrid 20 (cpp/float 10.0))
+          (when selected?
+            (cpp/DrawBoundingBox bounds cpp/GREEN))
+          (cpp/EndMode3D)
+
+          (cpp/DrawText "Click the castle to toggle selection" 10 (- HEIGHT 20) 10 cpp/DARKGRAY)
+          (when selected?
+            (cpp/DrawText "MODEL SELECTED" (- WIDTH 110) 10 10 cpp/GREEN))
+          (cpp/DrawText "(c) Castle 3D model by Alberto Cano" (- WIDTH 200) (- HEIGHT 20) 10 cpp/GRAY)
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+          (recur selected?))))
+
+    (cpp/UnloadTexture texture)
+    (cpp/UnloadModel model))
+
+  (cpp/CloseWindow))

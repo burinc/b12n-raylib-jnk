@@ -1,0 +1,128 @@
+(ns raylib-examples.postprocessing
+  "raylib [shaders] example - postprocessing effects, ported to jank.
+
+  Twelve full-screen post-process shaders applied one at a time to a
+  render-textured 3D scene. LEFT/RIGHT cycle the effect (grayscale,
+  posterization, dream vision, pixelizer, cross hatching, cross
+  stitching, predator, scanlines, fisheye, sobel, bloom, blur); ESC
+  quits.
+  Based on raylib/examples/shaders/shaders_postprocessing.c
+
+  jank-native notes:
+  - The capstone of the postprocess family: the scene renders once into
+    a RenderTexture, then the selected shader draws the whole texture to
+    screen (y-flipped) via a jank_draw_postpro C shim. Like the C, NO
+    per-shader uniforms are set - each shader carries its own defaults.
+  - Twelve native Shader values can't live in a jank vector, so they are
+    twelve outer-let locals; the active one is chosen by a cond on the
+    jank-int index, each branch calling the shim with its own shader
+    (the color-correction per-index-draw pattern, scaled to shaders).
+    Only the index + effect name thread through recur - no native value
+    crosses the loop.
+  - Intentional simplification: the C loads church.obj (the blocked
+    LoadModel path); the effects only need content in the texture, so
+    the scene is DrawCube primitives + a grid (the custom-uniform move)."
+  (:include "raylib.h"))
+
+;; Apply one postprocess shader to the whole render texture (y-flipped).
+(cpp/raw "static void jank_draw_postpro(Shader s, Texture2D t) {
+  BeginShaderMode(s);
+    DrawTextureRec(t, (Rectangle){ 0, 0, (float)t.width, (float)-t.height },
+                   (Vector2){ 0, 0 }, WHITE);
+  EndShaderMode();
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+;; Effect names, indexed to match the load order in -main.
+(def NAMES ["GRAYSCALE" "POSTERIZATION" "DREAM_VISION" "PIXELIZER"
+            "CROSS_HATCHING" "CROSS_STITCHING" "PREDATOR" "SCANLINES"
+            "FISHEYE" "SOBEL" "BLOOM" "BLUR"])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - postprocessing (jank)")
+
+  ;; Each shader is a native value, so it can't be returned from a jank
+  ;; helper or held in a vector - bind all twelve directly in the let.
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 8.0) (cpp/float 8.0) (cpp/float 8.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.5) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        grayscale (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/grayscale.fs"))
+        posterization (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/posterization.fs"))
+        dream-vision (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/dream_vision.fs"))
+        pixelizer (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/pixelizer.fs"))
+        cross-hatching (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/cross_hatching.fs"))
+        cross-stitching (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/cross_stitching.fs"))
+        predator (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/predator.fs"))
+        scanlines (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/scanlines.fs"))
+        fisheye (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/fisheye.fs"))
+        sobel (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/sobel.fs"))
+        bloom (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/bloom.fs"))
+        blur (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/blur.fs"))
+        target (cpp/LoadRenderTexture WIDTH HEIGHT)]
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread only the effect index; the shaders stay outer-let locals.
+    (loop [fx 0]
+      (if (cpp/! (cpp/WindowShouldClose))
+        (let [fx (cond (cpp/IsKeyPressed cpp/KEY_RIGHT) (if (< fx 11) (+ fx 1) 0)
+                       (cpp/IsKeyPressed cpp/KEY_LEFT) (if (> fx 0) (- fx 1) 11)
+                       :else fx)
+              tex (.-texture target)]
+          (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+          ;; Render the 3D scene into the target texture.
+          (cpp/BeginTextureMode target)
+          (cpp/ClearBackground cpp/RAYWHITE)
+          (cpp/BeginMode3D camera)
+          (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                        (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/MAROON)
+          (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/BLACK)
+          (cpp/DrawCube (cpp/Vector3 (cpp/float 3.0) (cpp/float 0.5) (cpp/float 2.0))
+                        (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0) cpp/BLUE)
+          (cpp/DrawCube (cpp/Vector3 (cpp/float -2.5) (cpp/float 0.75) (cpp/float -1.5))
+                        (cpp/float 1.5) (cpp/float 1.5) (cpp/float 1.5) cpp/GOLD)
+          (cpp/DrawGrid 10 (cpp/float 1.0))
+          (cpp/EndMode3D)
+          (cpp/EndTextureMode)
+
+          ;; Draw the render texture to screen through the selected shader.
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+          (cond (= fx 0) (cpp/jank_draw_postpro grayscale tex)
+                (= fx 1) (cpp/jank_draw_postpro posterization tex)
+                (= fx 2) (cpp/jank_draw_postpro dream-vision tex)
+                (= fx 3) (cpp/jank_draw_postpro pixelizer tex)
+                (= fx 4) (cpp/jank_draw_postpro cross-hatching tex)
+                (= fx 5) (cpp/jank_draw_postpro cross-stitching tex)
+                (= fx 6) (cpp/jank_draw_postpro predator tex)
+                (= fx 7) (cpp/jank_draw_postpro scanlines tex)
+                (= fx 8) (cpp/jank_draw_postpro fisheye tex)
+                (= fx 9) (cpp/jank_draw_postpro sobel tex)
+                (= fx 10) (cpp/jank_draw_postpro bloom tex)
+                :else (cpp/jank_draw_postpro blur tex))
+
+          (cpp/DrawRectangle 0 9 580 30 (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.7)))
+          (cpp/DrawText "(c) Church 3D model by Alberto Cano" 10 (- HEIGHT 20) 10 cpp/GRAY)
+          (cpp/DrawText (str "CURRENT POSTPRO SHADER: " (nth NAMES fx)) 20 15 20 cpp/BLACK)
+          (cpp/DrawText "< >" 540 10 30 cpp/DARKBLUE)
+          (cpp/DrawFPS 700 15)
+          (cpp/EndDrawing)
+
+          (recur fx))
+        (do
+          (cpp/UnloadShader grayscale) (cpp/UnloadShader posterization)
+          (cpp/UnloadShader dream-vision) (cpp/UnloadShader pixelizer)
+          (cpp/UnloadShader cross-hatching) (cpp/UnloadShader cross-stitching)
+          (cpp/UnloadShader predator) (cpp/UnloadShader scanlines)
+          (cpp/UnloadShader fisheye) (cpp/UnloadShader sobel)
+          (cpp/UnloadShader bloom) (cpp/UnloadShader blur)
+          (cpp/UnloadRenderTexture target)))))
+
+  (cpp/CloseWindow))

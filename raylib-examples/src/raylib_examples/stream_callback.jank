@@ -1,0 +1,147 @@
+(ns raylib-examples.stream-callback
+  "raylib [audio] example - stream callback, ported to jank.
+
+  A software synthesizer where the audio thread PULLS its samples: a
+  SetAudioStreamCallback generator fills each buffer on demand.
+  LEFT/RIGHT cycle sine / square / triangle / sawtooth waves, UP/DOWN
+  change the frequency, and the last 10ms of generated audio is
+  plotted. ESC quits.
+  Based on raylib/examples/audio/audio_stream_callback.c
+
+  jank-native notes:
+  - SetAudioStreamCallback joins the proven callback set: all four
+    wave generators live verbatim in cpp/raw sharing the oscillator
+    statics + a one-second history buffer; jank switches between
+    them by index through a wrapper picking from a C callback array.
+  - The waveform plot reads the history buffer per column through a
+    double-returning accessor."
+  (:include "raylib.h" "math.h"))
+
+;; The four pull-generators + shared oscillator state, verbatim.
+(cpp/raw "#define JANK_SAMPLE_RATE 44100
+static int jank_wave_frequency = 440;
+static int jank_new_wave_frequency = 440;
+static int jank_wave_index = 0;
+static float jank_history[JANK_SAMPLE_RATE] = { 0 };
+
+static void jank_save_history(float *framesOut, unsigned int frameCount) {
+  for (unsigned int i = 0; i < JANK_SAMPLE_RATE - frameCount; i++)
+    jank_history[i] = jank_history[i + frameCount];
+  for (unsigned int i = 0; i < frameCount; i++)
+    jank_history[JANK_SAMPLE_RATE - frameCount + i] = framesOut[i];
+}
+static void jank_advance(void) {
+  jank_wave_index++;
+  int wavelength = JANK_SAMPLE_RATE/jank_wave_frequency;
+  if (jank_wave_index >= wavelength) {
+    jank_wave_frequency = jank_new_wave_frequency;
+    jank_wave_index = 0;
+  }
+}
+static void jank_sine_cb(void *framesOut, unsigned int frameCount) {
+  for (unsigned int i = 0; i < frameCount; i++) {
+    int wavelength = JANK_SAMPLE_RATE/jank_wave_frequency;
+    ((float *)framesOut)[i] = sin(2*PI*jank_wave_index/wavelength);
+    jank_advance();
+  }
+  jank_save_history((float *)framesOut, frameCount);
+}
+static void jank_square_cb(void *framesOut, unsigned int frameCount) {
+  for (unsigned int i = 0; i < frameCount; i++) {
+    int wavelength = JANK_SAMPLE_RATE/jank_wave_frequency;
+    ((float *)framesOut)[i] = (jank_wave_index < wavelength/2)? 1 : -1;
+    jank_advance();
+  }
+  jank_save_history((float *)framesOut, frameCount);
+}
+static void jank_triangle_cb(void *framesOut, unsigned int frameCount) {
+  for (unsigned int i = 0; i < frameCount; i++) {
+    int wavelength = JANK_SAMPLE_RATE/jank_wave_frequency;
+    ((float *)framesOut)[i] = (jank_wave_index < wavelength/2)
+      ? (-1 + 2.0f*jank_wave_index/(wavelength/2))
+      : (1 - 2.0f*(jank_wave_index - wavelength/2)/(wavelength/2));
+    jank_advance();
+  }
+  jank_save_history((float *)framesOut, frameCount);
+}
+static void jank_sawtooth_cb(void *framesOut, unsigned int frameCount) {
+  for (unsigned int i = 0; i < frameCount; i++) {
+    int wavelength = JANK_SAMPLE_RATE/jank_wave_frequency;
+    ((float *)framesOut)[i] = -1 + 2.0f*jank_wave_index/wavelength;
+    jank_advance();
+  }
+  jank_save_history((float *)framesOut, frameCount);
+}
+static AudioCallback jank_wave_callbacks[] = {
+  jank_sine_cb, jank_square_cb, jank_triangle_cb, jank_sawtooth_cb
+};
+static void jank_set_wave(AudioStream stream, int type) {
+  SetAudioStreamCallback(stream, jank_wave_callbacks[type]);
+}
+static void jank_set_frequency(int f) { jank_new_wave_frequency = f; }
+static double jank_history_at(int i) { return (double)jank_history[i]; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SAMPLE-RATE 44100)
+(def WAVE-NAMES ["sine" "square" "triangle" "sawtooth"])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - stream callback (jank)")
+
+  (cpp/InitAudioDevice)
+  (cpp/SetAudioStreamBufferSizeDefault 4096)
+
+  ;; 44.1kHz, 32-bit float samples, mono; the callback PULLS samples
+  (let [stream (cpp/LoadAudioStream SAMPLE-RATE 32 1)]
+    (cpp/PlayAudioStream stream)
+    (cpp/jank_set_wave stream 0)
+
+    (cpp/SetTargetFPS 30)
+
+    ;; Thread [wave-type requested-frequency].
+    (loop [wave 0
+           freq 440]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [freq (cond (cpp/IsKeyDown cpp/KEY_UP) (min 12500 (+ freq 10))
+                         (cpp/IsKeyDown cpp/KEY_DOWN) (max 20 (- freq 10))
+                         :else freq)
+              wave' (cond (cpp/IsKeyPressed cpp/KEY_LEFT) (int (mod (+ wave 3) 4))
+                          (cpp/IsKeyPressed cpp/KEY_RIGHT) (int (mod (inc wave) 4))
+                          :else wave)]
+
+          (cpp/jank_set_frequency (int freq))
+          (when (not= wave' wave)
+            (cpp/jank_set_wave stream (int wave')))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawText (str "frequency: " freq) (- WIDTH 220) 10 20 cpp/RED)
+          (cpp/DrawText (str "wave type: " (nth WAVE-NAMES wave')) (- WIDTH 220) 30 20 cpp/RED)
+          (cpp/DrawText "Up/down to change frequency" 10 10 20 cpp/DARKGRAY)
+          (cpp/DrawText "Left/right to change wave type" 10 30 20 cpp/DARKGRAY)
+
+          ;; plot the last 10ms of generated audio
+          (let [win (int (quot SAMPLE-RATE 100))
+                base (- SAMPLE-RATE win)]
+            (loop [i 0]
+              (when (< i WIDTH)
+                (let [i0 (+ base (int (quot (* i win) WIDTH)))
+                      i1 (+ base (int (quot (* (inc i) win) WIDTH)))]
+                  (cpp/DrawLineV
+                   (cpp/Vector2 (cpp/float (+ 0.0 i))
+                                (cpp/float (- 250.0 (* 50.0 (+ 0.0 (cpp/jank_history_at (int i0)))))))
+                   (cpp/Vector2 (cpp/float (+ 1.0 i))
+                                (cpp/float (- 250.0 (* 50.0 (+ 0.0 (cpp/jank_history_at (int i1)))))))
+                   cpp/RED))
+                (recur (inc i)))))
+
+          (cpp/EndDrawing)
+          (recur wave' freq))))
+
+    (cpp/UnloadAudioStream stream))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

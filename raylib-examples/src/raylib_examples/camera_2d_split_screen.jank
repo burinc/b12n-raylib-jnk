@@ -1,0 +1,115 @@
+(ns raylib-examples.camera-2d-split-screen
+  "raylib [core] example - 2d camera split screen, ported to jank.
+
+  Two players roam one grid world, each rendered through its own camera
+  into its own half-screen RenderTexture. W/S/A/D moves player one
+  (red), the arrow keys move player two (blue), Q quits.
+  Based on raylib/examples/core/core_2d_camera_split_screen.c
+  (jank-native: the two RenderTextures live in a let outside the frame
+  loop and the cameras are built inline per view from threaded player
+  scalars.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 440)
+(def PSIZE 40)
+
+(defn draw-scene
+  "The shared world: grid lines, cell labels, both players.
+  Grid counts are WIDTH/PSIZE (20 cols) and HEIGHT/PSIZE (11 rows)."
+  [p1x p1y p2x p2y]
+  (loop [i 0]
+    (when (< i 21)
+      (cpp/DrawLineV (cpp/Vector2 (cpp/float (* 40.0 i)) (cpp/float 0.0))
+                     (cpp/Vector2 (cpp/float (* 40.0 i)) (cpp/float (+ 0.0 HEIGHT)))
+                     cpp/LIGHTGRAY)
+      (recur (inc i))))
+  (loop [j 0]
+    (when (< j 12)
+      (cpp/DrawLineV (cpp/Vector2 (cpp/float 0.0) (cpp/float (* 40.0 j)))
+                     (cpp/Vector2 (cpp/float (+ 0.0 WIDTH)) (cpp/float (* 40.0 j)))
+                     cpp/LIGHTGRAY)
+      (recur (inc j))))
+  (loop [i 0]
+    (when (< i 20)
+      (loop [j 0]
+        (when (< j 11)
+          (cpp/DrawText (str "[" i "," j "]") (+ 10 (* PSIZE i)) (+ 15 (* PSIZE j)) 10 cpp/LIGHTGRAY)
+          (recur (inc j))))
+      (recur (inc i))))
+  (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float p1x) (cpp/float p1y)
+                                       (cpp/float 40.0) (cpp/float 40.0)) cpp/RED)
+  (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float p2x) (cpp/float p2y)
+                                       (cpp/float 40.0) (cpp/float 40.0)) cpp/BLUE)
+  nil)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - 2d camera split screen (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [rt1 (cpp/LoadRenderTexture 400 HEIGHT)
+        rt2 (cpp/LoadRenderTexture 400 HEIGHT)]
+    ;; Thread [player1-x player1-y player2-x player2-y].
+    (loop [p1x 200.0 p1y 200.0 p2x 250.0 p2y 200.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [p1y (cond (cpp/IsKeyDown cpp/KEY_S) (+ p1y 3.0)
+                        (cpp/IsKeyDown cpp/KEY_W) (- p1y 3.0)
+                        :else p1y)
+              p1x (cond (cpp/IsKeyDown cpp/KEY_D) (+ p1x 3.0)
+                        (cpp/IsKeyDown cpp/KEY_A) (- p1x 3.0)
+                        :else p1x)
+              p2y (cond (cpp/IsKeyDown cpp/KEY_UP)   (- p2y 3.0)
+                        (cpp/IsKeyDown cpp/KEY_DOWN) (+ p2y 3.0)
+                        :else p2y)
+              p2x (cond (cpp/IsKeyDown cpp/KEY_RIGHT) (+ p2x 3.0)
+                        (cpp/IsKeyDown cpp/KEY_LEFT)  (- p2x 3.0)
+                        :else p2x)]
+
+          ;; Player one's view.
+          (cpp/BeginTextureMode rt1)
+          (cpp/ClearBackground cpp/RAYWHITE)
+          (cpp/BeginMode2D (cpp/Camera2D (cpp/Vector2 (cpp/float 200.0) (cpp/float 200.0))
+                                         (cpp/Vector2 (cpp/float p1x) (cpp/float p1y))
+                                         (cpp/float 0.0) (cpp/float 1.0)))
+          (draw-scene p1x p1y p2x p2y)
+          (cpp/EndMode2D)
+          (cpp/DrawRectangle 0 0 400 30 (cpp/Fade cpp/RAYWHITE (cpp/float 0.6)))
+          (cpp/DrawText "PLAYER1: W/S/A/D to move" 10 10 10 cpp/MAROON)
+          (cpp/EndTextureMode)
+
+          ;; Player two's view.
+          (cpp/BeginTextureMode rt2)
+          (cpp/ClearBackground cpp/RAYWHITE)
+          (cpp/BeginMode2D (cpp/Camera2D (cpp/Vector2 (cpp/float 200.0) (cpp/float 200.0))
+                                         (cpp/Vector2 (cpp/float p2x) (cpp/float p2y))
+                                         (cpp/float 0.0) (cpp/float 1.0)))
+          (draw-scene p1x p1y p2x p2y)
+          (cpp/EndMode2D)
+          (cpp/DrawRectangle 0 0 400 30 (cpp/Fade cpp/RAYWHITE (cpp/float 0.6)))
+          (cpp/DrawText "PLAYER2: UP/DOWN/LEFT/RIGHT to move" 10 10 10 cpp/DARKBLUE)
+          (cpp/EndTextureMode)
+
+          ;; Both views side by side (source height negative to flip the RTs).
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/BLACK)
+          (cpp/DrawTextureRec (.-texture rt1)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float 400.0) (cpp/float (- 0.0 HEIGHT)))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              cpp/WHITE)
+          (cpp/DrawTextureRec (.-texture rt2)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float 400.0) (cpp/float (- 0.0 HEIGHT)))
+                              (cpp/Vector2 (cpp/float 400.0) (cpp/float 0.0))
+                              cpp/WHITE)
+          (cpp/DrawRectangle 398 0 4 HEIGHT cpp/LIGHTGRAY)
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur p1x p1y p2x p2y)))))
+
+    (cpp/UnloadRenderTexture rt1)
+    (cpp/UnloadRenderTexture rt2))
+
+  (cpp/CloseWindow))

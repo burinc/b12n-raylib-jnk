@@ -1,0 +1,96 @@
+(ns raylib-examples.image-kernel
+  "raylib [textures] example - image kernel, ported to jank.
+
+  The cat image put through three convolution kernels on the CPU -
+  sharpen, Sobel edge-detect, and a 6x-iterated Gaussian blur - shown
+  side by side with the untouched original. Q quits.
+  Based on raylib/examples/textures/textures_image_kernel.c
+
+  jank-native: ImageKernelConvolution wants a `float *kernel`, which
+  jank builds by declaring the three kernels (and the normalize helper)
+  as C globals in a `cpp/raw` block - the constant-array interop
+  pattern. The kernels decay to `float*` when passed, and each Image is
+  mutated through (cpp/& img). No -sys wrapper change."
+  (:include "raylib.h"))
+
+(cpp/raw "
+static float jank_gaussian_kernel[] = { 1.0f, 2.0f, 1.0f,
+                                        2.0f, 4.0f, 2.0f,
+                                        1.0f, 2.0f, 1.0f };
+static float jank_sobel_kernel[]    = { 1.0f, 0.0f, -1.0f,
+                                        2.0f, 0.0f, -2.0f,
+                                        1.0f, 0.0f, -1.0f };
+static float jank_sharpen_kernel[]  = { 0.0f, -1.0f,  0.0f,
+                                       -1.0f,  5.0f, -1.0f,
+                                        0.0f, -1.0f,  0.0f };
+static void jank_normalize_kernel(float *kernel, int size) {
+  float sum = 0.0f;
+  for (int i = 0; i < size; i++) sum += kernel[i];
+  if (sum != 0.0f) for (int i = 0; i < size; i++) kernel[i] /= sum;
+}
+")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - image kernel (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; normalize each kernel in place once (sobel sums to 0 -> left as-is)
+  (cpp/jank_normalize_kernel cpp/jank_gaussian_kernel 9)
+  (cpp/jank_normalize_kernel cpp/jank_sharpen_kernel 9)
+  (cpp/jank_normalize_kernel cpp/jank_sobel_kernel 9)
+
+  (let [image (cpp/LoadImage (str RES "cat.png"))
+        cat-sharpen (cpp/ImageCopy image)
+        cat-sobel (cpp/ImageCopy image)
+        cat-gauss (cpp/ImageCopy image)]
+    (cpp/ImageKernelConvolution (cpp/& cat-sharpen) cpp/jank_sharpen_kernel 9)
+    (cpp/ImageKernelConvolution (cpp/& cat-sobel) cpp/jank_sobel_kernel 9)
+    ;; a 6x-iterated Gaussian for a stronger blur
+    (loop [i 0]
+      (when (< i 6)
+        (cpp/ImageKernelConvolution (cpp/& cat-gauss) cpp/jank_gaussian_kernel 9)
+        (recur (inc i))))
+
+    ;; crop all four to a 200x450 column
+    (cpp/ImageCrop (cpp/& image)       (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0) (cpp/float 200.0) (cpp/float 450.0)))
+    (cpp/ImageCrop (cpp/& cat-gauss)   (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0) (cpp/float 200.0) (cpp/float 450.0)))
+    (cpp/ImageCrop (cpp/& cat-sobel)   (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0) (cpp/float 200.0) (cpp/float 450.0)))
+    (cpp/ImageCrop (cpp/& cat-sharpen) (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0) (cpp/float 200.0) (cpp/float 450.0)))
+
+    (let [t-orig (cpp/LoadTextureFromImage image)
+          t-sharpen (cpp/LoadTextureFromImage cat-sharpen)
+          t-sobel (cpp/LoadTextureFromImage cat-sobel)
+          t-gauss (cpp/LoadTextureFromImage cat-gauss)]
+      (cpp/UnloadImage image)
+      (cpp/UnloadImage cat-gauss)
+      (cpp/UnloadImage cat-sobel)
+      (cpp/UnloadImage cat-sharpen)
+
+      (loop []
+        (when (cpp/! (cpp/WindowShouldClose))
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawTexture t-sharpen 0 0 cpp/WHITE)
+          (cpp/DrawTexture t-sobel 200 0 cpp/WHITE)
+          (cpp/DrawTexture t-gauss 400 0 cpp/WHITE)
+          (cpp/DrawTexture t-orig 600 0 cpp/WHITE)
+
+          (cpp/DrawText "sharpen | sobel | gaussian x6 | original - Q quits" 10 430 10 cpp/RAYWHITE)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur))))
+
+      (cpp/UnloadTexture t-orig)
+      (cpp/UnloadTexture t-gauss)
+      (cpp/UnloadTexture t-sobel)
+      (cpp/UnloadTexture t-sharpen)))
+
+  (cpp/CloseWindow))

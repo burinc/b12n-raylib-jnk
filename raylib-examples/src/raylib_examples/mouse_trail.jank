@@ -1,0 +1,49 @@
+(ns raylib-examples.mouse-trail
+  "raylib [shapes] example - mouse trail, ported to jank.
+
+  A trail of circles follows the mouse; older positions fade and shrink.
+  Press Q to quit. Based on raylib/examples/shapes/shapes_mouse_trail.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-TRAIL 30)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - mouse trail (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Trail is a vector of [x y] positions, newest first.
+  (loop [trail (vec (repeat MAX-TRAIL [0 0]))]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx    (cpp/GetMouseX)
+            my    (cpp/GetMouseY)
+            trail (into [[mx my]] (subvec trail 0 (dec MAX-TRAIL)))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/BLACK)
+
+        (loop [i 0]
+          (when (< i MAX-TRAIL)
+            (let [p (nth trail i)
+                  x (nth p 0)
+                  y (nth p 1)]
+              (when (or (not= x 0) (not= y 0))
+                ;; ratio: 1.0 at the newest sample -> 0 at the oldest.
+                (let [ratio  (/ (- MAX-TRAIL i) 30.0)
+                      alpha  (cpp/float (+ (* ratio 0.5) 0.5))
+                      radius (cpp/float (* 15.0 ratio))]
+                  (cpp/DrawCircle (int x) (int y) radius (cpp/Fade cpp/SKYBLUE alpha)))))
+            (recur (inc i))))
+
+        (cpp/DrawCircle (int mx) (int my) (cpp/float 15.0) cpp/WHITE)
+        (cpp/DrawText "Move the mouse to see the trail - Q quits"
+                      10 (- HEIGHT 30) 20 cpp/LIGHTGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur trail)))))
+
+  (cpp/CloseWindow))

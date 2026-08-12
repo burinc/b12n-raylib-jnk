@@ -1,0 +1,63 @@
+(ns raylib-examples.bouncing-ball
+  "raylib [shapes] example - bouncing ball, ported to jank.
+
+  A ball bounces around the window with optional gravity.
+  Controls: SPACE pause/resume, G toggle gravity, Q quit.
+  Based on raylib/examples/shapes/shapes_bouncing_ball.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def BALL-RADIUS 20.0)
+(def GRAVITY 0.2)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - bouncing ball (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [x        (/ WIDTH 2.0)
+         y        (/ HEIGHT 2.0)
+         sx       5.0
+         sy       4.0
+         gravity? true
+         paused?  false
+         frames   0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [gravity? (if (cpp/IsKeyPressed cpp/KEY_G) (not gravity?) gravity?)
+            paused?  (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not paused?) paused?)
+            ;; Advance physics unless paused.
+            nx  (if paused? x (+ x sx))
+            ny  (if paused? y (+ y sy))
+            nsy (if (and (not paused?) gravity?) (+ sy GRAVITY) sy)
+            ;; Horizontal walls flip x velocity.
+            hit-right? (>= nx (- WIDTH BALL-RADIUS))
+            hit-left?  (<= nx BALL-RADIUS)
+            fx  (cond hit-right? (- WIDTH BALL-RADIUS) hit-left? BALL-RADIUS :else nx)
+            fsx (if (or hit-right? hit-left?) (- sx) sx)
+            ;; Vertical walls flip y velocity with a little damping.
+            hit-bottom? (>= ny (- HEIGHT BALL-RADIUS))
+            hit-top?    (<= ny BALL-RADIUS)
+            fy  (cond hit-bottom? (- HEIGHT BALL-RADIUS) hit-top? BALL-RADIUS :else ny)
+            fsy (if (or hit-bottom? hit-top?) (* nsy -0.95) nsy)
+            frames (inc frames)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawCircle (int fx) (int fy) (cpp/float BALL-RADIUS) cpp/MAROON)
+
+        (cpp/DrawText "PRESS SPACE to PAUSE - G toggles GRAVITY - Q quits"
+                      10 (- HEIGHT 25) 20 cpp/LIGHTGRAY)
+        (if gravity?
+          (cpp/DrawText "GRAVITY: ON" 10 (- HEIGHT 50) 20 cpp/DARKGREEN)
+          (cpp/DrawText "GRAVITY: OFF" 10 (- HEIGHT 50) 20 cpp/RED))
+        (when (and paused? (zero? (mod (quot frames 30) 2)))
+          (cpp/DrawText "PAUSED" 350 200 30 cpp/GRAY))
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur fx fy fsx fsy gravity? paused? frames)))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,77 @@
+(ns raylib-examples.multi-sample2d
+  "raylib [shaders] example - multi sample2d, ported to jank.
+
+  A red texture drawn while a blue texture is bound to a second
+  sampler2D slot; the color_mix fragment shader blends them across a
+  divider. LEFT/RIGHT move the divider. ESC quits.
+  Based on raylib/examples/shaders/shaders_multi_sample2d.c
+
+  jank-native notes:
+  - First SetShaderValueTexture use: its args (Shader, int, Texture2D)
+    are all by-value so it calls directly, no shim. Per the C's note it
+    must be re-bound inside BeginShaderMode every frame - EndShaderMode
+    resets the extra texture units.
+  - The C's (Color){255,0,0,255} literals become cpp/GetColor with a
+    packed RGBA int (cpp/Color's unsigned-char ctor rejects jank ints).
+  - The divider FLOAT uniform goes through the static-float-buffer
+    jank_set_uniform shim (the texture-outline pattern)."
+  (:include "raylib.h"))
+
+;; Uniform staging (see texture-outline); only -main touches these.
+(cpp/raw "static float jank_uf_buf[4] = { 0 };
+static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
+static void jank_set_uniform(Shader s, int loc, int type) {
+  SetShaderValue(s, loc, jank_uf_buf, type);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - multi sample2d (jank)")
+
+  (let [im-red (cpp/GenImageColor 800 450 (cpp/GetColor (+ (* 255 16777216) 255)))
+        tex-red (cpp/LoadTextureFromImage im-red)
+        _ (cpp/UnloadImage im-red)
+        im-blue (cpp/GenImageColor 800 450 (cpp/GetColor (+ (* 255 256) 255)))
+        tex-blue (cpp/LoadTextureFromImage im-blue)
+        _ (cpp/UnloadImage im-blue)
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/color_mix.fs"))
+        tex-blue-loc (int (cpp/GetShaderLocation shader "texture1"))
+        divider-loc (int (cpp/GetShaderLocation shader "divider"))]
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [divider-value].
+    (loop [divider 0.5]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [divider (cond (cpp/IsKeyDown cpp/KEY_RIGHT) (+ divider 0.01)
+                            (cpp/IsKeyDown cpp/KEY_LEFT) (- divider 0.01)
+                            :else divider)
+              divider (min 1.0 (max 0.0 divider))]
+
+          (cpp/jank_uf_set 0 divider)
+          (cpp/jank_set_uniform shader divider-loc cpp/SHADER_UNIFORM_FLOAT)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginShaderMode shader)
+          ;; extra sampler2D units reset at EndShaderMode - rebind per frame
+          (cpp/SetShaderValueTexture shader tex-blue-loc tex-blue)
+          (cpp/DrawTexture tex-red 0 0 cpp/WHITE)
+          (cpp/EndShaderMode)
+
+          (cpp/DrawText "Use KEY_LEFT/KEY_RIGHT to move texture mixing in shader!"
+                        80 (- HEIGHT 40) 20 cpp/RAYWHITE)
+
+          (cpp/EndDrawing)
+          (recur divider))))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadTexture tex-red)
+    (cpp/UnloadTexture tex-blue))
+
+  (cpp/CloseWindow))

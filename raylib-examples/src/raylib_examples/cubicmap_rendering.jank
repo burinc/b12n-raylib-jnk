@@ -1,0 +1,84 @@
+(ns raylib-examples.cubicmap-rendering
+  "raylib [models] example - cubicmap rendering, ported to jank.
+
+  A maze of cubes generated from a tiny black-and-white image (white
+  pixel = wall cube, black = floor), textured from an atlas and
+  orbited by an auto camera; the source image shows top-right at 4x.
+  P pauses the orbit. ESC quits.
+  Based on raylib/examples/models/models_cubicmap_rendering.c
+
+  jank-native notes:
+  - GenMeshCubicmap(image, cubeSize) joins the proven GenMesh* set;
+    same shape as heightmap-rendering (Image by value, Vector3
+    inline, Mesh straight into LoadModelFromMesh).
+  - The pause flag threads through the loop as a jank bool gating
+    UpdateCamera."
+  (:include "raylib.h"))
+
+(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - cubicmap rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 16.0) (cpp/float 14.0) (cpp/float 16.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        image (cpp/LoadImage (str RES "cubicmap.png"))
+        cubicmap (cpp/LoadTextureFromImage image)
+        model (cpp/LoadModelFromMesh
+               (cpp/GenMeshCubicmap image
+                                    (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))))
+        texture (cpp/LoadTexture (str RES "cubicmap_atlas.png"))
+        cw (int (+ 0.0 (.-width cubicmap)))
+        ch (int (+ 0.0 (.-height cubicmap)))]
+
+    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (cpp/UnloadImage image)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [paused?].
+    (loop [paused? false]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [paused? (if (cpp/IsKeyPressed cpp/KEY_P) (not paused?) paused?)]
+          (when (not paused?)
+            (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawModel model
+                         (cpp/Vector3 (cpp/float -16.0) (cpp/float 0.0) (cpp/float -8.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/EndMode3D)
+
+          ;; the source cubicmap image, framed top-right at 4x
+          (cpp/DrawTextureEx cubicmap
+                             (cpp/Vector2 (cpp/float (+ 0.0 (- WIDTH (* cw 4) 20)))
+                                          (cpp/float 20.0))
+                             (cpp/float 0.0) (cpp/float 4.0) cpp/WHITE)
+          (cpp/DrawRectangleLines (- WIDTH (* cw 4) 20) 20 (* cw 4) (* ch 4) cpp/GREEN)
+
+          (cpp/DrawText "cubicmap image used to" 658 90 10 cpp/GRAY)
+          (cpp/DrawText "generate map 3d model" 658 104 10 cpp/GRAY)
+
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+          (recur paused?))))
+
+    (cpp/UnloadTexture cubicmap)
+    (cpp/UnloadTexture texture)
+    (cpp/UnloadModel model))
+
+  (cpp/CloseWindow))

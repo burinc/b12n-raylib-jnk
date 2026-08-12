@@ -1,0 +1,76 @@
+(ns raylib-examples.model-shader
+  "raylib [shaders] example - model shader, ported to jank.
+
+  The watermill OBJ model drawn entirely in grayscale: the shader is
+  assigned to the model's MATERIAL, so it applies wherever the model
+  is drawn - no BeginShaderMode wrap needed. Free camera: mouse look,
+  WASD move. ESC quits.
+  Based on raylib/examples/shaders/shaders_model_shader.c
+
+  jank-native notes:
+  - The first model-based shader port after the Mesh/Model unblock:
+    LoadModel(OBJ) + the material .shader / .texture field writes
+    (texture-tiling's (cpp/& model) shim pair) are all it takes.
+  - SetConfigFlags(FLAG_MSAA_4X_HINT) before InitWindow works as a
+    plain call with the C constant."
+  (:include "raylib.h"))
+
+;; Material field writes (no jank spelling for struct-array member
+;; assignment on the Model) - the texture-tiling shim pair.
+(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}
+static void jank_model_set_shader(Model* m, Shader s) {
+  m->materials[0].shader = s;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - model shader (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 4.0) (cpp/float 4.0) (cpp/float 4.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float -1.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModel (str RES "models/watermill.obj"))
+        texture (cpp/LoadTexture (str RES "models/watermill_diffuse.png"))
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/grayscale.fs"))]
+
+    ;; the shader rides the material: every DrawModel picks it up
+    (cpp/jank_model_set_shader (cpp/& model) shader)
+    (cpp/jank_model_set_texture (cpp/& model) texture)
+
+    (cpp/DisableCursor)
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FREE)
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/DrawModel model
+                       (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                       (cpp/float 0.2) cpp/WHITE)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndMode3D)
+
+        (cpp/DrawText "(c) Watermill 3D model by Alberto Cano" (- WIDTH 210) (- HEIGHT 20) 10 cpp/GRAY)
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadTexture texture)
+    (cpp/UnloadModel model))
+
+  (cpp/CloseWindow))

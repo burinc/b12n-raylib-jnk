@@ -1,0 +1,123 @@
+(ns raylib-examples.font-sdf
+  "raylib [text] example - font sdf, ported to jank.
+
+  The same TTF rasterized two ways: a plain 16px bitmap font and a
+  16px SDF (signed distance field) font drawn through the sdf.fs
+  shader. Scale with the MOUSE WHEEL - the bitmap font blurs while
+  the SDF font stays crisp. HOLD SPACE for the SDF version; the
+  font's atlas texture shows top-left. ESC quits.
+  Based on raylib/examples/text/text_font_sdf.c
+
+  jank-native notes:
+  - The C assembles each Font by hand: LoadFileData -> LoadFontData
+    (GlyphInfo* + an int* out-param) -> GenImageFontAtlas (a
+    Rectangle** out-param) -> struct field writes. That pointer
+    plumbing stays a verbatim C shim returning the finished Font
+    (the framebuffer-rendering approach); jank sees only the two
+    Font values. Deviation: the shim re-reads the TTF per font
+    instead of sharing one buffer - same result, simpler shim.
+  - SetTextureFilter on the SDF atlas (required for SDF sampling)
+    takes the Texture read straight off the Font with .-texture.
+  - The %02.02f render-size readout reuses viewport-scaling's
+    str-trim helper."
+  (:require [clojure.string :as string])
+  (:include "raylib.h"))
+
+;; Font assembly kept in C: LoadFontData's int* out-param and
+;; GenImageFontAtlas's Rectangle** out-param have no jank spelling yet.
+;; Parameters mirror the C: default = 95 glyphs, 4px padding, pack 0;
+;; SDF = autocount, 0 padding, skyline pack 1.
+(cpp/raw "static Font jank_build_font(const char* path, int sdf) {
+  int fileSize = 0;
+  unsigned char *fileData = LoadFileData(path, &fileSize);
+  Font font = { 0 };
+  font.baseSize = 16;
+  font.glyphCount = 95;
+  if (sdf) {
+    font.glyphs = LoadFontData(fileData, fileSize, 16, 0, 0, FONT_SDF, &font.glyphCount);
+    Image atlas = GenImageFontAtlas(font.glyphs, &font.recs, 95, 16, 0, 1);
+    font.texture = LoadTextureFromImage(atlas);
+    UnloadImage(atlas);
+  } else {
+    font.glyphs = LoadFontData(fileData, fileSize, 16, 0, 95, FONT_DEFAULT, &font.glyphCount);
+    Image atlas = GenImageFontAtlas(font.glyphs, &font.recs, 95, 16, 4, 0);
+    font.texture = LoadTextureFromImage(atlas);
+    UnloadImage(atlas);
+  }
+  UnloadFileData(fileData);
+  return font;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/text/resources/")
+(def MSG "Signed Distance Fields")
+
+(defn- fmt2
+  "The C's %02.02f, via trimming str two digits past the dot."
+  [v]
+  (let [s (str v)
+        dot (string/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - font sdf (jank)")
+
+  (let [font-path (str RES "anonymous_pro_bold.ttf")
+        font-default (cpp/jank_build_font font-path 0)
+        font-sdf (cpp/jank_build_font font-path 1)
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/sdf.fs"))]
+
+    ;; bilinear filtering on the atlas is required for SDF sampling
+    (cpp/SetTextureFilter (.-texture font-sdf) cpp/TEXTURE_FILTER_BILINEAR)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [render-font-size].
+    (loop [font-size 16.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [font-size (+ font-size (* 8.0 (+ 0.0 (cpp/GetMouseWheelMove))))
+              font-size (max font-size 6.0)
+              sdf? (if (cpp/IsKeyDown cpp/KEY_SPACE) true false)
+              text-size (if sdf?
+                          (cpp/MeasureTextEx font-sdf MSG (cpp/float font-size) (cpp/float 0.0))
+                          (cpp/MeasureTextEx font-default MSG (cpp/float font-size) (cpp/float 0.0)))
+              pos-x (- (/ WIDTH 2.0) (/ (+ 0.0 (.-x text-size)) 2.0))
+              pos-y (+ (- (/ HEIGHT 2.0) (/ (+ 0.0 (.-y text-size)) 2.0)) 80.0)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (if sdf?
+            (do
+              ;; SDF fonts need the SDF shader to compute fragment alpha
+              (cpp/BeginShaderMode shader)
+              (cpp/DrawTextEx font-sdf MSG
+                              (cpp/Vector2 (cpp/float pos-x) (cpp/float pos-y))
+                              (cpp/float font-size) (cpp/float 0.0) cpp/BLACK)
+              (cpp/EndShaderMode)
+              (cpp/DrawTexture (.-texture font-sdf) 10 10 cpp/BLACK))
+            (do
+              (cpp/DrawTextEx font-default MSG
+                              (cpp/Vector2 (cpp/float pos-x) (cpp/float pos-y))
+                              (cpp/float font-size) (cpp/float 0.0) cpp/BLACK)
+              (cpp/DrawTexture (.-texture font-default) 10 10 cpp/BLACK)))
+
+          (if sdf?
+            (cpp/DrawText "SDF!" 320 20 80 cpp/RED)
+            (cpp/DrawText "default font" 315 40 30 cpp/GRAY))
+
+          (cpp/DrawText "FONT SIZE: 16.0" (- WIDTH 240) 20 20 cpp/DARKGRAY)
+          (cpp/DrawText (str "RENDER SIZE: " (fmt2 font-size)) (- WIDTH 240) 50 20 cpp/DARKGRAY)
+          (cpp/DrawText "Use MOUSE WHEEL to SCALE TEXT!" (- WIDTH 240) 90 10 cpp/DARKGRAY)
+          (cpp/DrawText "HOLD SPACE to USE SDF FONT VERSION!" 340 (- HEIGHT 30) 20 cpp/MAROON)
+
+          (cpp/EndDrawing)
+          (recur font-size))))
+
+    (cpp/UnloadFont font-default)
+    (cpp/UnloadFont font-sdf)
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

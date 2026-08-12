@@ -1,0 +1,115 @@
+(ns raylib-examples.depth-writing
+  "raylib [shaders] example - depth writing, ported to jank.
+
+  Two cubes on a grid, orbited by an auto camera, rendered into a
+  custom RenderTexture whose depth buffer is a writable TEXTURE (not
+  raylib's default renderbuffer). The depth_write shader inverts the
+  depth of everything it draws (gl_FragDepth = 1 - gl_FragCoord.z),
+  so nearer fragments LOSE the depth test - the scene renders
+  inside-out. ESC quits.
+  Based on raylib/examples/shaders/shaders_depth_writing.c
+
+  jank-native notes:
+  - The C builds its custom framebuffer with rlgl calls
+    (rlLoadFramebuffer / rlLoadTexture / rlLoadTextureDepth /
+    rlFramebufferAttach) and hand-fills the RenderTexture2D struct
+    fields. That stays a verbatim C shim pair (load + unload), with
+    the internal TRACELOG macro swapped for the public TraceLog.
+  - Everything else is proven ground: UpdateCamera((cpp/& camera)
+    CAMERA_ORBITAL) on an outer-let Camera3D, inline cpp/Vector3 draw
+    args, and the y-flipped DrawTextureRec blit."
+  (:include "raylib.h" "rlgl.h"))
+
+;; Custom render texture with a writable depth TEXTURE buffer (the C's
+;; LoadRenderTextureDepthTex/UnloadRenderTextureDepthTex, verbatim).
+(cpp/raw "static RenderTexture2D jank_load_rt_depth(int width, int height) {
+  RenderTexture2D target = { 0 };
+  target.id = rlLoadFramebuffer();
+  if (target.id > 0) {
+    rlEnableFramebuffer(target.id);
+    target.texture.id = rlLoadTexture(0, width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
+    target.texture.width = width;
+    target.texture.height = height;
+    target.texture.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    target.texture.mipmaps = 1;
+    target.depth.id = rlLoadTextureDepth(width, height, false);
+    target.depth.width = width;
+    target.depth.height = height;
+    target.depth.format = 19; /* DEPTH_COMPONENT_24BIT: not defined in raylib */
+    target.depth.mipmaps = 1;
+    rlFramebufferAttach(target.id, target.texture.id, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
+    rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+    if (rlFramebufferComplete(target.id)) TraceLog(LOG_INFO, \"FBO: [ID %i] Framebuffer object created successfully\", target.id);
+    rlDisableFramebuffer();
+  } else TraceLog(LOG_WARNING, \"FBO: Framebuffer object can not be created\");
+  return target;
+}
+static void jank_unload_rt_depth(RenderTexture2D target) {
+  if (target.id > 0) {
+    rlUnloadTexture(target.texture.id);
+    rlUnloadTexture(target.depth.id);
+    rlUnloadFramebuffer(target.id);
+  }
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - depth writing (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 2.0) (cpp/float 2.0) (cpp/float 3.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        target (cpp/jank_load_rt_depth WIDTH HEIGHT)
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/depth_write.fs"))]
+
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        ;; scene into the depth-texture framebuffer, depths inverted
+        (cpp/BeginTextureMode target)
+        (cpp/ClearBackground cpp/WHITE)
+        (cpp/BeginMode3D camera)
+        (cpp/BeginShaderMode shader)
+        (cpp/DrawCubeWiresV (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 1.0))
+                            (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                            cpp/RED)
+        (cpp/DrawCubeV (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 1.0))
+                       (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                       cpp/PURPLE)
+        (cpp/DrawCubeWiresV (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float -1.0))
+                            (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                            cpp/DARKGREEN)
+        (cpp/DrawCubeV (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float -1.0))
+                       (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                       cpp/YELLOW)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndShaderMode)
+        (cpp/EndMode3D)
+        (cpp/EndTextureMode)
+
+        ;; blit the render texture to the screen (y-flipped)
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/DrawTextureRec (.-texture target)
+                            (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                           (cpp/float 800.0) (cpp/float -450.0))
+                            (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                            cpp/WHITE)
+        (cpp/DrawFPS 10 10)
+        (cpp/EndDrawing)
+
+        (recur)))
+
+    (cpp/jank_unload_rt_depth target)
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

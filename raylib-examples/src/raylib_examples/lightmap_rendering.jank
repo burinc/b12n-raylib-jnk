@@ -1,0 +1,147 @@
+(ns raylib-examples.lightmap-rendering
+  "raylib [shaders] example - lightmap rendering, ported to jank.
+
+  A plane lit by a BAKED lightmap: three colored flame sprites are
+  additively blended into a tiny 16x16 render texture once at init,
+  then the lightmap shader multiplies it (via a second UV channel)
+  over the plane's atlas texture forever after - no runtime lights.
+  The lightmap itself shows top-right. Orbital camera. ESC quits.
+  Based on raylib/examples/shaders/shaders_lightmap_rendering.c
+
+  jank-native notes:
+  - First DEEP MESH EDIT: GenMeshPlane makes no texcoords2, so a
+    verbatim C shim RL_MALLOCs the second UV channel, fills the four
+    corners, uploads it with rlLoadVertexBuffer and wires vertex
+    attribute 5 - all through (cpp/& mesh) on the let-local Mesh.
+  - GenTextureMipmaps must mutate the RenderTexture's OWN texture
+    struct (the mipmaps count feeds SetTextureFilter's trilinear
+    check), so the mipmap+filter pair is an RT-pointer shim; the
+    plain texture's pair uses (cpp/& texture) directly.
+  - Material texture writes reuse the mesh-instancing Material shims
+    (ALBEDO = the atlas, METALNESS = the lightmap's texture)."
+  (:include "raylib.h" "rlgl.h" "raymath.h" "jank_rlights.h"))
+
+;; The C's texcoords2 upload, verbatim (no jank spelling for the
+;; malloc'd attribute array + VAO wiring), plus Material/RT helpers.
+(cpp/raw "static void jank_mesh_add_lightmap_uvs(Mesh* mesh) {
+  mesh->texcoords2 = (float *)RL_MALLOC(mesh->vertexCount*2*sizeof(float));
+  mesh->texcoords2[0] = 0.0f; mesh->texcoords2[1] = 0.0f;
+  mesh->texcoords2[2] = 1.0f; mesh->texcoords2[3] = 0.0f;
+  mesh->texcoords2[4] = 0.0f; mesh->texcoords2[5] = 1.0f;
+  mesh->texcoords2[6] = 1.0f; mesh->texcoords2[7] = 1.0f;
+  mesh->vboId[SHADER_LOC_VERTEX_TEXCOORD02] =
+    rlLoadVertexBuffer(mesh->texcoords2, mesh->vertexCount*2*sizeof(float), false);
+  rlEnableVertexArray(mesh->vaoId);
+  rlSetVertexAttribute(5, 2, RL_FLOAT, 0, 0, 0); /* index 5 = texcoords2 */
+  rlEnableVertexAttribute(5);
+  rlDisableVertexArray();
+}
+static void jank_mat_set_shader(Material* m, Shader s) { m->shader = s; }
+static void jank_mat_set_texture(Material* m, int map, Texture2D tex) {
+  m->maps[map].texture = tex;
+}
+static void jank_rt_trilinear(RenderTexture2D* rt) {
+  GenTextureMipmaps(&rt->texture);
+  SetTextureFilter(rt->texture, TEXTURE_FILTER_TRILINEAR);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAP-SIZE 16)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - lightmap rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 4.0) (cpp/float 6.0) (cpp/float 8.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        mesh (cpp/GenMeshPlane (cpp/float 16.0) (cpp/float 16.0) 1 1)
+        shader (cpp/LoadShader (str RES "shaders/glsl330/lightmap.vs")
+                               (str RES "shaders/glsl330/lightmap.fs"))
+        texture (cpp/LoadTexture (str RES "cubicmap_atlas.png"))
+        light (cpp/LoadTexture (str RES "spark_flame.png"))
+        lightmap (cpp/LoadRenderTexture MAP-SIZE MAP-SIZE)
+        material (cpp/LoadMaterialDefault)]
+
+    ;; second UV channel for the lightmap (GenMeshPlane has none)
+    (cpp/jank_mesh_add_lightmap_uvs (cpp/& mesh))
+
+    (cpp/GenTextureMipmaps (cpp/& texture))
+    (cpp/SetTextureFilter texture cpp/TEXTURE_FILTER_TRILINEAR)
+
+    (cpp/jank_mat_set_shader (cpp/& material) shader)
+    (cpp/jank_mat_set_texture (cpp/& material) (cpp/int cpp/MATERIAL_MAP_ALBEDO) texture)
+    (cpp/jank_mat_set_texture (cpp/& material) (cpp/int cpp/MATERIAL_MAP_METALNESS)
+                              (.-texture lightmap))
+
+    ;; bake three additive flames into the lightmap, once (a jank helper
+    ;; can't take the Texture/Color natives - rule 2 - so they stay inline)
+    (let [lw (cpp/float (+ 0.0 (.-width light)))
+          lh (cpp/float (+ 0.0 (.-height light)))]
+      (cpp/BeginTextureMode lightmap)
+      (cpp/ClearBackground cpp/BLACK)
+      (cpp/BeginBlendMode cpp/BLEND_ADDITIVE)
+      (cpp/DrawTexturePro light
+                          (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0) lw lh)
+                          (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                         (cpp/float 32.0) (cpp/float 32.0))
+                          (cpp/Vector2 (cpp/float 16.0) (cpp/float 16.0))
+                          (cpp/float 0.0) cpp/RED)
+      (cpp/DrawTexturePro light
+                          (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0) lw lh)
+                          (cpp/Rectangle (cpp/float 12.8) (cpp/float 8.0)
+                                         (cpp/float 32.0) (cpp/float 32.0))
+                          (cpp/Vector2 (cpp/float 16.0) (cpp/float 16.0))
+                          (cpp/float 0.0) cpp/BLUE)
+      (cpp/DrawTexturePro light
+                          (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0) lw lh)
+                          (cpp/Rectangle (cpp/float 12.8) (cpp/float 12.8)
+                                         (cpp/float 16.0) (cpp/float 16.0))
+                          (cpp/Vector2 (cpp/float 8.0) (cpp/float 8.0))
+                          (cpp/float 0.0) cpp/GREEN)
+      (cpp/BeginBlendMode cpp/BLEND_ALPHA)
+      (cpp/EndTextureMode))
+
+    (cpp/jank_rt_trilinear (cpp/& lightmap))
+
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/DrawMesh mesh material (cpp/MatrixIdentity))
+        (cpp/EndMode3D)
+
+        ;; the baked lightmap, enlarged top-right (negative src = flipped)
+        (cpp/DrawTexturePro (.-texture lightmap)
+                            (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                           (cpp/float -16.0) (cpp/float -16.0))
+                            (cpp/Rectangle (cpp/float (+ 0.0 (- WIDTH (* MAP-SIZE 8) 10)))
+                                           (cpp/float 10.0)
+                                           (cpp/float 128.0) (cpp/float 128.0))
+                            (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                            (cpp/float 0.0) cpp/WHITE)
+        (cpp/DrawText "LIGHTMAP: 16x16 pixels" (- WIDTH 130) (+ 20 (* MAP-SIZE 8)) 10 cpp/GREEN)
+
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadMesh mesh)
+    (cpp/UnloadShader shader)
+    (cpp/UnloadTexture texture)
+    (cpp/UnloadTexture light)
+    (cpp/UnloadRenderTexture lightmap))
+
+  (cpp/CloseWindow))

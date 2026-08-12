@@ -1,0 +1,59 @@
+(ns raylib-examples.basic-shapes
+  "raylib [shapes] example - basic shapes, ported to jank.
+
+  A gallery of the basic shapes raylib can draw (circles, ellipses,
+  rectangles, triangles, polygons, gradients). The hexagons spin. Q quits.
+  Based on raylib/examples/shapes/shapes_basic_shapes.c
+  (jank-native: Vector2 built inline for the gradient/triangle/poly calls)."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - basic shapes (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [rotation 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [rot (+ rotation 0.2)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "some basic shapes available on raylib - Q to quit" 20 20 20 cpp/DARKGRAY)
+
+        ;; Circles and ellipses (left column, x = WIDTH/5 = 160).
+        (cpp/DrawCircle 160 120 (cpp/float 35.0) cpp/DARKBLUE)
+        (cpp/DrawCircleGradient (cpp/Vector2 (cpp/float 160.0) (cpp/float 220.0))
+                                (cpp/float 60.0) cpp/GREEN cpp/SKYBLUE)
+        (cpp/DrawCircleLines 160 340 (cpp/float 80.0) cpp/DARKBLUE)
+        (cpp/DrawEllipse 160 120 (cpp/float 25.0) (cpp/float 20.0) cpp/YELLOW)
+        (cpp/DrawEllipseLines 160 120 (cpp/float 30.0) (cpp/float 25.0) cpp/YELLOW)
+
+        ;; Rectangles (middle column, x around WIDTH/2 = 400).
+        (cpp/DrawRectangle 340 100 120 60 cpp/RED)
+        (cpp/DrawRectangleGradientH 310 170 180 130 cpp/MAROON cpp/GOLD)
+        (cpp/DrawRectangleLines 360 320 80 60 cpp/ORANGE)
+
+        ;; Triangles and polygons (right column, x = WIDTH/4*3 = 600).
+        (cpp/DrawTriangle (cpp/Vector2 (cpp/float 600.0) (cpp/float 80.0))
+                          (cpp/Vector2 (cpp/float 540.0) (cpp/float 150.0))
+                          (cpp/Vector2 (cpp/float 660.0) (cpp/float 150.0)) cpp/VIOLET)
+        (cpp/DrawTriangleLines (cpp/Vector2 (cpp/float 600.0) (cpp/float 160.0))
+                               (cpp/Vector2 (cpp/float 580.0) (cpp/float 230.0))
+                               (cpp/Vector2 (cpp/float 620.0) (cpp/float 230.0)) cpp/DARKBLUE)
+
+        (cpp/DrawPoly (cpp/Vector2 (cpp/float 600.0) (cpp/float 330.0)) 6 (cpp/float 80.0) (cpp/float rot) cpp/BROWN)
+        (cpp/DrawPolyLines (cpp/Vector2 (cpp/float 600.0) (cpp/float 330.0)) 6 (cpp/float 90.0) (cpp/float rot) cpp/BROWN)
+        (cpp/DrawPolyLinesEx (cpp/Vector2 (cpp/float 600.0) (cpp/float 330.0)) 6 (cpp/float 85.0) (cpp/float rot) (cpp/float 6.0) cpp/BEIGE)
+
+        (cpp/DrawLine 18 42 (- WIDTH 18) 42 cpp/BLACK)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur rot)))))
+
+  (cpp/CloseWindow))

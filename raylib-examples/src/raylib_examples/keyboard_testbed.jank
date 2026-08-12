@@ -1,0 +1,167 @@
+(ns raylib-examples.keyboard-testbed
+  "raylib [core] example - keyboard testbed, ported to jank.
+
+  An on-screen ENG-US keyboard: every key you hold lights up MAROON, the
+  key under the mouse gets a red overlay, and the last GetKeyPressed /
+  GetCharPressed codes are shown top-right. SetExitKey(KEY_NULL) disables
+  the ESC shortcut (ESC is a testbed key here) - close the window to quit.
+  Based on raylib/examples/core/core_keyboard_testbed.c
+
+  jank-native notes:
+  - The C's parallel keycode/width arrays + GetKeyText switch collapse into
+    one jank data structure: a vector of rows, each a vector of
+    {:w :label :code} maps (codes boxed once with (cpp/int cpp/KEY_*) at
+    def time). IsKeyDown takes the boxed code back through its int param.
+  - GuiKeyboardKey took a Rectangle by value; a native Rectangle can't
+    cross a jank fn boundary (rule 2), so draw-key takes plain scalars in
+    a map and builds the Rectangle as a let-local inside.
+  - The C TraceLogs key/char presses to the console; the port shows them
+    on screen instead (same data, no vararg TraceLog interop needed)."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SPACING 4)                        ; KEY_REC_SPACING
+(def OFF-X 26.0)
+(def OFF-Y 80.0)
+
+;; Characters 32..126 in code order (the input-box trick) for the readout.
+(def ASCII " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")
+
+(defn- k [w label code] {:w w :label label :code code})
+
+;; ESC, F1..F12, PRINTSCR, PAUSE
+(def ROW-01
+  [(k 45 "ESC" (cpp/int cpp/KEY_ESCAPE)) (k 45 "F1" (cpp/int cpp/KEY_F1))
+   (k 45 "F2" (cpp/int cpp/KEY_F2)) (k 45 "F3" (cpp/int cpp/KEY_F3))
+   (k 45 "F4" (cpp/int cpp/KEY_F4)) (k 45 "F5" (cpp/int cpp/KEY_F5))
+   (k 45 "F6" (cpp/int cpp/KEY_F6)) (k 45 "F7" (cpp/int cpp/KEY_F7))
+   (k 45 "F8" (cpp/int cpp/KEY_F8)) (k 45 "F9" (cpp/int cpp/KEY_F9))
+   (k 45 "F10" (cpp/int cpp/KEY_F10)) (k 45 "F11" (cpp/int cpp/KEY_F11))
+   (k 45 "F12" (cpp/int cpp/KEY_F12)) (k 62 "PRINTSCR" (cpp/int cpp/KEY_PRINT_SCREEN))
+   (k 45 "PAUSE" (cpp/int cpp/KEY_PAUSE))])
+
+;; `, 1..0, -, =, BACKSPACE, DEL
+(def ROW-02
+  [(k 25 "`" (cpp/int cpp/KEY_GRAVE)) (k 45 "1" (cpp/int cpp/KEY_ONE))
+   (k 45 "2" (cpp/int cpp/KEY_TWO)) (k 45 "3" (cpp/int cpp/KEY_THREE))
+   (k 45 "4" (cpp/int cpp/KEY_FOUR)) (k 45 "5" (cpp/int cpp/KEY_FIVE))
+   (k 45 "6" (cpp/int cpp/KEY_SIX)) (k 45 "7" (cpp/int cpp/KEY_SEVEN))
+   (k 45 "8" (cpp/int cpp/KEY_EIGHT)) (k 45 "9" (cpp/int cpp/KEY_NINE))
+   (k 45 "0" (cpp/int cpp/KEY_ZERO)) (k 45 "-" (cpp/int cpp/KEY_MINUS))
+   (k 45 "=" (cpp/int cpp/KEY_EQUAL)) (k 82 "BACK" (cpp/int cpp/KEY_BACKSPACE))
+   (k 45 "DEL" (cpp/int cpp/KEY_DELETE))])
+
+;; TAB, Q..P, [, ], backslash, INS
+(def ROW-03
+  [(k 50 "TAB" (cpp/int cpp/KEY_TAB)) (k 45 "Q" (cpp/int cpp/KEY_Q))
+   (k 45 "W" (cpp/int cpp/KEY_W)) (k 45 "E" (cpp/int cpp/KEY_E))
+   (k 45 "R" (cpp/int cpp/KEY_R)) (k 45 "T" (cpp/int cpp/KEY_T))
+   (k 45 "Y" (cpp/int cpp/KEY_Y)) (k 45 "U" (cpp/int cpp/KEY_U))
+   (k 45 "I" (cpp/int cpp/KEY_I)) (k 45 "O" (cpp/int cpp/KEY_O))
+   (k 45 "P" (cpp/int cpp/KEY_P)) (k 45 "[" (cpp/int cpp/KEY_LEFT_BRACKET))
+   (k 45 "]" (cpp/int cpp/KEY_RIGHT_BRACKET)) (k 57 "\\" (cpp/int cpp/KEY_BACKSLASH))
+   (k 45 "INS" (cpp/int cpp/KEY_INSERT))])
+
+;; CAPS, A..L, ;, ', ENTER, PGUP
+(def ROW-04
+  [(k 68 "CAPS" (cpp/int cpp/KEY_CAPS_LOCK)) (k 45 "A" (cpp/int cpp/KEY_A))
+   (k 45 "S" (cpp/int cpp/KEY_S)) (k 45 "D" (cpp/int cpp/KEY_D))
+   (k 45 "F" (cpp/int cpp/KEY_F)) (k 45 "G" (cpp/int cpp/KEY_G))
+   (k 45 "H" (cpp/int cpp/KEY_H)) (k 45 "J" (cpp/int cpp/KEY_J))
+   (k 45 "K" (cpp/int cpp/KEY_K)) (k 45 "L" (cpp/int cpp/KEY_L))
+   (k 45 ";" (cpp/int cpp/KEY_SEMICOLON)) (k 45 "'" (cpp/int cpp/KEY_APOSTROPHE))
+   (k 88 "ENTER" (cpp/int cpp/KEY_ENTER)) (k 45 "PGUP" (cpp/int cpp/KEY_PAGE_UP))])
+
+;; LSHIFT, Z..M, comma, period, slash, RSHIFT, UP, PGDOWN
+(def ROW-05
+  [(k 80 "LSHIFT" (cpp/int cpp/KEY_LEFT_SHIFT)) (k 45 "Z" (cpp/int cpp/KEY_Z))
+   (k 45 "X" (cpp/int cpp/KEY_X)) (k 45 "C" (cpp/int cpp/KEY_C))
+   (k 45 "V" (cpp/int cpp/KEY_V)) (k 45 "B" (cpp/int cpp/KEY_B))
+   (k 45 "N" (cpp/int cpp/KEY_N)) (k 45 "M" (cpp/int cpp/KEY_M))
+   (k 45 "," (cpp/int cpp/KEY_COMMA)) (k 45 "." (cpp/int cpp/KEY_PERIOD))
+   (k 45 "/" (cpp/int cpp/KEY_SLASH)) (k 76 "RSHIFT" (cpp/int cpp/KEY_RIGHT_SHIFT))
+   (k 45 "UP" (cpp/int cpp/KEY_UP)) (k 45 "PGDOWN" (cpp/int cpp/KEY_PAGE_DOWN))])
+
+;; LCTRL, WIN, LALT, SPACE, ALTGR, ISO-\\ (162, unlabeled), FN (KEY_NULL),
+;; RCTRL, LEFT, DOWN, RIGHT
+(def ROW-06
+  [(k 80 "LCTRL" (cpp/int cpp/KEY_LEFT_CONTROL)) (k 45 "WIN" (cpp/int cpp/KEY_LEFT_SUPER))
+   (k 45 "LALT" (cpp/int cpp/KEY_LEFT_ALT)) (k 208 "SPACE" (cpp/int cpp/KEY_SPACE))
+   (k 45 "ALTGR" (cpp/int cpp/KEY_RIGHT_ALT)) (k 45 "" 162)
+   (k 45 "" 0) (k 60 "RCTRL" (cpp/int cpp/KEY_RIGHT_CONTROL))
+   (k 45 "LEFT" (cpp/int cpp/KEY_LEFT)) (k 45 "DOWN" (cpp/int cpp/KEY_DOWN))
+   (k 45 "RIGHT" (cpp/int cpp/KEY_RIGHT))])
+
+;; Row y positions from the C: 80, then +30, then +38s, +4 spacing each.
+(def ROWS
+  [{:y 80.0 :h 30.0 :row ROW-01}
+   {:y 114.0 :h 38.0 :row ROW-02}
+   {:y 156.0 :h 38.0 :row ROW-03}
+   {:y 198.0 :h 38.0 :row ROW-04}
+   {:y 240.0 :h 38.0 :row ROW-05}
+   {:y 282.0 :h 38.0 :row ROW-06}])
+
+(defn- draw-key
+  "The C's GuiKeyboardKey: outline (MAROON while held) + label, and a red
+  overlay when hovered. KEY_NULL (0) cells draw a blank LIGHTGRAY frame."
+  [{:keys [x y w h code label]}]
+  (let [rec (cpp/Rectangle (cpp/float (+ 0.0 x)) (cpp/float (+ 0.0 y))
+                           (cpp/float (+ 0.0 w)) (cpp/float (+ 0.0 h)))
+        mouse (cpp/Vector2 (cpp/float (+ 0.0 (cpp/GetMouseX)))
+                           (cpp/float (+ 0.0 (cpp/GetMouseY))))]
+    (if (= code 0)
+      (cpp/DrawRectangleLinesEx rec (cpp/float 2.0) cpp/LIGHTGRAY)
+      (let [held? (if (cpp/IsKeyDown code) true false)]
+        (cpp/DrawRectangleLinesEx rec (cpp/float 2.0)
+                                  (if held? cpp/MAROON cpp/DARKGRAY))
+        (cpp/DrawText label (int (+ x 4)) (int (+ y 4)) 10
+                      (if held? cpp/MAROON cpp/DARKGRAY))))
+    (when (cpp/CheckCollisionPointRec mouse rec)
+      (cpp/DrawRectangleRec rec (cpp/Fade cpp/RED (cpp/float 0.2)))
+      (cpp/DrawRectangleLinesEx rec (cpp/float 3.0) cpp/RED))
+    nil))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - keyboard testbed (jank)")
+  (cpp/SetExitKey cpp/KEY_NULL)        ; ESC is a testbed key, not exit
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [last-keycode last-charcode] for the top-right readout.
+  (loop [last-key 0 last-ch 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [kp (int (cpp/GetKeyPressed))
+            ch (int (cpp/GetCharPressed))
+            last-key (if (> kp 0) kp last-key)
+            last-ch (if (> ch 0) ch last-ch)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "KEYBOARD LAYOUT: ENG-US" 26 38 20 cpp/LIGHTGRAY)
+
+        ;; the C's TraceLog readout, on screen
+        (cpp/DrawText (str "key: " last-key
+                           "  char: "
+                           (if (and (>= last-ch 32) (<= last-ch 125))
+                             (subs ASCII (- last-ch 32) (- last-ch 31))
+                             "")
+                           " (" last-ch ")")
+                      560 38 20 cpp/GRAY)
+
+        (loop [li 0]
+          (when (< li (count ROWS))
+            (let [{:keys [y h row]} (nth ROWS li)]
+              (loop [i 0 x OFF-X]
+                (when (< i (count row))
+                  (let [km (nth row i)]
+                    (draw-key (assoc km :x x :y y :h h))
+                    (recur (inc i) (+ x (:w km) SPACING))))))
+            (recur (inc li))))
+
+        (cpp/EndDrawing)
+
+        (recur last-key last-ch))))
+
+  (cpp/CloseWindow))

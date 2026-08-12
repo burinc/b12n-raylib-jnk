@@ -1,0 +1,148 @@
+(ns raylib-examples.digital-clock
+  "raylib [shapes] example - digital clock, ported to jank.
+
+  A live clock reading the system time, in two modes: a 7-segment digital
+  display and an analogue clock. SPACE switches modes, Q quits.
+  Based on raylib/examples/shapes/shapes_digital_clock.c
+
+  jank-native notes: the wall-clock time comes from C time()/localtime()
+  and struct tm field access (tm_hour/tm_min/tm_sec). The upstream digital
+  mode draws each 7-segment bar with DrawTriangleStrip over a Vector2
+  array; here each segment is a DrawRectangle bar instead (an LED-style
+  simplification - jank can't easily pass a native Vector2 array). The
+  analogue mode is faithful (DrawLineEx ticks + DrawRectanglePro hands)."
+  (:include "raylib.h" "math.h" "time.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def PI 3.141592653589793)
+(def DEG2RAD (/ PI 180.0))
+(def LEN 60)               ; 7-segment bar length
+(def THICK 20)             ; 7-segment bar thickness
+
+;; Segment centers (A..G) relative to a digit's top-left, and whether the
+;; bar is vertical. Matches the layout in shapes_digital_clock.c.
+(def SEGMENTS
+  [{:dx 50 :dy 20  :v false}    ; A top
+   {:dx 90 :dy 64  :v true}     ; B top-right
+   {:dx 90 :dy 152 :v true}     ; C bottom-right
+   {:dx 50 :dy 196 :v false}    ; D bottom
+   {:dx 10 :dy 152 :v true}     ; E bottom-left
+   {:dx 10 :dy 64  :v true}     ; F top-left
+   {:dx 50 :dy 108 :v false}])  ; G middle
+
+;; Which of the 7 segments (A..G) are lit for each digit 0-9.
+(def DIGITS
+  [[true  true  true  true  true  true  false]   ; 0
+   [false true  true  false false false false]   ; 1
+   [true  true  false true  true  false true ]   ; 2
+   [true  true  true  true  false false true ]   ; 3
+   [false true  true  false false true  true ]   ; 4
+   [true  false true  true  false true  true ]   ; 5
+   [true  false true  true  true  true  true ]   ; 6
+   [true  true  true  false false false false]   ; 7
+   [true  true  true  true  true  true  true ]   ; 8
+   [true  true  true  true  false true  true ]]) ; 9
+
+(defn pad2 [n] (if (< n 10) (str "0" n) (str n)))
+
+(defn draw-7seg [px py bools]
+  (loop [i 0]
+    (when (< i 7)
+      (let [seg (nth SEGMENTS i)
+            on? (nth bools i)
+            w   (if (:v seg) THICK LEN)
+            h   (if (:v seg) LEN THICK)
+            x   (- (+ px (:dx seg)) (quot w 2))
+            y   (- (+ py (:dy seg)) (quot h 2))]
+        (cpp/DrawRectangle (int x) (int y) w h
+                           (if on? cpp/RED (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.3)))))
+      (recur (inc i)))))
+
+(defn draw-digit [px py value]
+  (draw-7seg px py (nth DIGITS value)))
+
+(defn draw-digital [h m s]
+  (let [px 30 py 60
+        off (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.3))
+        sec-on (= 1 (int (mod s 2)))]
+    (draw-digit px py (int (quot h 10)))
+    (draw-digit (+ px 120) py (int (mod h 10)))
+    (cpp/DrawCircle (+ px 240) (+ py 70) (cpp/float 12.0) (if sec-on cpp/RED off))
+    (cpp/DrawCircle (+ px 240) (+ py 150) (cpp/float 12.0) (if sec-on cpp/RED off))
+    (draw-digit (+ px 260) py (int (quot m 10)))
+    (draw-digit (+ px 380) py (int (mod m 10)))
+    (cpp/DrawCircle (+ px 500) (+ py 70) (cpp/float 12.0) (if sec-on cpp/RED off))
+    (cpp/DrawCircle (+ px 500) (+ py 150) (cpp/float 12.0) (if sec-on cpp/RED off))
+    (draw-digit (+ px 520) py (int (quot s 10)))
+    (draw-digit (+ px 640) py (int (mod s 10)))
+    (let [txt (str (pad2 h) ":" (pad2 m) ":" (pad2 s))
+          mw  (int (cpp/MeasureText txt 150))]
+      (cpp/DrawText txt (int (- (quot WIDTH 2) (quot mw 2))) 300 150 cpp/BLACK))))
+
+;; A native Color can't be passed through a jank fn param (it boxes to a
+;; jank object that DrawRectanglePro rejects), so pass a color id and pick
+;; the Color inline: 0=MAROON (second), 1=DARKGRAY (minute), 2=BLACK (hour).
+(defn draw-hand [cx cy len thick angle cid]
+  (cpp/DrawRectanglePro (cpp/Rectangle (cpp/float cx) (cpp/float cy) (cpp/float len) (cpp/float thick))
+                        (cpp/Vector2 (cpp/float 0.0) (cpp/float (/ thick 2.0)))
+                        (cpp/float angle)
+                        (if (= cid 0) cpp/MAROON (if (= cid 1) cpp/DARKGRAY cpp/BLACK))))
+
+(defn draw-analog [h m s]
+  (let [cx 400.0 cy 240.0
+        h-ang (- (+ (* (mod h 12) 30.0) (* (mod m 60) 0.5)) 90.0)
+        m-ang (- (+ (* (mod m 60) 6.0) (* (mod s 60) 0.1)) 90.0)
+        s-ang (- (* (mod s 60) 6.0) 90.0)]
+    (cpp/DrawCircle (int cx) (int cy) (cpp/float 180.0) cpp/LIGHTGRAY)
+    (cpp/DrawCircle (int cx) (int cy) (cpp/float 12.0) cpp/GRAY)
+    ;; Minute/hour tick marks around the rim.
+    (loop [i 0]
+      (when (< i 60)
+        (let [ang   (* (- (* 6.0 i) 90.0) DEG2RAD)
+              mark  (= 0 (int (mod i 5)))
+              inner (+ 140.0 (if mark 6.0 10.0))
+              co    (cpp/cos ang)
+              si    (cpp/sin ang)]
+          (cpp/DrawLineEx (cpp/Vector2 (cpp/float (+ cx (* inner co))) (cpp/float (+ cy (* inner si))))
+                          (cpp/Vector2 (cpp/float (+ cx (* 160.0 co))) (cpp/float (+ cy (* 160.0 si))))
+                          (cpp/float (if mark 3.0 1.0)) cpp/DARKGRAY))
+        (recur (inc i))))
+    (draw-hand cx cy 140.0 3.0 s-ang 0)
+    (draw-hand cx cy 130.0 7.0 m-ang 1)
+    (draw-hand cx cy 100.0 7.0 h-ang 2)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - digital clock (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; mode 0 = digital, 1 = analogue.
+  (loop [mode 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mode (if (cpp/IsKeyPressed cpp/KEY_SPACE) (- 1 mode) mode)
+            t  (cpp/time cpp/nullptr)
+            lt (cpp/localtime (cpp/& t))
+            h  (int (.-tm_hour lt))
+            m  (int (.-tm_min lt))
+            s  (int (.-tm_sec lt))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (if (= mode 0)
+          (draw-digital h m s)
+          (draw-analog h m s))
+
+        (cpp/DrawText (if (= mode 0)
+                        "Mode: DIGITAL - SPACE for analogue, Q quits"
+                        "Mode: ANALOGUE - SPACE for digital, Q quits")
+                      10 10 20 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur mode)))))
+
+  (cpp/CloseWindow))

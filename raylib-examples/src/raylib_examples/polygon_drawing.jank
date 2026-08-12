@@ -1,0 +1,83 @@
+(ns raylib-examples.polygon-drawing
+  "raylib [textures] example - polygon drawing, ported to jank.
+
+  A cat texture mapped onto a spinning 10-sided polygon. The C example
+  implements DrawTexturePoly itself with rlgl immediate mode, so this
+  port needs no Vector2* array interop: the fixed texcoords and base
+  points live in jank vectors, are rotated per frame, and are emitted as
+  a triangle fan via rlSetTexture / rlBegin / rlTexCoord2f / rlVertex2f.
+  Q quits. Cat sprite by Eiden Marsal.
+  Based on raylib/examples/textures/textures_polygon_drawing.c"
+  (:include "raylib.h" "rlgl.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+(def CX 400.0)   ; screen centre
+(def CY 225.0)
+(def DEG2RAD 0.0174532925)
+
+;; texture coordinates mapping the texture onto the poly (last closes it)
+(def TEXCOORDS [[0.75 0.0] [0.25 0.0] [0.0 0.5] [0.0 0.75] [0.25 1.0]
+                [0.375 0.875] [0.625 0.875] [0.75 1.0] [1.0 0.75] [1.0 0.5] [0.75 0.0]])
+;; base poly vertices derived from the UVs: (uv - 0.5) * 256
+(def POINTS (mapv (fn [uv] [(* (- (nth uv 0) 0.5) 256.0)
+                            (* (- (nth uv 1) 0.5) 256.0)])
+                  TEXCOORDS))
+
+;; rotate a base point by rad (jank data in, jank data out)
+(defn rot [x y rad]
+  [(- (* x (cpp/cos rad)) (* y (cpp/sin rad)))
+   (+ (* x (cpp/sin rad)) (* y (cpp/cos rad)))])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - polygon drawing (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [texture (cpp/LoadTexture (str RES "cat.png"))]
+
+    ;; loop state: rotation angle in degrees.
+    (loop [angle 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [angle (+ angle 1.0)
+              rad (* angle DEG2RAD)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawText "textured polygon (Q quits)" 20 20 20 cpp/DARKGRAY)
+
+          ;; DrawTexturePoly, reimplemented with rlgl immediate mode
+          (cpp/rlSetTexture (.-id texture))
+          (cpp/rlBegin cpp/RL_TRIANGLES)
+          (cpp/rlColor4ub 255 255 255 255)
+          (loop [i 0]
+            (when (< i 10)                       ; MAX_POINTS - 1 triangles
+              (let [p0 (nth POINTS i)
+                    p1 (nth POINTS (inc i))
+                    t0 (nth TEXCOORDS i)
+                    t1 (nth TEXCOORDS (inc i))
+                    r0 (rot (nth p0 0) (nth p0 1) rad)
+                    r1 (rot (nth p1 0) (nth p1 1) rad)]
+                ;; centre vertex
+                (cpp/rlTexCoord2f (cpp/float 0.5) (cpp/float 0.5))
+                (cpp/rlVertex2f (cpp/float CX) (cpp/float CY))
+                ;; point i
+                (cpp/rlTexCoord2f (cpp/float (nth t0 0)) (cpp/float (nth t0 1)))
+                (cpp/rlVertex2f (cpp/float (+ (nth r0 0) CX)) (cpp/float (+ (nth r0 1) CY)))
+                ;; point i+1
+                (cpp/rlTexCoord2f (cpp/float (nth t1 0)) (cpp/float (nth t1 1)))
+                (cpp/rlVertex2f (cpp/float (+ (nth r1 0) CX)) (cpp/float (+ (nth r1 1) CY))))
+              (recur (inc i))))
+          (cpp/rlEnd)
+          (cpp/rlSetTexture 0)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur angle)))))
+
+    (cpp/UnloadTexture texture))
+
+  (cpp/CloseWindow))

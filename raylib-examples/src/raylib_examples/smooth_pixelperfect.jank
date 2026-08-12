@@ -1,0 +1,100 @@
+(ns raylib-examples.smooth-pixelperfect
+  "raylib [core] example - smooth pixelperfect, ported to jank.
+
+  Three rectangles spin inside a tiny 160x90 pixel-art world rendered
+  to a RenderTexture and upscaled to the window. The camera sways on a
+  sine/cosine path; the world camera gets the integer part of its
+  position and the screen camera gets the sub-pixel remainder (scaled
+  by the 5x ratio), which smooths the upscaled motion. S toggles the
+  smoothing, O toggles overscan, Q quits.
+  Based on raylib/examples/core/core_smooth_pixelperfect.c"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def VW 160)
+(def VH 90)
+(def RATIO 5.0)                    ; WIDTH / VW
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - smooth pixelperfect (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [target (cpp/LoadRenderTexture VW VH)]
+    ;; Thread [rotation smooth? overscan?].
+    (loop [rot 0.0 smooth? true overscan? false]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [rot (+ rot (* 60.0 (+ 0.0 (cpp/GetFrameTime))))
+              t   (+ 0.0 (cpp/GetTime))
+              cx  (- (* (cpp/sin t) 50.0) 10.0)
+              cy  (* (cpp/cos t) 30.0)
+              ;; Integer part for the world camera, scaled remainder for
+              ;; the screen camera.
+              wx  (+ 0.0 (cpp/trunc cx))
+              wy  (+ 0.0 (cpp/trunc cy))
+              sx  (* (- cx wx) RATIO)
+              sy  (* (- cy wy) RATIO)
+
+              smooth?   (if (cpp/IsKeyPressed cpp/KEY_S) (not smooth?) smooth?)
+              overscan? (if (cpp/IsKeyPressed cpp/KEY_O) (not overscan?) overscan?)
+
+              ;; Destination rect: full window + one virtual pixel of
+              ;; overscan, or a centered window/1.25 box.
+              dx (if overscan? (- 0.0 RATIO) 80.0)
+              dy (if overscan? (- 0.0 RATIO) 45.0)
+              dw (if overscan? (+ WIDTH (* RATIO 2.0)) 640.0)
+              dh (if overscan? (+ HEIGHT (* RATIO 2.0)) 360.0)]
+
+          ;; Draw the world at virtual resolution.
+          (cpp/BeginTextureMode target)
+          (cpp/ClearBackground cpp/RAYWHITE)
+          (cpp/BeginMode2D (cpp/Camera2D (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                         (cpp/Vector2 (cpp/float wx) (cpp/float wy))
+                                         (cpp/float 0.0) (cpp/float 1.0)))
+          (cpp/DrawRectanglePro (cpp/Rectangle (cpp/float 70.0) (cpp/float 35.0)
+                                               (cpp/float 20.0) (cpp/float 20.0))
+                                (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                (cpp/float rot) cpp/BLACK)
+          (cpp/DrawRectanglePro (cpp/Rectangle (cpp/float 90.0) (cpp/float 55.0)
+                                               (cpp/float 30.0) (cpp/float 10.0))
+                                (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                (cpp/float (- 0.0 rot)) cpp/RED)
+          (cpp/DrawRectanglePro (cpp/Rectangle (cpp/float 80.0) (cpp/float 65.0)
+                                               (cpp/float 15.0) (cpp/float 25.0))
+                                (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                (cpp/float (+ rot 45.0)) cpp/BLUE)
+          (cpp/EndMode2D)
+          (cpp/EndTextureMode)
+
+          ;; Blit upscaled, optionally through the sub-pixel screen camera.
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/LIGHTGRAY)
+          (when smooth?
+            (cpp/BeginMode2D (cpp/Camera2D (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                           (cpp/Vector2 (cpp/float sx) (cpp/float sy))
+                                           (cpp/float 0.0) (cpp/float 1.0))))
+          (cpp/DrawTexturePro (.-texture target)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 VW)) (cpp/float (- 0.0 VH)))
+                              (cpp/Rectangle (cpp/float dx) (cpp/float dy)
+                                             (cpp/float dw) (cpp/float dh))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              (cpp/float 0.0) cpp/WHITE)
+          (when smooth?
+            (cpp/EndMode2D))
+
+          (cpp/DrawText (str "Screen resolution: " WIDTH "x" HEIGHT) 10 10 20 cpp/DARKBLUE)
+          (cpp/DrawText (str "World resolution: " VW "x" VH) 10 40 20 cpp/DARKGREEN)
+          (cpp/DrawText (str "Smooth: " (if smooth? "ON" "OFF") "  Overscan: " (if overscan? "ON" "OFF")
+                             "  (S / O toggle, Q quits)")
+                        10 (- HEIGHT 30) 20 cpp/RED)
+          (cpp/DrawFPS (- WIDTH 95) 10)
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur rot smooth? overscan?)))))
+
+    (cpp/UnloadRenderTexture target))
+
+  (cpp/CloseWindow))

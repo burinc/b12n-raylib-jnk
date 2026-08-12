@@ -1,0 +1,130 @@
+(ns raylib-examples.particles
+  "raylib [shapes] example - simple particles, ported to jank.
+
+  Move the mouse to emit particles. LEFT/RIGHT cycle the type
+  (water falls, smoke rises and fades, fire shrinks yellow->red).
+  Press Q to quit. Based on
+  raylib/examples/shapes/shapes_simple_particles.c"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-PARTICLES 2000)
+(def PI 3.141592653589793)
+(def DEG2RAD (/ PI 180.0))
+
+(defn in-bounds? [x y r]
+  (and (> x (- r)) (< x (+ WIDTH r))
+       (> y (- r)) (< y (+ HEIGHT r))))
+
+(defn alive? [p]
+  (let [type (:type p)]
+    (and (in-bounds? (:x p) (:y p) (:radius p))
+         (cond
+           (= type :fire)  (> (:radius p) 0.5)
+           (= type :smoke) (< (:age p) 1.8)
+           :else           true))))
+
+(defn type-name [t]
+  (cond (= t :water) "WATER" (= t :smoke) "SMOKE" :else "FIRE"))
+
+(defn next-type [t]
+  (cond (= t :water) :smoke (= t :smoke) :fire :else :water))
+
+(defn prev-type [t]
+  (cond (= t :water) :fire (= t :smoke) :water :else :smoke))
+
+(defn emit-particle [ex ey type]
+  (let [base   (/ (cpp/GetRandomValue 0 9) 5.0)
+        speed  (if (= type :fire) (/ base 10.0) base)
+        dir    (cpp/GetRandomValue 0 359)
+        rad    (* dir DEG2RAD)
+        radius (cond (= type :water) 5.0 (= type :smoke) 7.0 :else 10.0)]
+    {:type type :x ex :y ey
+     :vx (* speed (cpp/cos rad))
+     :vy (* speed (cpp/sin rad))
+     :radius radius :age 0.0}))
+
+(defn update-particle [p]
+  (let [type (:type p) x (:x p) y (:y p) vx (:vx p) vy (:vy p)
+        radius (:radius p) age (+ (:age p) 0.0166667)]
+    (cond
+      (= type :water)
+      (let [vy2 (+ vy 0.2)]
+        {:type type :x (+ x vx) :y (+ y vy2) :vx vx :vy vy2 :radius radius :age age})
+
+      (= type :smoke)
+      (let [vy2 (- vy 0.05)]
+        {:type type :x (+ x vx) :y (+ y vy2) :vx vx :vy vy2 :radius (+ radius 0.5) :age age})
+
+      (= type :fire)
+      (let [vy2 (- vy 0.05)]
+        {:type type :x (+ x vx (cpp/cos (* age 215.0))) :y (+ y vy2)
+         :vx vx :vy vy2 :radius (- radius 0.15) :age age})
+
+      :else p)))
+
+;; Draw inside each branch so no native Color is returned from this fn.
+(defn draw-particle [p]
+  (let [type (:type p)
+        x    (int (:x p))
+        y    (int (:y p))
+        r    (cpp/float (:radius p))
+        age  (:age p)
+        radius (:radius p)]
+    (cond
+      (= type :water)
+      (cpp/DrawCircle x y r cpp/BLUE)
+
+      (= type :smoke)
+      (cpp/DrawCircle x y r (cpp/Fade cpp/GRAY (cpp/float (max 0.0 (- 1.0 (/ age 1.8))))))
+
+      (= type :fire)
+      (cpp/DrawCircle x y r (cpp/ColorLerp cpp/YELLOW cpp/RED
+                              (cpp/float (max 0.0 (min 1.0 (/ (- 10.0 radius) 10.0))))))
+
+      :else nil)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - simple particles (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [particles    []
+         current-type :water]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [ex        (cpp/GetMouseX)
+            ey        (cpp/GetMouseY)
+            emitted   (if (< (count particles) MAX-PARTICLES)
+                        [(emit-particle ex ey current-type)
+                         (emit-particle ex ey current-type)
+                         (emit-particle ex ey current-type)]
+                        [])
+            particles (into (filterv alive? (mapv update-particle particles)) emitted)
+            current-type (cond
+                           (cpp/IsKeyPressed cpp/KEY_RIGHT) (next-type current-type)
+                           (cpp/IsKeyPressed cpp/KEY_LEFT)  (prev-type current-type)
+                           :else current-type)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (loop [i 0]
+          (when (< i (count particles))
+            (draw-particle (nth particles i))
+            (recur (inc i))))
+
+        (cpp/DrawRectangle 5 5 360 60 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+        (cpp/DrawRectangleLines 5 5 360 60 cpp/BLUE)
+        (cpp/DrawText "Move mouse to emit - LEFT/RIGHT change type - Q quits"
+                      15 15 10 cpp/BLACK)
+        (cpp/DrawText (str "Type: " (type-name current-type)
+                           "   Particles: " (count particles))
+                      15 40 10 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur particles current-type)))))
+
+  (cpp/CloseWindow))

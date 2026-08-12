@@ -1,0 +1,268 @@
+(ns raylib-examples.easings-testbed
+  "raylib [shapes] example - easings testbed, ported to jank.
+
+  An interactive testbed for Robert Penner's easing equations: pick an
+  easing for the x axis and another for the y axis and watch a ball
+  animate along both. LEFT/RIGHT cycle the x easing, UP/DOWN cycle the
+  y easing, ENTER plays/pauses, SPACE restarts, Q/W and A/S change the
+  duration, T toggles bounded/unbounded time. ESC or the close button
+  quits (Q is taken by the duration control here, matching the C).
+  Based on raylib/examples/shapes/shapes_easings_testbed.c with the
+  easing functions from reasings.h.
+  (jank-native: all 28 easing fns are jank defns returning reals via C
+  sin/cos/sqrt/pow; dispatched by integer index through `ease`.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def FONT 20)
+(def PI 3.141592653589793)
+
+(def DSTEP 20.0)
+(def DSTEPFINE 2.0)
+(def DMIN 1.0)
+(def DMAX 10000.0)
+(def NONE 28)          ; EASING_NONE index (the "None" pass-through)
+
+;; ---------------------------------------------------------------------------
+;; Easing functions, transcribed from raylib's reasings.h. Each takes
+;; t (current time), b (start value), c (total change), d (duration) and
+;; returns a real. These are pure jank fns, so returning the C-double math
+;; result is fine (unlike native structs).
+;; ---------------------------------------------------------------------------
+
+(defn ease-linear [t b c d] (+ (/ (* c t) d) b))
+
+(defn ease-sine-in [t b c d]
+  (+ (* (- c) (cpp/cos (* (/ t d) (/ PI 2.0)))) c b))
+(defn ease-sine-out [t b c d]
+  (+ (* c (cpp/sin (* (/ t d) (/ PI 2.0)))) b))
+(defn ease-sine-inout [t b c d]
+  (+ (* (/ (- c) 2.0) (- (cpp/cos (/ (* PI t) d)) 1.0)) b))
+
+(defn ease-circ-in [t b c d]
+  (let [tt (/ t d)]
+    (+ (* (- c) (- (cpp/sqrt (- 1.0 (* tt tt))) 1.0)) b)))
+(defn ease-circ-out [t b c d]
+  (let [tt (- (/ t d) 1.0)]
+    (+ (* c (cpp/sqrt (- 1.0 (* tt tt)))) b)))
+(defn ease-circ-inout [t b c d]
+  (let [tt (/ t (/ d 2.0))]
+    (if (< tt 1.0)
+      (+ (* (/ (- c) 2.0) (- (cpp/sqrt (- 1.0 (* tt tt))) 1.0)) b)
+      (let [t2 (- tt 2.0)]
+        (+ (* (/ c 2.0) (+ (cpp/sqrt (- 1.0 (* t2 t2))) 1.0)) b)))))
+
+(defn ease-cubic-in [t b c d]
+  (let [tt (/ t d)] (+ (* c tt tt tt) b)))
+(defn ease-cubic-out [t b c d]
+  (let [tt (- (/ t d) 1.0)] (+ (* c (+ (* tt tt tt) 1.0)) b)))
+(defn ease-cubic-inout [t b c d]
+  (let [tt (/ t (/ d 2.0))]
+    (if (< tt 1.0)
+      (+ (* (/ c 2.0) tt tt tt) b)
+      (let [t2 (- tt 2.0)]
+        (+ (* (/ c 2.0) (+ (* t2 t2 t2) 2.0)) b)))))
+
+(defn ease-quad-in [t b c d]
+  (let [tt (/ t d)] (+ (* c tt tt) b)))
+(defn ease-quad-out [t b c d]
+  (let [tt (/ t d)] (+ (* (- c) tt (- tt 2.0)) b)))
+(defn ease-quad-inout [t b c d]
+  (let [tt (/ t (/ d 2.0))]
+    (if (< tt 1.0)
+      (+ (* (/ c 2.0) tt tt) b)
+      (+ (* (/ (- c) 2.0) (- (* (- tt 1.0) (- tt 3.0)) 1.0)) b))))
+
+(defn ease-expo-in [t b c d]
+  (if (= t 0.0) b
+    (+ (* c (cpp/pow 2.0 (* 10.0 (- (/ t d) 1.0)))) b)))
+(defn ease-expo-out [t b c d]
+  (if (= t d) (+ b c)
+    (+ (* c (+ (- (cpp/pow 2.0 (/ (* -10.0 t) d))) 1.0)) b)))
+(defn ease-expo-inout [t b c d]
+  (if (= t 0.0) b
+    (if (= t d) (+ b c)
+      (let [tt (/ t (/ d 2.0))]
+        (if (< tt 1.0)
+          (+ (* (/ c 2.0) (cpp/pow 2.0 (* 10.0 (- tt 1.0)))) b)
+          (+ (* (/ c 2.0) (+ (- (cpp/pow 2.0 (* -10.0 (- tt 1.0)))) 2.0)) b))))))
+
+(defn ease-back-in [t b c d]
+  (let [s 1.70158 tt (/ t d)]
+    (+ (* c tt tt (- (* (+ s 1.0) tt) s)) b)))
+(defn ease-back-out [t b c d]
+  (let [s 1.70158 tt (- (/ t d) 1.0)]
+    (+ (* c (+ (* tt tt (+ (* (+ s 1.0) tt) s)) 1.0)) b)))
+(defn ease-back-inout [t b c d]
+  (let [tt (/ t (/ d 2.0))]
+    (if (< tt 1.0)
+      (let [s (* 1.70158 1.525)]
+        (+ (* (/ c 2.0) (* tt tt (- (* (+ s 1.0) tt) s))) b))
+      (let [t2 (- tt 2.0) s (* 1.70158 1.525)]
+        (+ (* (/ c 2.0) (+ (* t2 t2 (+ (* (+ s 1.0) t2) s)) 2.0)) b)))))
+
+(defn ease-bounce-out [t b c d]
+  (let [tt (/ t d)]
+    (cond
+      (< tt (/ 1.0 2.75)) (+ (* c (* 7.5625 tt tt)) b)
+      (< tt (/ 2.0 2.75)) (let [t2 (- tt (/ 1.5 2.75))]  (+ (* c (+ (* 7.5625 t2 t2) 0.75)) b))
+      (< tt (/ 2.5 2.75)) (let [t2 (- tt (/ 2.25 2.75))] (+ (* c (+ (* 7.5625 t2 t2) 0.9375)) b))
+      :else               (let [t2 (- tt (/ 2.625 2.75))] (+ (* c (+ (* 7.5625 t2 t2) 0.984375)) b)))))
+(defn ease-bounce-in [t b c d]
+  (+ (- c (ease-bounce-out (- d t) 0.0 c d)) b))
+(defn ease-bounce-inout [t b c d]
+  (if (< t (/ d 2.0))
+    (+ (* (ease-bounce-in (* t 2.0) 0.0 c d) 0.5) b)
+    (+ (* (ease-bounce-out (- (* t 2.0) d) 0.0 c d) 0.5) (* c 0.5) b)))
+
+(defn ease-elastic-in [t b c d]
+  (if (= t 0.0) b
+    (let [tt (/ t d)]
+      (if (= tt 1.0) (+ b c)
+        (let [p (* d 0.3) s (/ p 4.0) t1 (- tt 1.0)
+              pf (* c (cpp/pow 2.0 (* 10.0 t1)))]
+          (+ (- (* pf (cpp/sin (/ (* (- (* t1 d) s) (* 2.0 PI)) p)))) b))))))
+(defn ease-elastic-out [t b c d]
+  (if (= t 0.0) b
+    (let [tt (/ t d)]
+      (if (= tt 1.0) (+ b c)
+        (let [p (* d 0.3) s (/ p 4.0)]
+          (+ (* c (cpp/pow 2.0 (* -10.0 tt))
+                (cpp/sin (/ (* (- (* tt d) s) (* 2.0 PI)) p)))
+             c b))))))
+(defn ease-elastic-inout [t b c d]
+  (if (= t 0.0) b
+    (let [tt (/ t (/ d 2.0))]
+      (if (= tt 2.0) (+ b c)
+        (let [p (* d (* 0.3 1.5)) s (/ p 4.0)]
+          (if (< tt 1.0)
+            (let [t1 (- tt 1.0) pf (* c (cpp/pow 2.0 (* 10.0 t1)))]
+              (+ (* -0.5 (* pf (cpp/sin (/ (* (- (* t1 d) s) (* 2.0 PI)) p)))) b))
+            (let [t1 (- tt 1.0) pf (* c (cpp/pow 2.0 (* -10.0 t1)))]
+              (+ (* pf (cpp/sin (/ (* (- (* t1 d) s) (* 2.0 PI)) p)) 0.5) c b))))))))
+
+;; Dispatch an easing by its integer index (matches the C enum order).
+(defn ease [idx t b c d]
+  (cond
+    (< idx 4)  (ease-linear t b c d)
+    (= idx 4)  (ease-sine-in t b c d)
+    (= idx 5)  (ease-sine-out t b c d)
+    (= idx 6)  (ease-sine-inout t b c d)
+    (= idx 7)  (ease-circ-in t b c d)
+    (= idx 8)  (ease-circ-out t b c d)
+    (= idx 9)  (ease-circ-inout t b c d)
+    (= idx 10) (ease-cubic-in t b c d)
+    (= idx 11) (ease-cubic-out t b c d)
+    (= idx 12) (ease-cubic-inout t b c d)
+    (= idx 13) (ease-quad-in t b c d)
+    (= idx 14) (ease-quad-out t b c d)
+    (= idx 15) (ease-quad-inout t b c d)
+    (= idx 16) (ease-expo-in t b c d)
+    (= idx 17) (ease-expo-out t b c d)
+    (= idx 18) (ease-expo-inout t b c d)
+    (= idx 19) (ease-back-in t b c d)
+    (= idx 20) (ease-back-out t b c d)
+    (= idx 21) (ease-back-inout t b c d)
+    (= idx 22) (ease-bounce-out t b c d)
+    (= idx 23) (ease-bounce-in t b c d)
+    (= idx 24) (ease-bounce-inout t b c d)
+    (= idx 25) (ease-elastic-in t b c d)
+    (= idx 26) (ease-elastic-out t b c d)
+    (= idx 27) (ease-elastic-inout t b c d)
+    :else b))
+
+(def names
+  ["EaseLinearNone" "EaseLinearIn" "EaseLinearOut" "EaseLinearInOut"
+   "EaseSineIn" "EaseSineOut" "EaseSineInOut"
+   "EaseCircIn" "EaseCircOut" "EaseCircInOut"
+   "EaseCubicIn" "EaseCubicOut" "EaseCubicInOut"
+   "EaseQuadIn" "EaseQuadOut" "EaseQuadInOut"
+   "EaseExpoIn" "EaseExpoOut" "EaseExpoInOut"
+   "EaseBackIn" "EaseBackOut" "EaseBackInOut"
+   "EaseBounceOut" "EaseBounceIn" "EaseBounceInOut"
+   "EaseElasticIn" "EaseElasticOut" "EaseElasticInOut"
+   "None"])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - easings testbed (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [t d paused? boundedT? easingX easingY ballx bally].
+  (loop [t 0.0 d 300.0 paused true bt true ex NONE ey NONE bx 100.0 by 100.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [;; T toggles bounded/unbounded time.
+            tkey (cpp/IsKeyPressed cpp/KEY_T)
+            bt   (if tkey (not bt) bt)
+
+            ;; LEFT/RIGHT cycle the x-axis easing (wrapping through None).
+            rightP (cpp/IsKeyPressed cpp/KEY_RIGHT)
+            leftP  (cpp/IsKeyPressed cpp/KEY_LEFT)
+            ex (cond
+                 rightP (let [e (inc ex)] (if (> e NONE) 0 e))
+                 leftP  (if (= ex 0) NONE (dec ex))
+                 :else  ex)
+
+            ;; UP/DOWN cycle the y-axis easing.
+            downP (cpp/IsKeyPressed cpp/KEY_DOWN)
+            upP   (cpp/IsKeyPressed cpp/KEY_UP)
+            ey (cond
+                 downP (let [e (inc ey)] (if (> e NONE) 0 e))
+                 upP   (if (= ey 0) NONE (dec ey))
+                 :else ey)
+
+            ;; W/Q coarse duration, S/A fine duration (S/A are held keys).
+            wP (cpp/IsKeyPressed cpp/KEY_W)
+            qP (cpp/IsKeyPressed cpp/KEY_Q)
+            sD (cpp/IsKeyDown cpp/KEY_S)
+            aD (cpp/IsKeyDown cpp/KEY_A)
+            d (cond
+                (and wP (< d (- DMAX DSTEP))) (+ d DSTEP)
+                (and qP (> d (+ DMIN DSTEP))) (- d DSTEP)
+                :else d)
+            d (cond
+                (and sD (< d (- DMAX DSTEPFINE))) (+ d DSTEPFINE)
+                (and aD (> d (+ DMIN DSTEPFINE))) (- d DSTEPFINE)
+                :else d)
+
+            spaceP (cpp/IsKeyPressed cpp/KEY_SPACE)
+            enterP (cpp/IsKeyPressed cpp/KEY_ENTER)
+
+            ;; Any control (or ENTER once bounded time has run out) restarts.
+            restart? (or spaceP tkey rightP leftP downP upP wP qP sD aD
+                         (and enterP bt (>= t d)))
+            [t bx by paused] (if restart? [0.0 100.0 100.0 true] [t bx by paused])
+
+            ;; ENTER toggles play/pause (after a possible restart above).
+            paused (if enterP (not paused) paused)
+
+            move? (and (not paused) (or (and bt (< t d)) (not bt)))
+            bx (if move? (+ 0.0 (ease ex t 100.0 530.0 d)) bx)
+            by (if move? (+ 0.0 (ease ey t 100.0 230.0 d)) by)
+            t  (if move? (+ t 1.0) t)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText (str "Easing x: " (nth names ex)) 20 FONT FONT cpp/LIGHTGRAY)
+        (cpp/DrawText (str "Easing y: " (nth names ey)) 20 (* FONT 2) FONT cpp/LIGHTGRAY)
+        (cpp/DrawText (str "t (" (if bt "b" "u") ") = " (int t) "   d = " (int d))
+                      20 (* FONT 3) FONT cpp/LIGHTGRAY)
+
+        (cpp/DrawText "Use ENTER to play or pause movement, use SPACE to restart"
+                      20 (- HEIGHT (* FONT 2)) FONT cpp/LIGHTGRAY)
+        (cpp/DrawText "Use Q and W or A and S keys to change duration"
+                      20 (- HEIGHT (* FONT 3)) FONT cpp/LIGHTGRAY)
+        (cpp/DrawText "Use LEFT or RIGHT keys to choose easing for the x axis"
+                      20 (- HEIGHT (* FONT 4)) FONT cpp/LIGHTGRAY)
+        (cpp/DrawText "Use UP or DOWN keys to choose easing for the y axis"
+                      20 (- HEIGHT (* FONT 5)) FONT cpp/LIGHTGRAY)
+
+        (cpp/DrawCircleV (cpp/Vector2 (cpp/float bx) (cpp/float by)) (cpp/float 16.0) cpp/MAROON)
+
+        (cpp/EndDrawing)
+
+        (recur t d paused bt ex ey bx by))))
+
+  (cpp/CloseWindow))

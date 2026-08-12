@@ -1,0 +1,266 @@
+(ns raylib-examples.basic-pbr
+  "raylib [shaders] example - basic pbr, ported to jank.
+
+  Physically-based rendering: the rusty-car GLB under four colored
+  point lights, every surface driven by albedo + normal + MRA
+  (metalness/roughness/occlusion) + emissive texture maps through the
+  pbr shader pair. Keys 1-4 toggle the lights. Orbital camera. ESC
+  quits. Model: 'Old Rusty Car' by Renafox (CC BY-NC).
+  Based on raylib/examples/shaders/shaders_basic_pbr.c
+
+  jank-native notes:
+  - The PBR example ships its OWN light struct (with an intensity
+    field - not rlights.h compatible), so its CreateLight/UpdateLight
+    stay a per-file cpp/raw block behind index wrappers, while
+    jank_rlights.h still supplies the generic uniform setters.
+  - Material map .color / .value / .texture writes are map-slot
+    shims; the per-model uniform values (tiling, emissive, metallic,
+    roughness) are known jank constants re-sent per frame, matching
+    the C reads off the material.
+  - Teardown keeps the C's unbind dance (shader zeroed, material
+    unloaded manually, maps NULLed) as a Model-by-value shim so the
+    shared PBR shader isn't double-freed."
+  (:include "raylib.h" "jank_rlights.h"))
+
+;; The PBR light array (type/enabled/pos/target/color/intensity + six
+;; locations each) and the example's careful model teardown.
+(cpp/raw "#define JANK_PBR_MAX_LIGHTS 4
+typedef struct {
+  int type, enabled;
+  Vector3 position, target;
+  float color[4];
+  float intensity;
+  int typeLoc, enabledLoc, positionLoc, targetLoc, colorLoc, intensityLoc;
+} PbrLight;
+static PbrLight jank_pbr_lights[JANK_PBR_MAX_LIGHTS];
+static int jank_pbr_count = 0;
+
+static void jank_pbr_update(Shader shader, int i) {
+  PbrLight *l = &jank_pbr_lights[i];
+  SetShaderValue(shader, l->enabledLoc, &l->enabled, SHADER_UNIFORM_INT);
+  SetShaderValue(shader, l->typeLoc, &l->type, SHADER_UNIFORM_INT);
+  float position[3] = { l->position.x, l->position.y, l->position.z };
+  SetShaderValue(shader, l->positionLoc, position, SHADER_UNIFORM_VEC3);
+  float target[3] = { l->target.x, l->target.y, l->target.z };
+  SetShaderValue(shader, l->targetLoc, target, SHADER_UNIFORM_VEC3);
+  SetShaderValue(shader, l->colorLoc, l->color, SHADER_UNIFORM_VEC4);
+  SetShaderValue(shader, l->intensityLoc, &l->intensity, SHADER_UNIFORM_FLOAT);
+}
+static int jank_pbr_create(int type, double px, double py, double pz,
+                           int r, int g, int b, int a,
+                           double intensity, Shader shader) {
+  if (jank_pbr_count >= JANK_PBR_MAX_LIGHTS) return -1;
+  int i = jank_pbr_count;
+  PbrLight *l = &jank_pbr_lights[i];
+  l->enabled = 1;
+  l->type = type;
+  l->position = (Vector3){ (float)px, (float)py, (float)pz };
+  l->target = (Vector3){ 0 };
+  l->color[0] = (float)r/255.0f; l->color[1] = (float)g/255.0f;
+  l->color[2] = (float)b/255.0f; l->color[3] = (float)a/255.0f;
+  l->intensity = (float)intensity;
+  l->enabledLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].enabled\", i));
+  l->typeLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].type\", i));
+  l->positionLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].position\", i));
+  l->targetLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].target\", i));
+  l->colorLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].color\", i));
+  l->intensityLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].intensity\", i));
+  jank_pbr_update(shader, i);
+  jank_pbr_count++;
+  return i;
+}
+static void jank_pbr_toggle(int i) {
+  jank_pbr_lights[i].enabled = !jank_pbr_lights[i].enabled;
+}
+static int jank_pbr_enabled(int i) { return jank_pbr_lights[i].enabled; }
+
+static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader = s; }
+static void jank_mat_map_texture(Model* m, int map, Texture2D tex) {
+  m->materials[0].maps[map].texture = tex;
+}
+static void jank_mat_map_color(Model* m, int map, int r, int g, int b, int a) {
+  m->materials[0].maps[map].color = (Color){ (unsigned char)r, (unsigned char)g,
+                                             (unsigned char)b, (unsigned char)a };
+}
+static void jank_mat_map_value(Model* m, int map, double v) {
+  m->materials[0].maps[map].value = (float)v;
+}
+/* the C's teardown: unbind the shared shader so it isn't double-freed */
+static void jank_pbr_unload_model(Model m) {
+  m.materials[0].shader = (Shader){ 0 };
+  UnloadMaterial(m.materials[0]);
+  m.materials[0].maps = NULL;
+  UnloadModel(m);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+;; The four lights, as jank data for the marker spheres:
+;; YELLOW / GREEN / RED / BLUE with per-light intensity.
+(def LIGHTS [{:x -1.0 :y 1.0 :z -2.0 :r 253 :g 249 :b 0 :intensity 4.0}
+             {:x 2.0 :y 1.0 :z 1.0 :r 0 :g 228 :b 48 :intensity 3.3}
+             {:x -2.0 :y 1.0 :z 1.0 :r 230 :g 41 :b 55 :intensity 8.3}
+             {:x 1.0 :y 1.0 :z -2.0 :r 0 :g 121 :b 241 :intensity 2.0}])
+
+(defn- light-color
+  "The light's Color as a packed-RGBA GetColor int."
+  [{:keys [r g b]}]
+  (+ (* r 16777216) (* g 65536) (* b 256) 255))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - basic pbr (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 2.0) (cpp/float 2.0) (cpp/float 6.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        shader (cpp/LoadShader (str RES "shaders/glsl330/pbr.vs")
+                               (str RES "shaders/glsl330/pbr.fs"))
+        view-loc (int (cpp/GetShaderLocation shader "viewPos"))
+        metallic-loc (int (cpp/GetShaderLocation shader "metallicValue"))
+        roughness-loc (int (cpp/GetShaderLocation shader "roughnessValue"))
+        emissive-power-loc (int (cpp/GetShaderLocation shader "emissivePower"))
+        emissive-color-loc (int (cpp/GetShaderLocation shader "emissiveColor"))
+        tiling-loc (int (cpp/GetShaderLocation shader "tiling"))
+        car (cpp/LoadModel (str RES "models/old_car_new.glb"))
+        floor (cpp/LoadModel (str RES "models/plane.glb"))]
+
+    ;; wire the packed texture maps into raylib's material slots
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_ALBEDO
+                                (int (cpp/GetShaderLocation shader "albedoMap")))
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_METALNESS
+                                (int (cpp/GetShaderLocation shader "mraMap")))
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_NORMAL
+                                (int (cpp/GetShaderLocation shader "normalMap")))
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_EMISSION
+                                (int (cpp/GetShaderLocation shader "emissiveMap")))
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_COLOR_DIFFUSE
+                                (int (cpp/GetShaderLocation shader "albedoColor")))
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+
+    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "numOfLights")) 4)
+
+    ;; ambient: Color(26 32 135) normalized + a low intensity
+    (cpp/jank_rl_set_vec3 shader (int (cpp/GetShaderLocation shader "ambientColor"))
+                          (/ 26.0 255.0) (/ 32.0 255.0) (/ 135.0 255.0))
+    (cpp/jank_rl_set_float shader (int (cpp/GetShaderLocation shader "ambient")) 0.02)
+
+    ;; car: PBR maps + defaults
+    (cpp/jank_model_set_shader (cpp/& car) shader)
+    (cpp/jank_mat_map_color (cpp/& car) (cpp/int cpp/MATERIAL_MAP_ALBEDO) 255 255 255 255)
+    (cpp/jank_mat_map_value (cpp/& car) (cpp/int cpp/MATERIAL_MAP_METALNESS) 1.0)
+    (cpp/jank_mat_map_value (cpp/& car) (cpp/int cpp/MATERIAL_MAP_ROUGHNESS) 0.0)
+    (cpp/jank_mat_map_value (cpp/& car) (cpp/int cpp/MATERIAL_MAP_OCCLUSION) 1.0)
+    (cpp/jank_mat_map_color (cpp/& car) (cpp/int cpp/MATERIAL_MAP_EMISSION) 255 162 0 255)
+    (cpp/jank_mat_map_texture (cpp/& car) (cpp/int cpp/MATERIAL_MAP_ALBEDO)
+                              (cpp/LoadTexture (str RES "old_car_d.png")))
+    (cpp/jank_mat_map_texture (cpp/& car) (cpp/int cpp/MATERIAL_MAP_METALNESS)
+                              (cpp/LoadTexture (str RES "old_car_mra.png")))
+    (cpp/jank_mat_map_texture (cpp/& car) (cpp/int cpp/MATERIAL_MAP_NORMAL)
+                              (cpp/LoadTexture (str RES "old_car_n.png")))
+    (cpp/jank_mat_map_texture (cpp/& car) (cpp/int cpp/MATERIAL_MAP_EMISSION)
+                              (cpp/LoadTexture (str RES "old_car_e.png")))
+
+    ;; floor: road maps + defaults
+    (cpp/jank_model_set_shader (cpp/& floor) shader)
+    (cpp/jank_mat_map_color (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_ALBEDO) 255 255 255 255)
+    (cpp/jank_mat_map_value (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_METALNESS) 0.8)
+    (cpp/jank_mat_map_value (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_ROUGHNESS) 0.1)
+    (cpp/jank_mat_map_value (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_OCCLUSION) 1.0)
+    (cpp/jank_mat_map_color (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_EMISSION) 0 0 0 255)
+    (cpp/jank_mat_map_texture (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_ALBEDO)
+                              (cpp/LoadTexture (str RES "road_a.png")))
+    (cpp/jank_mat_map_texture (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_METALNESS)
+                              (cpp/LoadTexture (str RES "road_mra.png")))
+    (cpp/jank_mat_map_texture (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_NORMAL)
+                              (cpp/LoadTexture (str RES "road_n.png")))
+
+    ;; the four point lights (LIGHT_POINT = 1 in the PBR enum)
+    (loop [i 0]
+      (when (< i 4)
+        (let [{:keys [x y z r g b intensity]} (nth LIGHTS i)]
+          (cpp/jank_pbr_create 1 x y z (int r) (int g) (int b) 255 intensity shader))
+        (recur (inc i))))
+
+    ;; texture maps all in use
+    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "useTexAlbedo")) 1)
+    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "useTexNormal")) 1)
+    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "useTexMRA")) 1)
+    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "useTexEmissive")) 1)
+
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+        (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
+
+        ;; the C toggles lights 2/1/3/0 on keys 1/2/3/4
+        (when (cpp/IsKeyPressed cpp/KEY_ONE) (cpp/jank_pbr_toggle 2))
+        (when (cpp/IsKeyPressed cpp/KEY_TWO) (cpp/jank_pbr_toggle 1))
+        (when (cpp/IsKeyPressed cpp/KEY_THREE) (cpp/jank_pbr_toggle 3))
+        (when (cpp/IsKeyPressed cpp/KEY_FOUR) (cpp/jank_pbr_toggle 0))
+        (loop [i 0]
+          (when (< i 4)
+            (cpp/jank_pbr_update shader (int i))
+            (recur (inc i))))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/BLACK)
+
+        (cpp/BeginMode3D camera)
+
+        ;; floor: tiling 0.5, black emissive, metallic 0.8 / roughness 0.1
+        (cpp/jank_rl_set_vec2 shader tiling-loc 0.5 0.5)
+        (cpp/jank_rl_set_vec4 shader emissive-color-loc 0.0 0.0 0.0 1.0)
+        (cpp/jank_rl_set_float shader metallic-loc 0.8)
+        (cpp/jank_rl_set_float shader roughness-loc 0.1)
+        (cpp/DrawModel floor
+                       (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                       (cpp/float 5.0) cpp/WHITE)
+
+        ;; car: tiling 0.5, orange emissive, metallic 1.0 / roughness 0.0
+        (cpp/jank_rl_set_vec2 shader tiling-loc 0.5 0.5)
+        (cpp/jank_rl_set_vec4 shader emissive-color-loc
+                              1.0 (/ 162.0 255.0) 0.0 1.0)
+        (cpp/jank_rl_set_float shader emissive-power-loc 0.01)
+        (cpp/jank_rl_set_float shader metallic-loc 1.0)
+        (cpp/jank_rl_set_float shader roughness-loc 0.0)
+        (cpp/DrawModel car
+                       (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                       (cpp/float 0.25) cpp/WHITE)
+
+        ;; marker spheres: solid when on, wire when off
+        (loop [i 0]
+          (when (< i 4)
+            (let [{:keys [x y z] :as light} (nth LIGHTS i)]
+              (if (= 1 (int (cpp/jank_pbr_enabled (int i))))
+                (cpp/DrawSphereEx (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                                  (cpp/float 0.2) 8 8
+                                  (cpp/GetColor (light-color light)))
+                (cpp/DrawSphereWires (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                                     (cpp/float 0.2) 8 8
+                                     (cpp/ColorAlpha (cpp/GetColor (light-color light))
+                                                     (cpp/float 0.3)))))
+            (recur (inc i))))
+
+        (cpp/EndMode3D)
+
+        (cpp/DrawText "Toggle lights: [1][2][3][4]" 10 40 20 cpp/LIGHTGRAY)
+        (cpp/DrawText "(c) Old Rusty Car model by Renafox (https://skfb.ly/LxRy)"
+                      (- WIDTH 320) (- HEIGHT 20) 10 cpp/LIGHTGRAY)
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/jank_pbr_unload_model car)
+    (cpp/jank_pbr_unload_model floor)
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

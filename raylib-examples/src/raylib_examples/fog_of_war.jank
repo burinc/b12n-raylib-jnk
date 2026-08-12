@@ -1,0 +1,106 @@
+(ns raylib-examples.fog-of-war
+  "raylib [textures] example - fog of war, ported to jank.
+
+  A 25x15 tile map hidden by fog: the player (ARROW keys) reveals
+  tiles around it; visited tiles fall back to half-fog. The fog is
+  drawn one pixel per tile into a tiny RenderTexture and upscaled
+  with bilinear filtering for the smooth look. Q quits.
+  Based on raylib/examples/textures/textures_fog_of_war.c
+  (jank-native: the C's two unsigned char* map arrays become jank
+  vectors of ints - tile ids fixed, fog state updated functionally
+  with mapv/assoc each frame.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAP-W 25)
+(def MAP-H 15)
+(def TILE 32)
+(def PLAYER 16)
+(def VISIBILITY 2)
+
+(defn reveal-around [fog ptx pty]
+  ;; Tiles in the visibility window become fully visible (state 1).
+  (reduce (fn [f [x y]] (assoc f (+ (* y MAP-W) x) 1))
+          fog
+          (for [y (range (- pty VISIBILITY) (+ pty VISIBILITY))
+                x (range (- ptx VISIBILITY) (+ ptx VISIBILITY))
+                :when (and (>= x 0) (< x MAP-W) (>= y 0) (< y MAP-H))]
+            [x y])))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - fog of war (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [tile-ids (vec (repeatedly (* MAP-W MAP-H) (fn [] (cpp/GetRandomValue 0 1))))
+        fog-rt (cpp/LoadRenderTexture MAP-W MAP-H)]
+    (cpp/SetTextureFilter (.-texture fog-rt) cpp/TEXTURE_FILTER_BILINEAR)
+    (cpp/SetTextureWrap (.-texture fog-rt) cpp/TEXTURE_WRAP_CLAMP)
+
+    ;; Thread [player-x player-y fog-states].
+    (loop [px 180.0 py 130.0 fog (vec (repeat (* MAP-W MAP-H) 0))]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [px (if (cpp/IsKeyDown cpp/KEY_RIGHT) (+ px 5.0) px)
+              px (if (cpp/IsKeyDown cpp/KEY_LEFT) (- px 5.0) px)
+              py (if (cpp/IsKeyDown cpp/KEY_DOWN) (+ py 5.0) py)
+              py (if (cpp/IsKeyDown cpp/KEY_UP) (- py 5.0) py)
+              px (if (< px 0.0) 0.0 (if (> (+ px PLAYER) (* MAP-W TILE)) (- (* MAP-W TILE) PLAYER) px))
+              py (if (< py 0.0) 0.0 (if (> (+ py PLAYER) (* MAP-H TILE)) (- (* MAP-H TILE) PLAYER) py))
+
+              ;; Previously visible tiles decay to half-fog (state 2).
+              fog (mapv (fn [f] (if (= f 1) 2 f)) fog)
+              ptx (int (/ (+ px (/ TILE 2.0)) TILE))
+              pty (int (/ (+ py (/ TILE 2.0)) TILE))
+              fog (reveal-around fog ptx pty)]
+
+          ;; The fog layer, one pixel per tile.
+          (cpp/BeginTextureMode fog-rt)
+          (cpp/ClearBackground cpp/BLANK)
+          (doseq [y (range MAP-H)
+                  x (range MAP-W)]
+            (let [f (nth fog (+ (* y MAP-W) x))]
+              (if (= f 0)
+                (cpp/DrawRectangle (int x) (int y) 1 1 cpp/BLACK)
+                (when (= f 2)
+                  (cpp/DrawRectangle (int x) (int y) 1 1 (cpp/Fade cpp/BLACK (cpp/float 0.8)))))))
+          (cpp/EndTextureMode)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; The tile map.
+          (doseq [y (range MAP-H)
+                  x (range MAP-W)]
+            (cpp/DrawRectangle (int (* x TILE)) (int (* y TILE)) TILE TILE
+                               (if (= (nth tile-ids (+ (* y MAP-W) x)) 0)
+                                 cpp/BLUE
+                                 (cpp/Fade cpp/BLUE (cpp/float 0.9))))
+            (cpp/DrawRectangleLines (int (* x TILE)) (int (* y TILE)) TILE TILE
+                                    (cpp/Fade cpp/DARKBLUE (cpp/float 0.5))))
+
+          (cpp/DrawRectangle (int px) (int py) PLAYER PLAYER cpp/RED)
+
+          ;; The fog upscaled over the whole map (y-flipped RenderTexture).
+          (cpp/DrawTexturePro (.-texture fog-rt)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 MAP-W))
+                                             (cpp/float (- 0.0 MAP-H)))
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 (* MAP-W TILE)))
+                                             (cpp/float (+ 0.0 (* MAP-H TILE))))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              (cpp/float 0.0)
+                              cpp/WHITE)
+
+          (cpp/DrawText (str "Current tile: [" ptx "," pty "]") 10 10 20 cpp/RAYWHITE)
+          (cpp/DrawText "ARROW KEYS to move (Q quits)" 10 (- HEIGHT 25) 20 cpp/RAYWHITE)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur px py fog)))))
+
+    (cpp/UnloadRenderTexture fog-rt))
+
+  (cpp/CloseWindow))

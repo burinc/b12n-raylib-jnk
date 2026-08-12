@@ -1,0 +1,75 @@
+(ns raylib-examples.shapes-textures-shader
+  "raylib [shaders] example - shapes textures, ported to jank.
+
+  The FIRST shader example: a grayscale fragment shader toggled around
+  groups of shapes and a sprite with BeginShaderMode/EndShaderMode -
+  sections drawn with the custom shader lose their color. ESC quits.
+  Based on raylib/examples/shaders/shaders_shapes_textures.c
+
+  jank-native notes:
+  - This port unblocks the shaders category: LoadShader(0, path) works
+    directly - cpp/nullptr for the default vertex shader (the
+    font-loading trick), the returned Shader struct is a create-once
+    outer-let local (like Font/Texture2D), and
+    BeginShaderMode/EndShaderMode take it by value. No wrapper changes.
+  - The C's TextFormat GLSL_VERSION path becomes a plain str; desktop
+    GL is GLSL 330 here."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - shapes textures (jank)")
+
+  (let [fudesumi (cpp/LoadTexture (str RES "fudesumi.png"))
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/grayscale.fs"))]
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        ;; default shader
+        (cpp/DrawText "USING DEFAULT SHADER" 20 40 10 cpp/RED)
+        (cpp/DrawCircle 80 120 (cpp/float 35.0) cpp/DARKBLUE)
+        (cpp/DrawCircleGradient (cpp/Vector2 (cpp/float 80.0) (cpp/float 220.0))
+                                (cpp/float 60.0) cpp/GREEN cpp/SKYBLUE)
+        (cpp/DrawCircleLines 80 340 (cpp/float 80.0) cpp/DARKBLUE)
+
+        ;; custom (grayscale) shader
+        (cpp/BeginShaderMode shader)
+        (cpp/DrawText "USING CUSTOM SHADER" 190 40 10 cpp/RED)
+        (cpp/DrawRectangle 190 90 120 60 cpp/RED)
+        (cpp/DrawRectangleGradientH 160 170 180 130 cpp/MAROON cpp/GOLD)
+        (cpp/DrawRectangleLines 210 320 80 60 cpp/ORANGE)
+        (cpp/EndShaderMode)
+
+        ;; default shader again
+        (cpp/DrawText "USING DEFAULT SHADER" 370 40 10 cpp/RED)
+        (cpp/DrawTriangle (cpp/Vector2 (cpp/float 430.0) (cpp/float 80.0))
+                          (cpp/Vector2 (cpp/float 370.0) (cpp/float 150.0))
+                          (cpp/Vector2 (cpp/float 490.0) (cpp/float 150.0)) cpp/VIOLET)
+        (cpp/DrawTriangleLines (cpp/Vector2 (cpp/float 430.0) (cpp/float 160.0))
+                               (cpp/Vector2 (cpp/float 410.0) (cpp/float 230.0))
+                               (cpp/Vector2 (cpp/float 450.0) (cpp/float 230.0)) cpp/DARKBLUE)
+        (cpp/DrawPoly (cpp/Vector2 (cpp/float 430.0) (cpp/float 320.0)) 6
+                      (cpp/float 80.0) (cpp/float 0.0) cpp/BROWN)
+
+        ;; the sprite through the grayscale shader
+        (cpp/BeginShaderMode shader)
+        (cpp/DrawTexture fudesumi 500 -30 cpp/WHITE)
+        (cpp/EndShaderMode)
+
+        (cpp/DrawText "(c) Fudesumi sprite by Eiden Marsal" 380 (- HEIGHT 20) 10 cpp/GRAY)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadTexture fudesumi))
+
+  (cpp/CloseWindow))

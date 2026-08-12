@@ -1,0 +1,143 @@
+(ns raylib-examples.point-rendering
+  "raylib [models] example - point rendering, ported to jank.
+
+  A spherical point cloud (1 thousand to 10 MILLION points, UP/DOWN
+  scale by 10x) drawn two ways: SPACE toggles between one GPU
+  point-mode DrawModel call and the old per-point DrawPoint3D loop -
+  watch the FPS difference at high counts. Orbital camera. ESC quits.
+  Based on raylib/examples/models/models_point_rendering.c
+
+  jank-native notes:
+  - The point-cloud Model is REPLACED on every count change, so the
+    Mesh + Model pair live as C statics behind load/draw/unload
+    wrappers (the hot-reloading runtime-replaced-native pattern);
+    the spherical generator (MemAlloc'd vertex/color arrays, rand())
+    stays verbatim C.
+  - Both draw paths are shims: the new one wraps DrawModel in
+    rlEnablePointMode, the old one walks mesh.vertices[]/colors[]
+    calling DrawPoint3D per point."
+  (:include "raylib.h" "rlgl.h"))
+
+;; The runtime-replaced point cloud, C-side (mesh arrays + model).
+(cpp/raw "static Mesh jank_points_mesh = { 0 };
+static Model jank_points_model = { 0 };
+static int jank_points_loaded = 0;
+
+/* the C's GenMeshPoints, verbatim: a random spherical cloud */
+static Mesh jank_gen_mesh_points(int numPoints) {
+  Mesh mesh = { 0 };
+  mesh.triangleCount = 1;
+  mesh.vertexCount = numPoints;
+  mesh.vertices = (float *)MemAlloc(numPoints*3*sizeof(float));
+  mesh.colors = (unsigned char*)MemAlloc(numPoints*4*sizeof(unsigned char));
+  for (int i = 0; i < numPoints; i++) {
+    float theta = ((float)PI*rand())/((float)RAND_MAX);
+    float phi = (2.0f*PI*rand())/((float)RAND_MAX);
+    float r = (10.0f*rand())/((float)RAND_MAX);
+    mesh.vertices[i*3 + 0] = r*sinf(theta)*cosf(phi);
+    mesh.vertices[i*3 + 1] = r*sinf(theta)*sinf(phi);
+    mesh.vertices[i*3 + 2] = r*cosf(theta);
+    Color color = ColorFromHSV(r*360.0f, 1.0f, 1.0f);
+    mesh.colors[i*4 + 0] = color.r;
+    mesh.colors[i*4 + 1] = color.g;
+    mesh.colors[i*4 + 2] = color.b;
+    mesh.colors[i*4 + 3] = color.a;
+  }
+  UploadMesh(&mesh, false);
+  return mesh;
+}
+static void jank_points_load(int numPoints) {
+  if (jank_points_loaded) UnloadModel(jank_points_model);
+  jank_points_mesh = jank_gen_mesh_points(numPoints);
+  jank_points_model = LoadModelFromMesh(jank_points_mesh);
+  jank_points_loaded = 1;
+}
+static void jank_points_unload(void) {
+  if (jank_points_loaded) { UnloadModel(jank_points_model); jank_points_loaded = 0; }
+}
+/* one GPU draw call in point mode */
+static void jank_draw_points_new(void) {
+  rlEnablePointMode();
+  rlDisableBackfaceCulling();
+  DrawModel(jank_points_model, (Vector3){ 0, 0, 0 }, 1.0f, WHITE);
+  rlEnableBackfaceCulling();
+  rlDisablePointMode();
+}
+/* the old way: one DrawPoint3D per point, every frame */
+static void jank_draw_points_old(int numPoints) {
+  for (int i = 0; i < numPoints; i++) {
+    Vector3 pos = { jank_points_mesh.vertices[i*3 + 0],
+                    jank_points_mesh.vertices[i*3 + 1],
+                    jank_points_mesh.vertices[i*3 + 2] };
+    Color color = { jank_points_mesh.colors[i*4 + 0],
+                    jank_points_mesh.colors[i*4 + 1],
+                    jank_points_mesh.colors[i*4 + 2],
+                    jank_points_mesh.colors[i*4 + 3] };
+    DrawPoint3D(pos, color);
+  }
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MIN-POINTS 1000)
+(def MAX-POINTS 10000000)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - point rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 3.0) (cpp/float 3.0) (cpp/float 3.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)]
+
+    (cpp/jank_points_load 1000)
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [num-points gpu-mode?].
+    (loop [num-points 1000
+           gpu? true]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (let [gpu? (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not gpu?) gpu?)
+              wanted (cond (cpp/IsKeyPressed cpp/KEY_UP)
+                           (if (> (* num-points 10) MAX-POINTS) MAX-POINTS (* num-points 10))
+                           (cpp/IsKeyPressed cpp/KEY_DOWN)
+                           (if (< (int (quot num-points 10)) MIN-POINTS)
+                             MIN-POINTS
+                             (int (quot num-points 10)))
+                           :else num-points)]
+
+          ;; a different cloud size: regenerate + re-upload
+          (when (not= wanted num-points)
+            (cpp/jank_points_load (int wanted)))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/BLACK)
+
+          (cpp/BeginMode3D camera)
+          (if gpu?
+            (cpp/jank_draw_points_new)
+            (cpp/jank_draw_points_old (int wanted)))
+          ;; a unit sphere for reference
+          (cpp/DrawSphereWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                               (cpp/float 1.0) 10 10 cpp/YELLOW)
+          (cpp/EndMode3D)
+
+          (cpp/DrawText (str "Point Count: " wanted) 10 (- HEIGHT 50) 40 cpp/WHITE)
+          (cpp/DrawText "UP - Increase points" 10 40 20 cpp/WHITE)
+          (cpp/DrawText "DOWN - Decrease points" 10 70 20 cpp/WHITE)
+          (cpp/DrawText "SPACE - Drawing function" 10 100 20 cpp/WHITE)
+          (if gpu?
+            (cpp/DrawText "Using: DrawModelPoints()" 10 130 20 cpp/GREEN)
+            (cpp/DrawText "Using: DrawPoint3D()" 10 130 20 cpp/RED))
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+          (recur wanted gpu?))))
+
+    (cpp/jank_points_unload))
+
+  (cpp/CloseWindow))

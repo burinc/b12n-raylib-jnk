@@ -1,0 +1,164 @@
+(ns raylib-examples.clock-of-clocks
+  "raylib [shapes] example - clock of clocks, ported to jank.
+
+  Each of the six time digits is a 4x6 grid of little clocks whose two
+  hands sweep to form the digit's strokes. Reads the real system time;
+  SPACE toggles 12/24-hour mode, Q quits.
+  Based on raylib/examples/shapes/shapes_clock_of_clocks.c
+  (jank-native: C time()/localtime(); the [6*24] hand-angle state is held
+  as flat jank vectors of [big-angle little-angle] pairs and lerped each
+  frame; colors built inline via ColorLerp)."
+  (:include "raylib.h" "time.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def DUR 0.5)              ; seconds for the hands to sweep to a new digit
+(def NCELLS 144)          ; 6 digits * 24 clocks
+
+;; Each entry is [big-hand-angle little-hand-angle]; named by the stroke
+;; the two hands form on a clock face.
+(def TL [0.0 90.0])       ; top-left corner
+(def TR [90.0 180.0])     ; top-right corner
+(def BR [180.0 270.0])    ; bottom-right corner
+(def BL [0.0 270.0])      ; bottom-left corner
+(def HH [0.0 180.0])      ; horizontal
+(def VV [90.0 270.0])     ; vertical
+(def ZZ [135.0 135.0])    ; blank (both hands tucked away)
+
+;; 24 hand-states (row-major 4x6) for each digit 0-9.
+(def DIGIT-TABLE
+  [[TL HH HH TR  VV TL TR VV  VV VV VV VV  VV VV VV VV  VV BL BR VV  BL HH HH BR]   ; 0
+   [TL HH TR ZZ  BL TR VV ZZ  ZZ VV VV ZZ  ZZ VV VV ZZ  TL BR BL TR  BL HH HH BR]   ; 1
+   [TL HH HH TR  BL HH TR VV  TL HH BR VV  VV TL HH BR  VV BL HH TR  BL HH HH BR]   ; 2
+   [TL HH HH TR  BL HH TR VV  TL HH BR VV  BL HH TR VV  TL HH BR VV  BL HH HH BR]   ; 3
+   [TL TR TL TR  VV VV VV VV  VV BL BR VV  BL HH TR VV  ZZ ZZ VV VV  ZZ ZZ BL BR]   ; 4
+   [TL HH HH TR  VV TL HH BR  VV BL HH TR  BL HH TR VV  TL HH BR VV  BL HH HH BR]   ; 5
+   [TL HH HH TR  VV TL HH BR  VV BL HH TR  VV TL TR VV  VV BL BR VV  BL HH HH BR]   ; 6
+   [TL HH HH TR  BL HH TR VV  ZZ ZZ VV VV  ZZ ZZ VV VV  ZZ ZZ VV VV  ZZ ZZ BL BR]   ; 7
+   [TL HH HH TR  VV TL TR VV  VV BL BR VV  VV TL TR VV  VV BL BR VV  BL HH HH BR]   ; 8
+   [TL HH HH TR  VV TL TR VV  VV BL BR VV  BL HH TR VV  TL HH BR VV  BL HH HH BR]]) ; 9
+
+(def INIT-CURRENT (vec (repeat NCELLS [0.0 0.0])))
+
+;; Target angles for the 6 digits, flattened to NCELLS pairs.
+(defn build-dst [digits hour-mode]
+  (loop [g 0 acc []]
+    (if (< g 6)
+      (let [dval  (nth digits g)
+            blank (and (= g 0) (= hour-mode 12) (= (nth digits 0) 0))
+            cells (nth DIGIT-TABLE dval)]
+        (recur (inc g)
+               (loop [c 0 a acc]
+                 (if (< c 24)
+                   (recur (inc c) (conj a (if blank ZZ (nth cells c))))
+                   a))))
+      acc)))
+
+;; Source = current, shifted by -360 where needed so hands take the short way.
+(defn build-src [current dst]
+  (loop [i 0 acc []]
+    (if (< i NCELLS)
+      (let [cur (nth current i)
+            dv  (nth dst i)
+            sx  (if (> (nth cur 0) (nth dv 0)) (- (nth cur 0) 360.0) (nth cur 0))
+            sy  (if (> (nth cur 1) (nth dv 1)) (- (nth cur 1) 360.0) (nth cur 1))]
+        (recur (inc i) (conj acc [sx sy])))
+      acc)))
+
+(defn lerp-all [src dst t]
+  (loop [i 0 acc []]
+    (if (< i NCELLS)
+      (let [s  (nth src i)
+            dv (nth dst i)
+            x  (+ (nth s 0) (* (- (nth dv 0) (nth s 0)) t))
+            y  (+ (nth s 1) (* (- (nth dv 1) (nth s 1)) t))]
+        (recur (inc i) (conj acc [x y])))
+      acc)))
+
+(defn draw-clocks [current]
+  (loop [digit 0 xoff 4.0]
+    (when (< digit 6)
+      (loop [row 0]
+        (when (< row 6)
+          (loop [col 0]
+            (when (< col 4)
+              (let [cx   (+ xoff (* col 32.0) 12.0)
+                    cy   (+ 100.0 (* row 32.0) 12.0)
+                    pair (nth current (+ (* digit 24) (* row 4) col))
+                    ax   (nth pair 0)
+                    ay   (nth pair 1)]
+                (cpp/DrawRing (cpp/Vector2 (cpp/float cx) (cpp/float cy))
+                              (cpp/float 10.0) (cpp/float 12.0) (cpp/float 0.0) (cpp/float 360.0)
+                              24 cpp/DARKGRAY)
+                (cpp/DrawRectanglePro (cpp/Rectangle (cpp/float cx) (cpp/float cy) (cpp/float 16.0) (cpp/float 4.0))
+                                      (cpp/Vector2 (cpp/float 2.0) (cpp/float 2.0)) (cpp/float ax)
+                                      (cpp/ColorLerp cpp/YELLOW cpp/RAYWHITE (cpp/float 0.25)))
+                (cpp/DrawRectanglePro (cpp/Rectangle (cpp/float cx) (cpp/float cy) (cpp/float 14.0) (cpp/float 4.0))
+                                      (cpp/Vector2 (cpp/float 2.0) (cpp/float 2.0)) (cpp/float ay)
+                                      (cpp/ColorLerp cpp/YELLOW cpp/RAYWHITE (cpp/float 0.25))))
+              (recur (inc col))))
+          (recur (inc row))))
+      ;; Colon dots after every second digit.
+      (let [xoff2 (+ xoff 128.0)]
+        (if (= 1 (int (mod digit 2)))
+          (do
+            (cpp/DrawRing (cpp/Vector2 (cpp/float (+ xoff2 4.0)) (cpp/float 160.0))
+                          (cpp/float 6.0) (cpp/float 8.0) (cpp/float 0.0) (cpp/float 360.0)
+                          24 (cpp/ColorLerp cpp/YELLOW cpp/RAYWHITE (cpp/float 0.25)))
+            (cpp/DrawRing (cpp/Vector2 (cpp/float (+ xoff2 4.0)) (cpp/float 225.0))
+                          (cpp/float 6.0) (cpp/float 8.0) (cpp/float 0.0) (cpp/float 360.0)
+                          24 (cpp/ColorLerp cpp/YELLOW cpp/RAYWHITE (cpp/float 0.25)))
+            (recur (inc digit) (+ xoff2 16.0)))
+          (recur (inc digit) xoff2))))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - clock of clocks (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [current src dst prev-sec timer hour-mode].
+  (loop [current INIT-CURRENT src INIT-CURRENT dst INIT-CURRENT prev-sec -1 timer 0.0 hour-mode 24]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [t  (cpp/time cpp/nullptr)
+            lt (cpp/localtime (cpp/& t))
+            h  (int (.-tm_hour lt))
+            m  (int (.-tm_min lt))
+            s  (int (.-tm_sec lt))
+            ft (+ 0.0 (cpp/GetFrameTime))
+            changed (not (= s prev-sec))
+            ;; On a new second, recompute the target digits and restart the sweep.
+            [src dst prev-sec timer]
+            (if changed
+              (let [hh (int (mod h hour-mode))
+                    digits [(int (quot hh 10)) (int (mod hh 10))
+                            (int (quot m 10))  (int (mod m 10))
+                            (int (quot s 10))  (int (mod s 10))]
+                    nd (build-dst digits hour-mode)
+                    ns (build-src current nd)]
+                [ns nd s (- 0.0 ft)])
+              [src dst prev-sec timer])
+            ;; Advance the sweep with a smoothstep ease.
+            [current timer]
+            (if (< timer DUR)
+              (let [tt (+ timer ft)
+                    tt (if (> tt DUR) DUR (if (< tt 0.0) 0.0 tt))
+                    p  (/ tt DUR)
+                    e  (* p p (- 3.0 (* 2.0 p)))]
+                [(lerp-all src dst e) tt])
+              [current timer])
+            hour-mode (if (cpp/IsKeyPressed cpp/KEY_SPACE) (- 36 hour-mode) hour-mode)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground (cpp/ColorLerp cpp/DARKBLUE cpp/BLACK (cpp/float 0.75)))
+
+        (draw-clocks current)
+
+        (cpp/DrawText (str hour-mode "-h mode - SPACE to change, Q quits") 10 30 20 cpp/RAYWHITE)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur current src dst prev-sec timer hour-mode)))))
+
+  (cpp/CloseWindow))

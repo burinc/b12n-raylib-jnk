@@ -1,0 +1,61 @@
+(ns raylib-examples.following-eyes
+  "raylib [shapes] example - following eyes, ported to jank.
+
+  Two eyes whose irises track the mouse, clamped to the sclera. Q quits.
+  Based on raylib/examples/shapes/shapes_following_eyes.c
+  (jank-native: C atan2/cos/sin, pure-math point-in-circle test)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SCLERA 80.0)
+(def IRIS 24.0)
+(def PUPIL 10.0)
+(def MAXD (- SCLERA IRIS))             ; how far an iris may travel from center
+(def LX (- (/ WIDTH 2.0) 100.0))       ; left eye center x
+(def RX (+ (/ WIDTH 2.0) 100.0))       ; right eye center x
+(def CY (/ HEIGHT 2.0))                ; both eyes' center y
+
+;; Iris position for one eye: the mouse, but clamped to within MAXD of the
+;; eye center (equivalent to raylib's CheckCollisionPointCircle guard).
+(defn iris-pos [cx cy mx my]
+  (let [dx (- mx cx)
+        dy (- my cy)]
+    (if (<= (+ (* dx dx) (* dy dy)) (* MAXD MAXD))
+      {:x mx :y my}
+      (let [angle (cpp/atan2 dy dx)]
+        {:x (+ cx (* MAXD (cpp/cos angle)))
+         :y (+ cy (* MAXD (cpp/sin angle)))}))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - following eyes (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+            li (iris-pos LX CY mx my)
+            ri (iris-pos RX CY mx my)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawCircle (int LX) (int CY) (cpp/float SCLERA) cpp/LIGHTGRAY)
+        (cpp/DrawCircle (int (:x li)) (int (:y li)) (cpp/float IRIS) cpp/BROWN)
+        (cpp/DrawCircle (int (:x li)) (int (:y li)) (cpp/float PUPIL) cpp/BLACK)
+
+        (cpp/DrawCircle (int RX) (int CY) (cpp/float SCLERA) cpp/LIGHTGRAY)
+        (cpp/DrawCircle (int (:x ri)) (int (:y ri)) (cpp/float IRIS) cpp/DARKGREEN)
+        (cpp/DrawCircle (int (:x ri)) (int (:y ri)) (cpp/float PUPIL) cpp/BLACK)
+
+        (cpp/DrawText "Move the mouse - the eyes follow. Q to quit."
+                      10 (- HEIGHT 30) 20 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur)))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,93 @@
+(ns raylib-examples.kaleidoscope
+  "raylib [shapes] example - kaleidoscope, ported to jank.
+
+  Draw with the LEFT mouse button and every stroke is repeated with
+  6-fold symmetry plus a mirror image. LEFT/RIGHT arrows step back and
+  forward through the drawing history, R resets, Q quits. Runs at the
+  C's deliberate 20 FPS drawing cadence.
+  Based on raylib/examples/shapes/shapes_kaleidoscope.c
+  (jank-native: the static Line array becomes a vector of segment
+  maps; Vector2Rotate/Multiply are inline math; the raygui buttons
+  become keys; and the C's outer symmetry loop that redraws identical
+  lines s times is drawn once - the symmetry is already baked into the
+  stored lines.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-LINES 8192)
+(def SYMMETRY 6)
+(def THICK 3.0)
+(def DEG2RAD 0.017453292519943295)
+(def ANGLE (* (/ 360.0 SYMMETRY) DEG2RAD))
+
+(defn add-strokes
+  "One frame's worth of symmetric strokes: rotate the mouse segment
+  cumulatively per symmetry step, storing it and its y-mirror."
+  [lines sx sy ex ey]
+  (let [c (+ 0.0 (cpp/cos ANGLE))
+        s (+ 0.0 (cpp/sin ANGLE))]
+    (loop [i 0 lines lines sx sx sy sy ex ex ey ey]
+      (if (and (< i SYMMETRY) (< (count lines) (- MAX-LINES 1)))
+        (let [rsx (- (* sx c) (* sy s)) rsy (+ (* sx s) (* sy c))
+              rex (- (* ex c) (* ey s)) rey (+ (* ex s) (* ey c))]
+          (recur (inc i)
+                 (conj lines
+                       {:sx rsx :sy rsy :ex rex :ey rey}
+                       {:sx rsx :sy (- 0.0 rsy) :ex rex :ey (- 0.0 rey)})
+                 rsx rsy rex rey))
+        lines))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - kaleidoscope (jank)")
+  (cpp/SetTargetFPS 20)
+
+  ;; Thread [lines current-line-counter prev-mouse-x prev-mouse-y].
+  (loop [lines [] current 0 pmx 400.0 pmy 225.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+
+            drawing? (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT)
+            lines (if drawing?
+                    (add-strokes lines (- mx 400.0) (- my 225.0)
+                                 (- pmx 400.0) (- pmy 225.0))
+                    lines)
+            current (if drawing? (count lines) current)
+
+            reset? (cpp/IsKeyPressed cpp/KEY_R)
+            lines (if reset? [] lines)
+            current (if reset? 0 current)
+            current (if (and (cpp/IsKeyPressed cpp/KEY_LEFT) (> current 0))
+                      (- current 1) current)
+            current (if (and (cpp/IsKeyPressed cpp/KEY_RIGHT)
+                             (< current (count lines)))
+                      (+ current 1) current)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode2D (cpp/Camera2D (cpp/Vector2 (cpp/float 400.0) (cpp/float 225.0))
+                                       (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                       (cpp/float 0.0) (cpp/float 1.0)))
+        (loop [i 0]
+          (when (< i current)
+            (let [l (nth lines i)]
+              (cpp/DrawLineEx (cpp/Vector2 (cpp/float (:sx l)) (cpp/float (:sy l)))
+                              (cpp/Vector2 (cpp/float (:ex l)) (cpp/float (:ey l)))
+                              (cpp/float THICK) cpp/BLACK))
+            (recur (inc i))))
+        (cpp/EndMode2D)
+
+        (cpp/DrawText (str "LINES: " current "/" MAX-LINES) 10 (- HEIGHT 30) 20 cpp/MAROON)
+        (cpp/DrawText "draw with LEFT mouse - LEFT/RIGHT history - R reset - Q quit"
+                      10 (- HEIGHT 55) 10 cpp/DARKGRAY)
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur lines current mx my)))))
+
+  (cpp/CloseWindow))

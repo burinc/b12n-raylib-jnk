@@ -1,0 +1,184 @@
+(ns raylib-examples.amp-envelope
+  "raylib [audio] example - amp envelope, ported to jank.
+
+  An ADSR amplitude envelope on a 440Hz tone: HOLD SPACE to play -
+  the gain rises through Attack, falls through Decay, holds at
+  Sustain and fades through Release when you let go. Q/A, W/S, E/D,
+  R/F adjust the four parameters, with the envelope shape drawn and a
+  live gain dot. ESC quits.
+  Based on raylib/examples/audio/audio_amp_envelope.c
+
+  jank-native notes:
+  - The per-sample envelope state machine + sine fill (4096 samples
+    per refill) live in a C shim around the raw-stream pattern; jank
+    pushes the four ADSR parameters, triggers attack/release from
+    SPACE, and reads the current gain for the dot.
+  - The raygui slider bars become key pairs + drawn value bars; the
+    ADSR shape visualization is pure jank math."
+  (:require [clojure.string :as string])
+  (:include "raylib.h" "math.h"))
+
+;; The envelope state machine + oscillator + stream refill.
+(cpp/raw "#define JANK_BUFFER_SIZE 4096
+#define JANK_SAMPLE_RATE 44100
+typedef enum { JANK_IDLE, JANK_ATTACK, JANK_DECAY, JANK_SUSTAIN, JANK_RELEASE } JankADSRState;
+static float jank_attack = 1.0f, jank_decay = 1.0f, jank_sustain = 0.5f, jank_release = 1.0f;
+static float jank_env_value = 0.0f;
+static JankADSRState jank_env_state = JANK_IDLE;
+static float jank_audio_time = 0.0f;
+static float jank_env_buffer[JANK_BUFFER_SIZE] = { 0 };
+
+static void jank_env_set_params(double a, double d, double s, double r) {
+  jank_attack = (float)a; jank_decay = (float)d;
+  jank_sustain = (float)s; jank_release = (float)r;
+}
+static void jank_env_trigger(void) { jank_env_state = JANK_ATTACK; }
+static void jank_env_release_key(void) {
+  if (jank_env_state != JANK_IDLE) jank_env_state = JANK_RELEASE;
+}
+static double jank_env_get_value(void) { return (double)jank_env_value; }
+
+static void jank_update_envelope(void) {
+  float sampleTime = 1.0f/JANK_SAMPLE_RATE;
+  switch (jank_env_state) {
+    case JANK_ATTACK:
+      jank_env_value += (1.0f/jank_attack)*sampleTime;
+      if (jank_env_value >= 1.0f) { jank_env_value = 1.0f; jank_env_state = JANK_DECAY; }
+      break;
+    case JANK_DECAY:
+      jank_env_value -= ((1.0f - jank_sustain)/jank_decay)*sampleTime;
+      if (jank_env_value <= jank_sustain) { jank_env_value = jank_sustain; jank_env_state = JANK_SUSTAIN; }
+      break;
+    case JANK_SUSTAIN:
+      jank_env_value = jank_sustain;
+      break;
+    case JANK_RELEASE:
+      jank_env_value -= (jank_sustain/jank_release)*sampleTime;
+      if (jank_env_value <= 0.001f) { jank_env_value = 0.0f; jank_env_state = JANK_IDLE; }
+      break;
+    default: break;
+  }
+}
+/* one refill: envelope-shaped sine, or silence when idle */
+static void jank_env_fill(AudioStream stream) {
+  if ((jank_env_state != JANK_IDLE) || (jank_env_value > 0.0f)) {
+    for (int i = 0; i < JANK_BUFFER_SIZE; i++) {
+      jank_update_envelope();
+      jank_env_buffer[i] = jank_env_value*sinf(2.0f*PI*440.0f*jank_audio_time);
+      jank_audio_time += (1.0f/JANK_SAMPLE_RATE);
+    }
+  } else {
+    for (int i = 0; i < JANK_BUFFER_SIZE; i++) jank_env_buffer[i] = 0;
+    jank_audio_time = 0.0f;
+  }
+  UpdateAudioStream(stream, jank_env_buffer, JANK_BUFFER_SIZE);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn- fmt2
+  "The C's %2.2f, via trimming str two digits past the dot."
+  [v]
+  (let [s (str v)
+        dot (string/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
+
+(defn- clamp [v lo hi] (if (< v lo) lo (if (> v hi) hi v)))
+
+(defn- param-bar
+  "One labelled value bar (the raygui slider, keyboardized)."
+  [{:keys [y label keys- value lo hi]}]
+  (cpp/DrawText label 20 (+ y 10) 10 cpp/DARKGRAY)
+  (cpp/DrawRectangle 100 y 400 30 (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.5)))
+  (cpp/DrawRectangle 100 y (int (* (/ (- value lo) (- hi lo)) 400)) 30 cpp/SKYBLUE)
+  (cpp/DrawRectangleLines 100 y 400 30 cpp/GRAY)
+  (cpp/DrawText (str (fmt2 value) "  (" keys- ")") 510 (+ y 10) 10 cpp/DARKGRAY))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - amp envelope (jank)")
+
+  (cpp/InitAudioDevice)
+  (cpp/SetAudioStreamBufferSizeDefault 4096)
+
+  (let [stream (cpp/LoadAudioStream 44100 32 1)]
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [attack decay sustain release] (seconds / level).
+    (loop [attack 1.0
+           decay 1.0
+           sustain 0.5
+           release 1.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [step 0.02
+              attack (clamp (cond (cpp/IsKeyDown cpp/KEY_Q) (+ attack step)
+                                  (cpp/IsKeyDown cpp/KEY_A) (- attack step)
+                                  :else attack) 0.1 3.0)
+              decay (clamp (cond (cpp/IsKeyDown cpp/KEY_W) (+ decay step)
+                                 (cpp/IsKeyDown cpp/KEY_S) (- decay step)
+                                 :else decay) 0.1 3.0)
+              sustain (clamp (cond (cpp/IsKeyDown cpp/KEY_E) (+ sustain 0.01)
+                                   (cpp/IsKeyDown cpp/KEY_D) (- sustain 0.01)
+                                   :else sustain) 0.0 1.0)
+              release (clamp (cond (cpp/IsKeyDown cpp/KEY_R) (+ release step)
+                                   (cpp/IsKeyDown cpp/KEY_F) (- release step)
+                                   :else release) 0.1 3.0)]
+
+          (cpp/jank_env_set_params attack decay sustain release)
+
+          (when (cpp/IsKeyPressed cpp/KEY_SPACE) (cpp/jank_env_trigger))
+          (when (cpp/IsKeyReleased cpp/KEY_SPACE) (cpp/jank_env_release_key))
+
+          (when (cpp/IsAudioStreamProcessed stream)
+            (cpp/jank_env_fill stream))
+          (when (cpp/! (cpp/IsAudioStreamPlaying stream))
+            (cpp/PlayAudioStream stream))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (param-bar {:y 60 :label "Attack (s)" :keys- "Q/A" :value attack :lo 0.1 :hi 3.0})
+          (param-bar {:y 100 :label "Decay (s)" :keys- "W/S" :value decay :lo 0.1 :hi 3.0})
+          (param-bar {:y 140 :label "Sustain" :keys- "E/D" :value sustain :lo 0.0 :hi 1.0})
+          (param-bar {:y 180 :label "Release (s)" :keys- "R/F" :value release :lo 0.1 :hi 3.0})
+
+          ;; the ADSR shape (sustain drawn at a fixed one-second width);
+          ;; graph corners are hand-folded literals - a pure-literal chain
+          ;; stays an unboxed f64 that cpp/float rejects (guide trap)
+          (let [total (+ attack decay 1.0 release)
+                scale-x (/ 400.0 total)
+                peak-x (+ 100.0 (* attack scale-x))
+                sus-x (+ peak-x (* decay scale-x))
+                sus-y (+ 250.0 (* (- 1.0 sustain) 100.0))
+                rel-x (+ sus-x scale-x)
+                end-x (+ rel-x (* release scale-x))]
+            (cpp/DrawRectangle 100 250 400 100 (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.3)))
+            (cpp/DrawRectangleLines 100 250 400 100 cpp/GRAY)
+            (cpp/DrawLineV (cpp/Vector2 (cpp/float 100.0) (cpp/float 350.0))
+                           (cpp/Vector2 (cpp/float peak-x) (cpp/float 250.0)) cpp/SKYBLUE)
+            (cpp/DrawLineV (cpp/Vector2 (cpp/float peak-x) (cpp/float 250.0))
+                           (cpp/Vector2 (cpp/float sus-x) (cpp/float sus-y)) cpp/BLUE)
+            (cpp/DrawLineV (cpp/Vector2 (cpp/float sus-x) (cpp/float sus-y))
+                           (cpp/Vector2 (cpp/float rel-x) (cpp/float sus-y)) cpp/DARKBLUE)
+            (cpp/DrawLineV (cpp/Vector2 (cpp/float rel-x) (cpp/float sus-y))
+                           (cpp/Vector2 (cpp/float end-x) (cpp/float 350.0)) cpp/ORANGE)
+            (cpp/DrawText "ADSR Visualizer" 100 230 10 cpp/DARKGRAY))
+
+          ;; the live gain dot
+          (let [gain (+ 0.0 (cpp/jank_env_get_value))]
+            (cpp/DrawCircleV (cpp/Vector2 (cpp/float 520.0)
+                                          (cpp/float (- 350.0 (* gain 100.0))))
+                             (cpp/float 5.0) cpp/MAROON)
+            (cpp/DrawText (str "Current Gain: " (fmt2 gain))
+                          535 (int (- 345.0 (* gain 100.0))) 10 cpp/MAROON))
+
+          (cpp/DrawText "HOLD SPACE to PLAY the sound!" 200 400 20 cpp/LIGHTGRAY)
+
+          (cpp/EndDrawing)
+          (recur attack decay sustain release))))
+
+    (cpp/UnloadAudioStream stream))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

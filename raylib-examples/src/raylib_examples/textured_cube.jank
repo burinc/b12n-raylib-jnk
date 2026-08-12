@@ -1,0 +1,121 @@
+(ns raylib-examples.textured-cube
+  "raylib [models] example - textured cube, ported to jank.
+
+  Two textured cubes drawn with rlgl immediate mode from a shared
+  atlas: the left cube maps the whole texture across each face, the
+  right cube maps only the bottom-left quarter (a texture-source
+  rectangle). A static perspective camera looks down at both. ESC quits.
+  Based on raylib/examples/models/models_textured_cube.c
+  (DrawCubeTexture / DrawCubeTextureRec are example-local helpers,
+  reimplemented here.)
+
+  jank-native notes:
+  - No UpdateCamera here (static camera), so this 3D example doesn't hit
+    the pointer-camera blocker - the Camera3D is an outer-let local.
+  - The cube-draw functions can't take the native Texture2D by value
+    (rule 2), so they receive the already-read texture id (+ normalized
+    source coords for the Rec variant) as jank data. rlSetTexture takes
+    the boxed id fine (function coercion).
+  - `tv` bundles an rlTexCoord2f + rlVertex3f pair; its (u v x y z)
+    signature is a graphics-primitive one (mirrors the two rl* calls),
+    so it stays positional despite >3 args."
+  (:include "raylib.h" "rlgl.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn- tv
+  "One textured vertex: rlTexCoord2f(u,v) then rlVertex3f(x,y,z)."
+  [u v x y z]
+  (cpp/rlTexCoord2f (cpp/float u) (cpp/float v))
+  (cpp/rlVertex3f (cpp/float x) (cpp/float y) (cpp/float z)))
+
+(defn- draw-cube-texture
+  "Whole-atlas textured cube centred at (x,y,z), size w*h*l. WHITE tint."
+  [{:keys [tex-id x y z w h l]}]
+  (let [x2 (/ w 2.0) y2 (/ h 2.0) z2 (/ l 2.0)
+        xl (- x x2) xr (+ x x2)
+        yb (- y y2) yt (+ y y2)
+        zb (- z z2) zf (+ z z2)]           ; zb = back (z-l/2), zf = front (z+l/2)
+    (cpp/rlSetTexture tex-id)
+    (cpp/rlBegin cpp/RL_QUADS)
+    (cpp/rlColor4ub 255 255 255 255)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float 1.0))    ; front
+    (tv 0.0 0.0 xl yb zf) (tv 1.0 0.0 xr yb zf) (tv 1.0 1.0 xr yt zf) (tv 0.0 1.0 xl yt zf)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float -1.0))   ; back
+    (tv 1.0 0.0 xl yb zb) (tv 1.0 1.0 xl yt zb) (tv 0.0 1.0 xr yt zb) (tv 0.0 0.0 xr yb zb)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))    ; top
+    (tv 0.0 1.0 xl yt zb) (tv 0.0 0.0 xl yt zf) (tv 1.0 0.0 xr yt zf) (tv 1.0 1.0 xr yt zb)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float -1.0) (cpp/float 0.0))   ; bottom
+    (tv 1.0 1.0 xl yb zb) (tv 0.0 1.0 xr yb zb) (tv 0.0 0.0 xr yb zf) (tv 1.0 0.0 xl yb zf)
+    (cpp/rlNormal3f (cpp/float 1.0) (cpp/float 0.0) (cpp/float 0.0))    ; right
+    (tv 1.0 0.0 xr yb zb) (tv 1.0 1.0 xr yt zb) (tv 0.0 1.0 xr yt zf) (tv 0.0 0.0 xr yb zf)
+    (cpp/rlNormal3f (cpp/float -1.0) (cpp/float 0.0) (cpp/float 0.0))   ; left
+    (tv 0.0 0.0 xl yb zb) (tv 1.0 0.0 xl yb zf) (tv 1.0 1.0 xl yt zf) (tv 0.0 1.0 xl yt zb)
+    (cpp/rlEnd)
+    (cpp/rlSetTexture 0)))
+
+(defn- draw-cube-texture-rec
+  "Textured cube using only the [su0..su1] x [sv0..sv1] slice of the atlas
+  (already normalized to 0..1) on every face."
+  [{:keys [tex-id x y z w h l su0 su1 sv0 sv1]}]
+  (let [x2 (/ w 2.0) y2 (/ h 2.0) z2 (/ l 2.0)
+        xl (- x x2) xr (+ x x2)
+        yb (- y y2) yt (+ y y2)
+        zb (- z z2) zf (+ z z2)]
+    (cpp/rlSetTexture tex-id)
+    (cpp/rlBegin cpp/RL_QUADS)
+    (cpp/rlColor4ub 255 255 255 255)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float 1.0))    ; front
+    (tv su0 sv1 xl yb zf) (tv su1 sv1 xr yb zf) (tv su1 sv0 xr yt zf) (tv su0 sv0 xl yt zf)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float -1.0))   ; back
+    (tv su1 sv1 xl yb zb) (tv su1 sv0 xl yt zb) (tv su0 sv0 xr yt zb) (tv su0 sv1 xr yb zb)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))    ; top
+    (tv su0 sv0 xl yt zb) (tv su0 sv1 xl yt zf) (tv su1 sv1 xr yt zf) (tv su1 sv0 xr yt zb)
+    (cpp/rlNormal3f (cpp/float 0.0) (cpp/float -1.0) (cpp/float 0.0))   ; bottom
+    (tv su1 sv0 xl yb zb) (tv su0 sv0 xr yb zb) (tv su0 sv1 xr yb zf) (tv su1 sv1 xl yb zf)
+    (cpp/rlNormal3f (cpp/float 1.0) (cpp/float 0.0) (cpp/float 0.0))    ; right
+    (tv su1 sv1 xr yb zb) (tv su1 sv0 xr yt zb) (tv su0 sv0 xr yt zf) (tv su0 sv1 xr yb zf)
+    (cpp/rlNormal3f (cpp/float -1.0) (cpp/float 0.0) (cpp/float 0.0))   ; left
+    (tv su0 sv1 xl yb zb) (tv su1 sv1 xl yb zf) (tv su1 sv0 xl yt zf) (tv su0 sv0 xl yt zb)
+    (cpp/rlEnd)
+    (cpp/rlSetTexture 0)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - textured cube (jank)")
+  (let [camera  (cpp/Camera3D (cpp/Vector3 (cpp/float 0.0) (cpp/float 10.0) (cpp/float 10.0))
+                              (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                              (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                              (cpp/float 45.0) cpp/CAMERA_PERSPECTIVE)
+        texture (cpp/LoadTexture (str RES "cubicmap_atlas.png"))
+        tex-id  (nth [(+ 0 (.-id texture))] 0)
+        tw      (nth [(+ 0.0 (.-width texture))] 0)
+        th      (nth [(+ 0.0 (.-height texture))] 0)
+        ;; right cube uses source rect { 0, texH/2, texW/2, texH/2 }, normalized
+        su0 0.0
+        su1 (/ (/ tw 2.0) tw)
+        sv0 (/ (/ th 2.0) th)
+        sv1 1.0]
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (draw-cube-texture {:tex-id tex-id :x -2.0 :y 2.0 :z 0.0 :w 2.0 :h 4.0 :l 2.0})
+        (draw-cube-texture-rec {:tex-id tex-id :x 2.0 :y 1.0 :z 0.0 :w 2.0 :h 2.0 :l 2.0
+                                :su0 su0 :su1 su1 :sv0 sv0 :sv1 sv1})
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndMode3D)
+
+        (cpp/DrawFPS 10 10)
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadTexture texture))
+
+  (cpp/CloseWindow))

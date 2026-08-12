@@ -1,0 +1,45 @@
+(ns raylib-examples.scissor-test
+  "raylib [core] example - scissor test, ported to jank.
+
+  A scissor rectangle follows the mouse; only the part of the red
+  fullscreen rectangle inside it is drawn. S toggles the scissor, Q quits.
+  Based on raylib/examples/core/core_scissor_test.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def AREA 300)             ; scissor rectangle is 300x300
+(def HALF (quot AREA 2))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - scissor test (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [scissor? true]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [scissor? (if (cpp/IsKeyPressed cpp/KEY_S) (not scissor?) scissor?)
+            sx (- (cpp/GetMouseX) HALF)
+            sy (- (cpp/GetMouseY) HALF)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (when scissor?
+          (cpp/BeginScissorMode sx sy AREA AREA))
+
+        (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/RED)
+        (cpp/DrawText "Move the mouse to reveal this text!" 190 200 20 cpp/LIGHTGRAY)
+
+        (when scissor?
+          (cpp/EndScissorMode))
+
+        (cpp/DrawRectangleLines sx sy AREA AREA cpp/BLACK)
+        (cpp/DrawText "Press S to toggle scissor test - Q quits" 10 10 20 cpp/BLACK)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur scissor?)))))
+
+  (cpp/CloseWindow))

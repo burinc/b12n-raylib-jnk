@@ -1,0 +1,86 @@
+(ns raylib-examples.starfield
+  "raylib [shapes] example - starfield effect, ported to jank.
+
+  Stars fly toward the camera with a simple perspective projection.
+  MOUSE WHEEL changes speed, SPACE toggles lines/circles, Q quits.
+  Based on raylib/examples/shapes/shapes_starfield_effect.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def STAR-COUNT 350)
+
+(defn clamp [v mn mx] (max mn (min mx v)))
+(defn lerp  [t a b]   (+ a (* t (- b a))))
+
+;; Perspective projection of a star (x,y in world space, z is depth) onto the
+;; screen. jank division yields reals; callers `int`-cast before cpp draw calls.
+(defn proj-x [x z] (+ (* WIDTH 0.5)  (/ x z)))
+(defn proj-y [y z] (+ (* HEIGHT 0.5) (/ y z)))
+
+(defn make-star []
+  {:x (cpp/GetRandomValue (int (/ WIDTH -2))  (int (/ WIDTH 2)))
+   :y (cpp/GetRandomValue (int (/ HEIGHT -2)) (int (/ HEIGHT 2)))
+   :z 1.0})
+
+(defn make-stars []
+  (mapv (fn [_] (make-star)) (range STAR-COUNT)))
+
+(defn offscreen? [px py]
+  (or (< px 0.0) (< py 0.0) (> px WIDTH) (> py HEIGHT)))
+
+(defn update-star [s dt speed]
+  (let [nz (- (:z s) (* dt speed))
+        px (proj-x (:x s) nz)
+        py (proj-y (:y s) nz)]
+    (if (or (< nz 0.0) (offscreen? px py))
+      (make-star)
+      {:x (:x s) :y (:y s) :z nz})))
+
+(defn draw-star [s draw-lines?]
+  (let [z  (:z s)
+        px (int (proj-x (:x s) z))
+        py (int (proj-y (:y s) z))]
+    (if draw-lines?
+      ;; Streak from a slightly-deeper projection to the current position.
+      (let [t  (clamp (+ z (/ 1.0 32.0)) 0.01 1.0)
+            sx (int (proj-x (:x s) t))
+            sy (int (proj-y (:y s) t))]
+        (cpp/DrawLine sx sy px py cpp/RAYWHITE))
+      (cpp/DrawCircle px py (cpp/float (lerp z 1.0 5.0)) cpp/RAYWHITE))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - starfield effect (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [stars      (make-stars)
+         speed      (/ 10.0 9.0)
+         draw-lines? true]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [wheel      (cpp/GetMouseWheelMove)
+            speed      (clamp (+ speed (* 2.0 (/ wheel 9.0))) 0.1 2.0)
+            draw-lines? (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not draw-lines?) draw-lines?)
+            dt         (cpp/GetFrameTime)
+            stars      (mapv (fn [s] (update-star s dt speed)) stars)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/BLACK)
+
+        (loop [i 0]
+          (when (< i (count stars))
+            (draw-star (nth stars i) draw-lines?)
+            (recur (inc i))))
+
+        (cpp/DrawText (str "[MOUSE WHEEL] Speed: " (int (* 9.0 (/ speed 2.0))))
+                      10 40 20 cpp/RAYWHITE)
+        (cpp/DrawText (str "[SPACE] Mode: " (if draw-lines? "Lines" "Circles"))
+                      10 70 20 cpp/RAYWHITE)
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur stars speed draw-lines?)))))
+
+  (cpp/CloseWindow))

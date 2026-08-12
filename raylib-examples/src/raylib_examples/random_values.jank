@@ -1,0 +1,35 @@
+(ns raylib-examples.random-values
+  "raylib [core] example - random values, ported to jank.
+
+  Every two seconds (120 frames) a new random value in [-8, 5] is shown.
+  Q quits. Based on raylib/examples/core/core_random_values.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - random values (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [fc 0 rv (int (cpp/GetRandomValue -8 5))]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [fc    (inc fc)
+            regen (>= fc 120)
+            rv    (if regen (int (cpp/GetRandomValue -8 5)) rv)
+            fc    (if regen 0 fc)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "Every 2 seconds a new random value is generated:" 130 100 20 cpp/MAROON)
+        (cpp/DrawText (str rv) 360 180 80 cpp/LIGHTGRAY)
+        (cpp/DrawText "Q quits" 10 10 20 cpp/LIGHTGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur fc rv)))))
+
+  (cpp/CloseWindow))

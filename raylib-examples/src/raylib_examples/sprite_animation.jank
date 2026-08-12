@@ -1,0 +1,79 @@
+(ns raylib-examples.sprite-animation
+  "raylib [textures] example - sprite animation, ported to jank.
+
+  Scarfy runs: one frame of a 6-frame spritesheet is drawn at a time,
+  advancing on a frame counter. RIGHT/LEFT change the animation speed
+  (1-15 FPS), Q quits. Scarfy sprite by Eiden Marsal.
+  Based on raylib/examples/textures/textures_sprite_animation.c
+  (jank-native: the spritesheet loads from the vendored raylib
+  submodule relative to the raylib-examples/ working dir; the frame
+  rectangle is rebuilt inline each draw from the current frame index
+  and the texture's .-width/.-height.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SHEET "../jank-raylib-sys/raylib/examples/textures/resources/scarfy.png")
+(def MAX-SPEED 15)
+(def MIN-SPEED 1)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - sprite animation (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Textures must load after InitWindow (needs the OpenGL context).
+  (let [scarfy (cpp/LoadTexture SHEET)
+        tw (int (+ 0.0 (.-width scarfy)))
+        th (int (+ 0.0 (.-height scarfy)))
+        fw (int (quot tw 6))]
+
+    ;; Thread [current-frame frames-counter frames-speed].
+    (loop [frame 0 fc 0 speed 8]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [fc (+ fc 1)
+              tick? (>= fc (int (quot 60 speed)))
+              fc (if tick? 0 fc)
+              frame (if tick? (let [f (+ frame 1)] (if (> f 5) 0 f)) frame)
+
+              speed (if (cpp/IsKeyPressed cpp/KEY_RIGHT) (+ speed 1) speed)
+              speed (if (cpp/IsKeyPressed cpp/KEY_LEFT) (- speed 1) speed)
+              speed (if (> speed MAX-SPEED) MAX-SPEED (if (< speed MIN-SPEED) MIN-SPEED speed))
+              fx (* frame fw)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; The full sheet with the current frame outlined.
+          (cpp/DrawTexture scarfy 15 40 cpp/WHITE)
+          (cpp/DrawRectangleLines 15 40 tw th cpp/LIME)
+          (cpp/DrawRectangleLines (+ 15 fx) 40 fw th cpp/RED)
+
+          (cpp/DrawText "FRAME SPEED: " 165 210 10 cpp/DARKGRAY)
+          (cpp/DrawText (str (if (< speed 10) "0" "") speed " FPS") 575 210 10 cpp/DARKGRAY)
+          (cpp/DrawText "PRESS RIGHT/LEFT KEYS to CHANGE SPEED! (Q quits)" 290 240 10 cpp/DARKGRAY)
+
+          (loop [i 0]
+            (when (< i MAX-SPEED)
+              (when (< i speed)
+                (cpp/DrawRectangle (+ 250 (* 21 i)) 205 20 20 cpp/RED))
+              (cpp/DrawRectangleLines (+ 250 (* 21 i)) 205 20 20 cpp/MAROON)
+              (recur (inc i))))
+
+          ;; The animated sprite: one frame of the sheet.
+          (cpp/DrawTextureRec scarfy
+                              (cpp/Rectangle (cpp/float (+ 0.0 fx)) (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 fw)) (cpp/float (+ 0.0 th)))
+                              (cpp/Vector2 (cpp/float 350.0) (cpp/float 280.0))
+                              cpp/WHITE)
+
+          (cpp/DrawText "(c) Scarfy sprite by Eiden Marsal" (- WIDTH 200) (- HEIGHT 20) 10 cpp/GRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur frame fc speed)))))
+
+    (cpp/UnloadTexture scarfy))
+
+  (cpp/CloseWindow))

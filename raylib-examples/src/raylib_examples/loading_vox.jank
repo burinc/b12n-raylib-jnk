@@ -1,0 +1,157 @@
+(ns raylib-examples.loading-vox
+  "raylib [models] example - loading vox, ported to jank.
+
+  Four MagicaVoxel (.vox) models - knight, sword, monument, fez -
+  cycled with LEFT CLICK under a custom fly camera (ARROWS/WASD move,
+  MIDDLE-drag rotates, WHEEL zooms) and four gray point lights on the
+  voxel lighting shader. ESC quits.
+  Based on raylib/examples/models/models_loading_vox.c
+
+  jank-native notes:
+  - First VOX format (the last probe-first model format); the four
+    Models are let-locals cycled by a per-index cond (the
+    mesh-generation pattern).
+  - Each model is centered by a shim computing its bounding-box
+    XZ-middle and setting a MatrixTranslate transform.
+  - First UpdateCameraPro: movement/rotation Vector3s built inline
+    from jank-computed key/mouse values, called on (cpp/& camera).
+  - Lights + uniforms ride jank_rlights.h."
+  (:include "raylib.h" "raymath.h" "jank_rlights.h"))
+
+;; Center a model on its bounding-box XZ middle + shader-all-materials.
+(cpp/raw "static void jank_model_center_xz(Model* m) {
+  BoundingBox bb = GetModelBoundingBox(*m);
+  float cx = bb.min.x + (bb.max.x - bb.min.x)/2.0f;
+  float cz = bb.min.z + (bb.max.z - bb.min.z)/2.0f;
+  m->transform = MatrixTranslate(-cx, 0, -cz);
+}
+static void jank_model_set_shader_all(Model* m, Shader s) {
+  for (int i = 0; i < m->materialCount; i++) m->materials[i].shader = s;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(def VOX-NAMES ["chr_knight.vox" "chr_sword.vox" "monu9.vox" "fez.vox"])
+
+;; The four gray point lights, as jank data for the marker spheres.
+(def LIGHTS [{:x -20.0 :y 20.0 :z -20.0}
+             {:x 20.0 :y -20.0 :z 20.0}
+             {:x -20.0 :y 20.0 :z 20.0}
+             {:x 20.0 :y -20.0 :z -20.0}])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - loading vox (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 10.0) (cpp/float 10.0) (cpp/float 10.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        m0 (cpp/LoadModel (str RES "models/vox/chr_knight.vox"))
+        m1 (cpp/LoadModel (str RES "models/vox/chr_sword.vox"))
+        m2 (cpp/LoadModel (str RES "models/vox/monu9.vox"))
+        m3 (cpp/LoadModel (str RES "models/vox/fez.vox"))
+        shader (cpp/LoadShader (str RES "shaders/glsl330/voxel_lighting.vs")
+                               (str RES "shaders/glsl330/voxel_lighting.fs"))
+        view-loc (int (cpp/GetShaderLocation shader "viewPos"))
+        ambient-loc (int (cpp/GetShaderLocation shader "ambient"))]
+
+    (cpp/jank_model_center_xz (cpp/& m0))
+    (cpp/jank_model_center_xz (cpp/& m1))
+    (cpp/jank_model_center_xz (cpp/& m2))
+    (cpp/jank_model_center_xz (cpp/& m3))
+
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (cpp/jank_rl_set_vec4 shader ambient-loc 0.1 0.1 0.1 1.0)
+
+    (cpp/jank_model_set_shader_all (cpp/& m0) shader)
+    (cpp/jank_model_set_shader_all (cpp/& m1) shader)
+    (cpp/jank_model_set_shader_all (cpp/& m2) shader)
+    (cpp/jank_model_set_shader_all (cpp/& m3) shader)
+
+    ;; four GRAY point lights
+    (loop [i 0]
+      (when (< i 4)
+        (let [{:keys [x y z]} (nth LIGHTS i)]
+          (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_POINT)
+                                    x y z 0.0 0.0 0.0
+                                    130 130 130 255 shader))
+        (recur (inc i))))
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [current-model-index].
+    (loop [current 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [middle? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_MIDDLE) true false)
+              delta (cpp/GetMouseDelta)
+              rot-x (if middle? (* (+ 0.0 (.-x delta)) 0.05) 0.0)
+              rot-y (if middle? (* (+ 0.0 (.-y delta)) 0.05) 0.0)
+              fwd (- (+ (if (cpp/IsKeyDown cpp/KEY_W) 0.1 0.0)
+                        (if (cpp/IsKeyDown cpp/KEY_UP) 0.1 0.0))
+                     (+ (if (cpp/IsKeyDown cpp/KEY_S) 0.1 0.0)
+                        (if (cpp/IsKeyDown cpp/KEY_DOWN) 0.1 0.0)))
+              side (- (+ (if (cpp/IsKeyDown cpp/KEY_D) 0.1 0.0)
+                         (if (cpp/IsKeyDown cpp/KEY_RIGHT) 0.1 0.0))
+                      (+ (if (cpp/IsKeyDown cpp/KEY_A) 0.1 0.0)
+                         (if (cpp/IsKeyDown cpp/KEY_LEFT) 0.1 0.0)))
+              zoom (* (+ 0.0 (cpp/GetMouseWheelMove)) -2.0)
+              current (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+                        (int (mod (inc current) 4))
+                        current)]
+
+          (cpp/UpdateCameraPro (cpp/& camera)
+                               (cpp/Vector3 (cpp/float fwd) (cpp/float side) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float rot-x) (cpp/float rot-y) (cpp/float 0.0))
+                               (cpp/float zoom))
+
+          (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
+          (loop [i 0]
+            (when (< i 4)
+              (cpp/jank_rl_update_light shader (int i))
+              (recur (inc i))))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          ;; four native Models can't sit in a vector: per-index cond
+          (cond (= current 0) (cpp/DrawModel m0 (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0)) (cpp/float 1.0) cpp/WHITE)
+                (= current 1) (cpp/DrawModel m1 (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0)) (cpp/float 1.0) cpp/WHITE)
+                (= current 2) (cpp/DrawModel m2 (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0)) (cpp/float 1.0) cpp/WHITE)
+                :else (cpp/DrawModel m3 (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0)) (cpp/float 1.0) cpp/WHITE))
+          (cpp/DrawGrid 10 (cpp/float 1.0))
+
+          ;; gray marker spheres at the lights
+          (loop [i 0]
+            (when (< i 4)
+              (let [{:keys [x y z]} (nth LIGHTS i)]
+                (if (= 1 (int (cpp/jank_rl_light_enabled (int i))))
+                  (cpp/DrawSphereEx (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                                    (cpp/float 0.2) 8 8 cpp/GRAY)
+                  (cpp/DrawSphereWires (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                                       (cpp/float 0.2) 8 8
+                                       (cpp/ColorAlpha cpp/GRAY (cpp/float 0.3)))))
+              (recur (inc i))))
+          (cpp/EndMode3D)
+
+          (cpp/DrawRectangle 10 40 340 70 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+          (cpp/DrawRectangleLines 10 40 340 70 (cpp/Fade cpp/DARKBLUE (cpp/float 0.5)))
+          (cpp/DrawText "- MOUSE LEFT BUTTON: CYCLE VOX MODELS" 20 50 10 cpp/BLUE)
+          (cpp/DrawText "- MOUSE MIDDLE BUTTON: ZOOM OR ROTATE CAMERA" 20 70 10 cpp/BLUE)
+          (cpp/DrawText "- UP-DOWN-LEFT-RIGHT KEYS: MOVE CAMERA" 20 90 10 cpp/BLUE)
+          (cpp/DrawText (str "VOX model file: " (nth VOX-NAMES current)) 10 10 20 cpp/GRAY)
+
+          (cpp/EndDrawing)
+          (recur current))))
+
+    (cpp/UnloadModel m0)
+    (cpp/UnloadModel m1)
+    (cpp/UnloadModel m2)
+    (cpp/UnloadModel m3)
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,118 @@
+(ns raylib-examples.basic-lighting
+  "raylib [shaders] example - basic lighting, ported to jank.
+
+  A white plane and cube lit by four colored point lights under the
+  lighting.vs/lighting.fs shader pair, orbital camera. Keys Y/R/G/B
+  toggle the yellow/red/green/blue lights (spheres mark them; wire
+  spheres are off). ESC quits.
+  Based on raylib/examples/shaders/shaders_basic_lighting.c
+
+  jank-native notes:
+  - First consumer of jank_rlights.h, the rlights.h adaptation SHIPPED
+    WITH jank-raylib-sys (its jank-build.bb emits a second include-dir
+    for helper headers): light state lives in the header's static
+    array behind index-based scalar wrappers, so this file has NO
+    cpp/raw block at all.
+  - Light positions/colors also live in a jank vector for the marker
+    spheres; only enabled-state round-trips through the C side.
+  - First LoadShader with BOTH a vertex and fragment path; the
+    shader.locs[SHADER_LOC_VECTOR_VIEW] write and per-frame viewPos
+    push are header helpers."
+  (:include "raylib.h" "jank_rlights.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+;; The four lights (raylib's YELLOW / RED / GREEN / BLUE as RGB triplets).
+(def LIGHTS [{:x -2.0 :y 1.0 :z -2.0 :r 253 :g 249 :b 0}
+             {:x 2.0 :y 1.0 :z 2.0 :r 230 :g 41 :b 55}
+             {:x -2.0 :y 1.0 :z 2.0 :r 0 :g 228 :b 48}
+             {:x 2.0 :y 1.0 :z -2.0 :r 0 :g 121 :b 241}])
+
+(defn- light-color
+  "The light's Color as a packed-RGBA GetColor int."
+  [{:keys [r g b]}]
+  (+ (* r 16777216) (* g 65536) (* b 256) 255))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - basic lighting (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 2.0) (cpp/float 4.0) (cpp/float 6.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        shader (cpp/LoadShader (str RES "shaders/glsl330/lighting.vs")
+                               (str RES "shaders/glsl330/lighting.fs"))
+        view-loc (int (cpp/GetShaderLocation shader "viewPos"))
+        ambient-loc (int (cpp/GetShaderLocation shader "ambient"))]
+
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (cpp/jank_rl_set_vec4 shader ambient-loc 0.1 0.1 0.1 1.0)
+
+    ;; create the four point lights (indices 0-3 in the header's array)
+    (loop [i 0]
+      (when (< i 4)
+        (let [{:keys [x y z r g b]} (nth LIGHTS i)]
+          (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_POINT)
+                                    x y z 0.0 0.0 0.0
+                                    (int r) (int g) (int b) 255
+                                    shader))
+        (recur (inc i))))
+
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+        (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
+
+        ;; Y/R/G/B toggle their lights
+        (when (cpp/IsKeyPressed cpp/KEY_Y) (cpp/jank_rl_toggle_light 0))
+        (when (cpp/IsKeyPressed cpp/KEY_R) (cpp/jank_rl_toggle_light 1))
+        (when (cpp/IsKeyPressed cpp/KEY_G) (cpp/jank_rl_toggle_light 2))
+        (when (cpp/IsKeyPressed cpp/KEY_B) (cpp/jank_rl_toggle_light 3))
+        (loop [i 0]
+          (when (< i 4)
+            (cpp/jank_rl_update_light shader (int i))
+            (recur (inc i))))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/BeginShaderMode shader)
+        (cpp/DrawPlane (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                       (cpp/Vector2 (cpp/float 10.0) (cpp/float 10.0)) cpp/WHITE)
+        (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                      (cpp/float 2.0) (cpp/float 4.0) (cpp/float 2.0) cpp/WHITE)
+        (cpp/EndShaderMode)
+
+        ;; marker spheres: solid when the light is on, wire when off
+        (loop [i 0]
+          (when (< i 4)
+            (let [{:keys [x y z] :as light} (nth LIGHTS i)]
+              (if (= 1 (int (cpp/jank_rl_light_enabled (int i))))
+                (cpp/DrawSphereEx (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                                  (cpp/float 0.2) 8 8
+                                  (cpp/GetColor (light-color light)))
+                (cpp/DrawSphereWires (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                                     (cpp/float 0.2) 8 8
+                                     (cpp/ColorAlpha (cpp/GetColor (light-color light))
+                                                     (cpp/float 0.3)))))
+            (recur (inc i))))
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndMode3D)
+
+        (cpp/DrawFPS 10 10)
+        (cpp/DrawText "Use keys [Y][R][G][B] to toggle lights" 10 40 20 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

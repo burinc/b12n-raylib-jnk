@@ -1,0 +1,86 @@
+(ns raylib-examples.ellipse-collision
+  "raylib [shapes] example - ellipse collision, ported to jank.
+
+  Two ellipses; move one with the mouse and press A/B to switch which one
+  you control. They turn red when they overlap. Q quits.
+  Based on raylib/examples/shapes/shapes_ellipse_collision.c
+  (jank-native: C sqrt/atan2/cos/sin for the radial ellipse-overlap test)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def A-RX 120.0)
+(def A-RY 70.0)
+(def B-RX 90.0)
+(def B-RY 140.0)
+
+;; Is a point inside an ellipse? (normalized-distance test)
+(defn point-in-ellipse? [px py cx cy rx ry]
+  (let [dx (/ (- px cx) rx)
+        dy (/ (- py cy) ry)]
+    (<= (+ (* dx dx) (* dy dy)) 1.0)))
+
+;; Do two ellipses overlap? Compares center distance against each
+;; ellipse's boundary radius in the direction between the centers.
+(defn ellipses-collide? [c1x c1y rx1 ry1 c2x c2y rx2 ry2]
+  (let [dx   (- c2x c1x)
+        dy   (- c2y c1y)
+        dist (+ 0.0 (cpp/sqrt (+ (* dx dx) (* dy dy))))]
+    (if (< dist 0.001)
+      true
+      (let [theta (cpp/atan2 dy dx)
+            cost  (+ 0.0 (cpp/cos theta))
+            sint  (+ 0.0 (cpp/sin theta))
+            r1    (/ (* rx1 ry1) (cpp/sqrt (+ (* (* ry1 cost) (* ry1 cost)) (* (* rx1 sint) (* rx1 sint)))))
+            r2    (/ (* rx2 ry2) (cpp/sqrt (+ (* (* ry2 cost) (* ry2 cost)) (* (* rx2 sint) (* rx2 sint)))))]
+        (<= dist (+ r1 r2))))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - ellipse collision (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread the two ellipse centers + which one the mouse controls.
+  (loop [ax 200.0 ay 225.0 bx 600.0 by 225.0 controlled 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+            controlled (cond (cpp/IsKeyPressed cpp/KEY_A) 0
+                             (cpp/IsKeyPressed cpp/KEY_B) 1
+                             :else controlled)
+            ax (if (= controlled 0) mx ax)
+            ay (if (= controlled 0) my ay)
+            bx (if (= controlled 1) mx bx)
+            by (if (= controlled 1) my by)
+            collide (ellipses-collide? ax ay A-RX A-RY bx by B-RX B-RY)
+            in-a (point-in-ellipse? mx my ax ay A-RX A-RY)
+            in-b (point-in-ellipse? mx my bx by B-RX B-RY)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawEllipse (int ax) (int ay) (cpp/float A-RX) (cpp/float A-RY) (if collide cpp/RED cpp/BLUE))
+        (cpp/DrawEllipse (int bx) (int by) (cpp/float B-RX) (cpp/float B-RY) (if collide cpp/RED cpp/GREEN))
+        (cpp/DrawEllipseLines (int ax) (int ay) (cpp/float A-RX) (cpp/float A-RY) cpp/WHITE)
+        (cpp/DrawEllipseLines (int bx) (int by) (cpp/float B-RX) (cpp/float B-RY) cpp/WHITE)
+        (cpp/DrawCircle (int ax) (int ay) (cpp/float 4.0) cpp/WHITE)
+        (cpp/DrawCircle (int bx) (int by) (cpp/float 4.0) cpp/WHITE)
+
+        (if collide
+          (cpp/DrawText "ELLIPSES COLLIDE" (- (quot WIDTH 2) 120) 40 28 cpp/RED)
+          (cpp/DrawText "NO COLLISION" (- (quot WIDTH 2) 80) 40 28 cpp/DARKGRAY))
+
+        (cpp/DrawText (if (= controlled 0) "Controlling: A" "Controlling: B")
+                      20 (- HEIGHT 40) 20 cpp/ORANGE)
+        (when (and in-a (not (= controlled 0)))
+          (cpp/DrawText "Mouse inside ellipse A" 20 (- HEIGHT 70) 20 cpp/BLUE))
+        (when (and in-b (not (= controlled 1)))
+          (cpp/DrawText "Mouse inside ellipse B" 20 (- HEIGHT 70) 20 cpp/GREEN))
+        (cpp/DrawText "Press [A] or [B] to switch control - Q quits" 20 20 20 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur ax ay bx by controlled)))))
+
+  (cpp/CloseWindow))

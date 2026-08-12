@@ -1,0 +1,96 @@
+(ns raylib-examples.rounded-rectangle
+  "raylib [shapes] example - rounded rectangle drawing, ported to jank.
+
+  A rounded rectangle with adjustable size, roundness, outline
+  thickness and segment count. Hold A/S for width, Z/X for height,
+  LEFT/RIGHT for roundness, DOWN/UP for outline thickness, O/P for
+  segments. R toggles the rounded fill, L the rounded outline, G the
+  plain gold rectangle. Q quits.
+  Based on raylib/examples/shapes/shapes_rounded_rectangle_drawing.c
+  (jank-native: the raygui sliders/checkboxes become held-key
+  adjustments + toggle keys, with the control panel drawn as text.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn fmt2
+  "A non-negative real formatted with exactly two decimals."
+  [x]
+  (let [c     (int (+ (* x 100.0) 0.5))
+        whole (int (quot c 100))
+        frac  (int (mod c 100))
+        frac  (str (if (< frac 10) "0" "") frac)]
+    (str whole "." frac)))
+
+(defn adj
+  "Adjust v by step while dn/up are held, clamped to lo..hi."
+  [v dn up step lo hi]
+  (let [v (if dn (- v step) v)
+        v (if up (+ v step) v)]
+    (if (< v lo) lo (if (> v hi) hi v))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - rounded rectangle drawing (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [width height roundness line-thickness segments
+  ;;         rounded? rounded-lines? plain-rect?].
+  (loop [w 200.0 h 100.0 rnd 0.2 thick 1.0 segs 0.0
+         rrect? true rlines? false rect? false]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [w (adj w (cpp/IsKeyDown cpp/KEY_A) (cpp/IsKeyDown cpp/KEY_S) 4.0 0.0 500.0)
+            h (adj h (cpp/IsKeyDown cpp/KEY_Z) (cpp/IsKeyDown cpp/KEY_X) 4.0 0.0 400.0)
+            rnd (adj rnd (cpp/IsKeyDown cpp/KEY_LEFT) (cpp/IsKeyDown cpp/KEY_RIGHT) 0.01 0.0 1.0)
+            thick (adj thick (cpp/IsKeyDown cpp/KEY_DOWN) (cpp/IsKeyDown cpp/KEY_UP) 0.25 0.0 20.0)
+            segs (adj segs (cpp/IsKeyDown cpp/KEY_O) (cpp/IsKeyDown cpp/KEY_P) 0.5 0.0 60.0)
+            rrect?  (if (cpp/IsKeyPressed cpp/KEY_R) (not rrect?) rrect?)
+            rlines? (if (cpp/IsKeyPressed cpp/KEY_L) (not rlines?) rlines?)
+            rect?   (if (cpp/IsKeyPressed cpp/KEY_G) (not rect?) rect?)
+            ;; The rectangle, centered in the left area.
+            rx (/ (- (- WIDTH w) 250.0) 2.0)
+            ry (/ (- HEIGHT h) 2.0)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawLine 560 0 560 HEIGHT (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.6)))
+        (cpp/DrawRectangle 560 0 (- WIDTH 560) HEIGHT (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.3)))
+
+        (when rect?
+          (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float rx) (cpp/float ry)
+                                               (cpp/float w) (cpp/float h))
+                                (cpp/Fade cpp/GOLD (cpp/float 0.6))))
+        (when rrect?
+          (cpp/DrawRectangleRounded (cpp/Rectangle (cpp/float rx) (cpp/float ry)
+                                                   (cpp/float w) (cpp/float h))
+                                    (cpp/float rnd) (int segs)
+                                    (cpp/Fade cpp/MAROON (cpp/float 0.2))))
+        (when rlines?
+          (cpp/DrawRectangleRoundedLinesEx (cpp/Rectangle (cpp/float rx) (cpp/float ry)
+                                                          (cpp/float w) (cpp/float h))
+                                           (cpp/float rnd) (int segs) (cpp/float thick)
+                                           (cpp/Fade cpp/MAROON (cpp/float 0.4))))
+
+        ;; The control panel, as text.
+        (cpp/DrawText (str "Width: " (fmt2 w) "  (A/S)") 600 40 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Height: " (fmt2 h) "  (Z/X)") 600 70 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Roundness: " (fmt2 rnd) "  (LEFT/RIGHT)") 600 140 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Thickness: " (fmt2 thick) "  (DOWN/UP)") 600 170 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "Segments: " (fmt2 segs) "  (O/P)") 600 240 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "MODE: " (if (>= segs 4.0) "MANUAL" "AUTO"))
+                      600 280 10 (if (>= segs 4.0) cpp/MAROON cpp/DARKGRAY))
+        (cpp/DrawText (str "[R] RoundedRect: " (if rrect? "ON" "OFF")) 600 320 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "[L] RoundedLines: " (if rlines? "ON" "OFF")) 600 350 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "[G] Rect: " (if rect? "ON" "OFF")) 600 380 10 cpp/DARKGRAY)
+        (cpp/DrawText "[Q] quit" 600 410 10 cpp/DARKGRAY)
+
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur w h rnd thick segs rrect? rlines? rect?)))))
+
+  (cpp/CloseWindow))

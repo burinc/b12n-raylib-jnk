@@ -1,0 +1,123 @@
+(ns raylib-examples.animation-timing
+  "raylib [models] example - animation timing, ported to jank.
+
+  The glTF robot with a playback timeline: LEFT/RIGHT switch
+  animations, UP/DOWN change the play speed (x0.1 to x2.0), P pauses;
+  the bottom bar shows playback progress with a tick per keyframe.
+  Orbital camera. ESC quits.
+  Based on raylib/examples/models/models_animation_timing.c
+
+  jank-native notes:
+  - The raygui dropdown/slider/progress-bar become keyboard controls
+    + a hand-drawn timeline (filled bar + keyframe ticks).
+  - This example plays INTERPOLATED frames (fractional speeds), so
+    the update shim takes the frame as a double - unlike the earlier
+    int-frame animation ports.
+  - The C starts on animation index 10 (the robot's walk); kept."
+  (:require [clojure.string :as string])
+  (:include "raylib.h"))
+
+(cpp/raw "static ModelAnimation *jank_anims = NULL;
+static int jank_anims_count = 0;
+static int jank_load_anims(const char* path) {
+  jank_anims = LoadModelAnimations(path, &jank_anims_count);
+  return jank_anims_count;
+}
+static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
+static const char* jank_anim_name(int i) { return jank_anims[i].name; }
+static void jank_update_anim_f(Model m, int i, double frame) {
+  UpdateModelAnimation(m, jank_anims[i], (float)frame);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn- fmt
+  "Trim a real to n digits past the dot."
+  [v n]
+  (let [s (str v)
+        dot (string/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot n 1))) s)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - animation timing (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 6.0) (cpp/float 6.0) (cpp/float 6.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModel (str RES "models/gltf/robot.glb"))
+        anim-count (int (cpp/jank_load_anims (str RES "models/gltf/robot.glb")))
+        bar-w (- WIDTH 20)]
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [animation-index frame speed paused?].
+    (loop [anim-index 10
+           frame 0.0
+           speed 0.5
+           paused? false]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (let [paused? (if (cpp/IsKeyPressed cpp/KEY_P) (not paused?) paused?)
+              switched (cond (cpp/IsKeyPressed cpp/KEY_RIGHT)
+                             (int (mod (inc anim-index) anim-count))
+                             (cpp/IsKeyPressed cpp/KEY_LEFT)
+                             (int (mod (+ anim-index (dec anim-count)) anim-count))
+                             :else anim-index)
+              frame (if (= switched anim-index) frame 0.0)
+              anim-index switched
+              speed (cond (cpp/IsKeyPressed cpp/KEY_UP) (+ speed 0.1)
+                          (cpp/IsKeyPressed cpp/KEY_DOWN) (- speed 0.1)
+                          :else speed)
+              speed (if (> speed 2.0) 2.0 (if (< speed 0.1) 0.1 speed))
+              keyframes (int (cpp/jank_anim_keyframes (int anim-index)))
+              frame (if paused?
+                      frame
+                      (let [f (+ frame speed)]
+                        (if (>= f keyframes) 0.0 f)))]
+
+          (when (not paused?)
+            (cpp/jank_update_anim_f model (int anim-index) frame))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawModel model
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/DrawGrid 10 (cpp/float 1.0))
+          (cpp/EndMode3D)
+
+          ;; controls readout (the raygui dropdown/slider, keyboardized)
+          (cpp/DrawText (str "Animation: " (cpp/jank_anim_name (int anim-index))
+                             "  (LEFT/RIGHT switch)")
+                        10 10 20 cpp/MAROON)
+          (cpp/DrawText (str "Frame speed: x" (fmt speed 1) "  (UP/DOWN)  ·  P "
+                             (if paused? "resume" "pause"))
+                        10 36 10 cpp/DARKGRAY)
+
+          ;; the playback timeline: label, filled bar, keyframe ticks
+          (cpp/DrawText (str "CURRENT FRAME: " (fmt frame 2) " / " keyframes)
+                        10 (- HEIGHT 64) 10 cpp/DARKGRAY)
+          (cpp/DrawRectangle 10 (- HEIGHT 40) bar-w 24 cpp/LIGHTGRAY)
+          (cpp/DrawRectangle 10 (- HEIGHT 40)
+                             (int (* (/ frame keyframes) bar-w)) 24 cpp/SKYBLUE)
+          (cpp/DrawRectangleLines 10 (- HEIGHT 40) bar-w 24 cpp/GRAY)
+          (loop [i 0]
+            (when (< i keyframes)
+              (cpp/DrawRectangle (+ 10 (int (* (/ (+ 0.0 bar-w) keyframes) i)))
+                                 (- HEIGHT 40) 1 24 cpp/BLUE)
+              (recur (inc i))))
+
+          (cpp/EndDrawing)
+          (recur anim-index frame speed paused?))))
+
+    (cpp/UnloadModel model))
+
+  (cpp/CloseWindow))

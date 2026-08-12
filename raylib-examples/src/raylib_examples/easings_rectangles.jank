@@ -1,0 +1,86 @@
+(ns raylib-examples.easings-rectangles
+  "raylib [shapes] example - easings rectangles, ported to jank.
+
+  A grid of rectangles shrinks to nothing while rotating, driven by
+  easing functions. Press SPACE to replay, Q to quit.
+  Based on raylib/examples/shapes/shapes_easings_rectangles.c
+  (jank-native: C sqrt, Rectangle + Vector2 structs built inline for
+  DrawRectanglePro)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RECS-WIDTH 50)
+(def RECS-HEIGHT 50)
+(def MAX-RECS-X (quot WIDTH RECS-WIDTH))
+(def MAX-RECS-Y (quot HEIGHT RECS-HEIGHT))
+(def PLAY-TIME 240.0)
+
+;; Easing functions (t=time, b=begin, c=change, d=duration).
+(defn ease-circ-out [t b c d]
+  (let [tt (- (/ t d) 1.0)]
+    (+ b (* c (cpp/sqrt (- 1.0 (* tt tt)))))))
+
+(defn ease-linear-in [t b c d]
+  (+ b (* c (/ t d))))
+
+;; Grid of rectangle centers, computed once as plain jank data.
+(defn make-recs []
+  (loop [y 0 acc []]
+    (if (< y MAX-RECS-Y)
+      (recur (inc y)
+             (loop [x 0 row acc]
+               (if (< x MAX-RECS-X)
+                 (recur (inc x)
+                        (conj row {:cx (+ (/ RECS-WIDTH 2.0) (* RECS-WIDTH x))
+                                   :cy (+ (/ RECS-HEIGHT 2.0) (* RECS-HEIGHT y))}))
+                 row)))
+      acc)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - easings rectangles (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [recs (make-recs)]
+    ;; state 0 = playing, 1 = finished (waiting for SPACE).
+    (loop [fc 0 st 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [playing? (= st 0)
+              restart? (and (not playing?) (cpp/IsKeyPressed cpp/KEY_SPACE))
+              fc2      (if playing? (inc fc) fc)
+              tf       (+ 0.0 fc2)
+              h        (if playing? (max 0.0 (ease-circ-out tf 50.0 -50.0 PLAY-TIME)) 0.0)
+              w        (if playing? (max 0.0 (ease-circ-out tf 50.0 -50.0 PLAY-TIME)) 0.0)
+              rot      (if playing? (ease-linear-in tf 0.0 360.0 PLAY-TIME) 0.0)
+              done?    (and (<= h 0.0) (<= w 0.0))
+              st2      (cond restart?              0
+                             (and playing? done?)  1
+                             :else                 st)
+              fc3      (if restart? 0 fc2)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (when playing?
+            (loop [i 0]
+              (when (< i (count recs))
+                (let [r (nth recs i)]
+                  (cpp/DrawRectanglePro
+                   (cpp/Rectangle (cpp/float (:cx r)) (cpp/float (:cy r))
+                                  (cpp/float w) (cpp/float h))
+                   (cpp/Vector2 (cpp/float (/ w 2.0)) (cpp/float (/ h 2.0)))
+                   (cpp/float rot)
+                   cpp/RED))
+                (recur (inc i)))))
+
+          (when-not playing?
+            (cpp/DrawText "PRESS [SPACE] TO PLAY AGAIN!" 240 200 20 cpp/GRAY))
+
+          (cpp/DrawText "SPACE restart - Q quit" 10 10 10 cpp/DARKGRAY)
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur fc3 st2))))))
+
+  (cpp/CloseWindow))

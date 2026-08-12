@@ -1,0 +1,69 @@
+(ns raylib-examples.blend-modes
+  "raylib [textures] example - blend modes, ported to jank.
+
+  The cyberpunk-street foreground drawn over the background through
+  the four 2D blend modes (ALPHA / ADDITIVE / MULTIPLIED / ADD_COLORS).
+  SPACE cycles the mode, Q quits.
+  Cyberpunk Street Environment by Luis Zuno (@ansimuz).
+  Based on raylib/examples/textures/textures_blend_modes.c
+  (jank-native: BeginBlendMode takes the mode as a plain jank int;
+  the mode name is picked with nested ifs returning jank strings.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+(def BLEND-COUNT 4)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - blend modes (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Textures must load after InitWindow (needs the OpenGL context).
+  (let [bg-image (cpp/LoadImage (str RES "cyberpunk_street_background.png"))
+        bg (cpp/LoadTextureFromImage bg-image)
+        _ (cpp/UnloadImage bg-image)
+        fg-image (cpp/LoadImage (str RES "cyberpunk_street_foreground.png"))
+        fg (cpp/LoadTextureFromImage fg-image)
+        _ (cpp/UnloadImage fg-image)
+        bx (int (- (quot WIDTH 2) (quot (int (+ 0.0 (.-width bg))) 2)))
+        by (int (- (quot HEIGHT 2) (quot (int (+ 0.0 (.-height bg))) 2)))
+        fx (int (- (quot WIDTH 2) (quot (int (+ 0.0 (.-width fg))) 2)))
+        fy (int (- (quot HEIGHT 2) (quot (int (+ 0.0 (.-height fg))) 2)))]
+
+    (loop [mode 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mode (if (cpp/IsKeyPressed cpp/KEY_SPACE)
+                     (let [m (+ mode 1)] (if (>= m BLEND-COUNT) 0 m))
+                     mode)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawTexture bg bx by cpp/WHITE)
+
+          ;; The foreground goes through the current blend mode.
+          (cpp/BeginBlendMode mode)
+          (cpp/DrawTexture fg fx fy cpp/WHITE)
+          (cpp/EndBlendMode)
+
+          (cpp/DrawText "Press SPACE to change blend modes. (Q quits)" 300 350 10 cpp/GRAY)
+          (cpp/DrawText (str "Current: "
+                             (if (= mode 0) "BLEND_ALPHA"
+                                 (if (= mode 1) "BLEND_ADDITIVE"
+                                     (if (= mode 2) "BLEND_MULTIPLIED" "BLEND_ADD_COLORS"))))
+                        (- (quot WIDTH 2) 60) 370 10 cpp/GRAY)
+
+          (cpp/DrawText "(c) Cyberpunk Street Environment by Luis Zuno (@ansimuz)"
+                        (- WIDTH 330) (- HEIGHT 20) 10 cpp/GRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur mode)))))
+
+    (cpp/UnloadTexture fg)
+    (cpp/UnloadTexture bg))
+
+  (cpp/CloseWindow))

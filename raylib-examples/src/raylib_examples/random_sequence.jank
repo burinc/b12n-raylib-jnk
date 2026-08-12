@@ -1,0 +1,119 @@
+(ns raylib-examples.random-sequence
+  "raylib [core] example - random sequence, ported to jank.
+
+  A row of colored bars whose heights are a random *permutation* (no
+  repeats) produced by raylib's LoadRandomSequence. SPACE shuffles the
+  current bars; UP adds a bar and regenerates; DOWN removes one. ESC quits.
+  Based on raylib/examples/core/core_random_sequence.c
+
+  jank-native notes:
+  - LoadRandomSequence returns a freshly malloc'd `int *` of `count`
+    shuffled values. jank can hold the pointer but can't index `seq[i]`
+    directly, so a tiny `cpp/raw` shim (`jank_seq_at`) does the C
+    subscript and hands back a boxed int - the same escape hatch
+    gif-player uses for image.data pointer arithmetic.
+  - The C keeps a malloc'd `ColorRect[]`; jank keeps an ordinary vector
+    of `{:rgba :x :y :w :h}` maps instead - no native struct array, no
+    RL_CALLOC / RL_FREE. Only the LoadRandomSequence int* needs interop.
+  - A jank fn can't return a native Color (rule 2), so each bar stores a
+    packed RGBA int and the Color is built inline at the draw call with
+    `(cpp/GetColor rgba)` (the particles-blending packing trick)."
+  (:include "raylib.h"))
+
+;; jank can't subscript a raw int* returned from C; do the C subscript in
+;; raw C++ and return a boxed int.
+(cpp/raw "static int jank_seq_at(int* seq, int i) { return seq[i]; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def BASELINE (* 0.75 HEIGHT))   ; bars grow up from here; text lives below
+
+(defn- rand-rgba
+  "A random opaque color packed as one 0xRRGGBBAA int (mirrors
+  GenerateRandomColor: r,g,b random, a = 255)."
+  []
+  (+ (* (cpp/GetRandomValue 0 255) 16777216)
+     (* (cpp/GetRandomValue 0 255) 65536)
+     (* (cpp/GetRandomValue 0 255) 256)
+     255))
+
+(defn- gen-sequence
+  "Build a vector of `rect-count` bar maps whose heights are a random
+  permutation of 0..BASELINE (via LoadRandomSequence + Remap)."
+  [rect-count rect-width]
+  (let [start-x (* (- WIDTH (* rect-count rect-width)) 0.5)
+        seq (cpp/LoadRandomSequence rect-count 0 (dec rect-count))
+        rects (loop [i 0 acc []]
+                (if (< i rect-count)
+                  (let [sv (cpp/jank_seq_at seq i)
+                        h (* (/ (+ 0.0 sv) (dec rect-count)) BASELINE)]
+                    (recur (inc i)
+                           (conj acc {:rgba (rand-rgba)
+                                      :x (+ start-x (* i rect-width))
+                                      :y (- BASELINE h)
+                                      :w rect-width
+                                      :h h})))
+                  acc))]
+    (cpp/UnloadRandomSequence seq)
+    rects))
+
+(defn- shuffle-rects
+  "Reorder the bars' color+height across their fixed x positions, mirroring
+  the C ShuffleColorRectSequence sequential swap driven by a fresh
+  LoadRandomSequence permutation."
+  [rects]
+  (let [n (count rects)
+        seq (cpp/LoadRandomSequence n 0 (dec n))
+        out (loop [i 0 v rects]
+              (if (< i n)
+                (let [j (cpp/jank_seq_at seq i)
+                      r1 (nth v i)
+                      r2 (nth v j)
+                      v (assoc v i (assoc r1 :rgba (:rgba r2) :y (:y r2) :h (:h r2)))
+                      v (assoc v j (assoc r2 :rgba (:rgba r1) :y (:y r1) :h (:h r1)))]
+                  (recur (inc i) v))
+                v))]
+    (cpp/UnloadRandomSequence seq)
+    out))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - random sequence (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [rect-count 20
+         rects (gen-sequence 20 (/ (+ 0.0 WIDTH) 20))]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [;; SPACE shuffles in place; UP/DOWN change the count and regenerate
+            shuffle? (cpp/IsKeyPressed cpp/KEY_SPACE)
+            up?      (cpp/IsKeyPressed cpp/KEY_UP)
+            down?    (and (cpp/IsKeyPressed cpp/KEY_DOWN) (>= rect-count 4))
+            n        (cond up? (inc rect-count)
+                           down? (dec rect-count)
+                           :else rect-count)
+            rw       (/ (+ 0.0 WIDTH) n)
+            rects    (cond shuffle? (shuffle-rects rects)
+                           (or up? down?) (gen-sequence n rw)
+                           :else rects)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (loop [i 0]
+          (when (< i (count rects))
+            (let [r (nth rects i)]
+              (cpp/DrawRectangle (int (:x r)) (int (:y r)) (int (:w r)) (int (:h r))
+                                 (cpp/GetColor (:rgba r))))
+            (recur (inc i))))
+
+        (cpp/DrawText "Press SPACE to shuffle the current sequence" 10 (- HEIGHT 96) 20 cpp/BLACK)
+        (cpp/DrawText "Press UP to add a rectangle and generate a new sequence" 10 (- HEIGHT 64) 20 cpp/BLACK)
+        (cpp/DrawText "Press DOWN to remove a rectangle and generate a new sequence" 10 (- HEIGHT 32) 20 cpp/BLACK)
+        (cpp/DrawText (str "Count: " n " rectangles") 10 10 20 cpp/MAROON)
+        (cpp/DrawFPS (- WIDTH 80) 10)
+
+        (cpp/EndDrawing)
+
+        (recur n rects))))
+
+  (cpp/CloseWindow))

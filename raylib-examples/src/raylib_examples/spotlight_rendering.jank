@@ -1,0 +1,197 @@
+(ns raylib-examples.spotlight-rendering
+  "raylib [shaders] example - spotlight rendering, ported to jank.
+
+  A star field and a swarm of orbiting raysan sprites under three
+  spotlights: the spotlight shader alpha-masks a full-screen rectangle
+  so the pools of light punch through. The left screen half is pitch
+  black outside the spots, the right half dimly lit. Spot 0 follows
+  the mouse (move it!); the other two bounce around. ESC quits.
+  Based on raylib/examples/shaders/shaders_spotlight_rendering.c
+
+  jank-native notes:
+  - First GLSL struct-array uniforms (uniform Spot spots[3]): each
+    member location is just GetShaderLocation with a computed jank
+    string (str \"spots[\" i \"].pos\") - no C-side name patching like
+    the original's posName[6] = '0' + i. Values go through the
+    per-type scalar setters (VEC2 position per frame; inner/radius
+    FLOAT once at init).
+  - The C's Star/Spot struct arrays become jank vectors of maps
+    threaded through the frame loop (rule 2); Vector2Add/Multiply
+    reduce to plain jank arithmetic.
+  - The C's quirky reset-star re-roll condition
+    !(fabs(sx) + (fabs(sy) > 1)) mixes a double and a bool: it
+    re-rolls only while sx == 0 AND |sy| <= 1. Kept faithful.
+  - The mouse spot's y is flipped (HEIGHT - mouse.y): the shader works
+    in gl_FragCoord space, which is bottom-up."
+  (:include "raylib.h" "math.h"))
+
+;; Per-type scalar uniform setters (the preferred shim - see the guide).
+(cpp/raw "static void jank_set_float(Shader s, int loc, double v) {
+  float f = (float)v;
+  SetShaderValue(s, loc, &f, SHADER_UNIFORM_FLOAT);
+}
+static void jank_set_vec2(Shader s, int loc, double a, double b) {
+  float v[2] = { (float)a, (float)b };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-SPOTS 3)
+(def MAX-STARS 400)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn- rand-real
+  "GetRandomValue(lo, hi) scaled by 1/div, as a jank real."
+  [lo hi div]
+  (/ (+ 0.0 (int (cpp/GetRandomValue lo hi))) div))
+
+(defn- reset-star
+  "A star reborn at the screen centre with a random velocity, stepped
+  8 frames out so respawns don't clump in the middle."
+  []
+  (loop [sx (rand-real -1000 1000 100.0)
+         sy (rand-real -1000 1000 100.0)]
+    ;; the C's !(fabs(sx) + (fabs(sy) > 1)): re-roll while sx == 0 and |sy| <= 1
+    (if (and (== sx 0.0) (<= (max sy (- sy)) 1.0))
+      (recur (rand-real -1000 1000 100.0) (rand-real -1000 1000 100.0))
+      {:x (+ (/ WIDTH 2.0) (* sx 8.0))
+       :y (+ (/ HEIGHT 2.0) (* sy 8.0))
+       :sx sx :sy sy})))
+
+(defn- update-star
+  "Advance one star, respawning it when it leaves the screen."
+  [{:keys [x y sx sy]}]
+  (let [nx (+ x sx)
+        ny (+ y sy)]
+    (if (or (< nx 0.0) (> nx (+ 0.0 WIDTH)) (< ny 0.0) (> ny (+ 0.0 HEIGHT)))
+      (reset-star)
+      {:x nx :y ny :sx sx :sy sy})))
+
+(defn- roll-spot-speed
+  "Random speed pair re-rolled until |sx| + |sy| >= 2 (matching the C)."
+  []
+  (loop [sx (rand-real -400 40 25.0)
+         sy (rand-real -400 40 25.0)]
+    (if (< (+ (max sx (- sx)) (max sy (- sy))) 2.0)
+      (recur (rand-real -400 40 25.0) (rand-real -400 40 25.0))
+      [sx sy])))
+
+(defn- update-spot
+  "Advance one bouncing spot (spot 0 is mouse-driven and handled inline)."
+  [{:keys [x y sx sy] :as spot}]
+  (let [nx (+ x sx)
+        ny (+ y sy)
+        nsx (if (or (< nx 64.0) (> nx (- WIDTH 64.0))) (- sx) sx)
+        nsy (if (or (< ny 64.0) (> ny (- HEIGHT 64.0))) (- sy) sy)]
+    (assoc spot :x nx :y ny :sx nsx :sy nsy)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - spotlight rendering (jank)")
+  (cpp/HideCursor)
+
+  (let [tex-ray (cpp/LoadTexture (str RES "raysan.png"))
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/spotlight.fs"))
+        w-loc (int (cpp/GetShaderLocation shader "screenWidth"))
+        ;; per-spot member locations off the GLSL struct array
+        spots0 (loop [i 0 acc []]
+                 (if (< i MAX-SPOTS)
+                   (let [speed (roll-spot-speed)]
+                     (recur (inc i)
+                            (conj acc {:x (+ 0.0 (int (cpp/GetRandomValue 64 (- WIDTH 64))))
+                                       :y (+ 0.0 (int (cpp/GetRandomValue 64 (- HEIGHT 64))))
+                                       :sx (nth speed 0)
+                                       :sy (nth speed 1)
+                                       :inner (* 28.0 (inc i))
+                                       :radius (* 48.0 (inc i))
+                                       :pos-loc (int (cpp/GetShaderLocation shader (str "spots[" i "].pos")))
+                                       :inner-loc (int (cpp/GetShaderLocation shader (str "spots[" i "].inner")))
+                                       :radius-loc (int (cpp/GetShaderLocation shader (str "spots[" i "].radius")))})))
+                   acc))]
+
+    (cpp/jank_set_float shader w-loc (+ 0.0 WIDTH))
+    (loop [i 0]
+      (when (< i MAX-SPOTS)
+        (let [s (nth spots0 i)]
+          (cpp/jank_set_vec2 shader (:pos-loc s) (:x s) (:y s))
+          (cpp/jank_set_float shader (:inner-loc s) (:inner s))
+          (cpp/jank_set_float shader (:radius-loc s) (:radius s)))
+        (recur (inc i))))
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [frame-counter stars spots]; stars pre-advanced 400 steps so
+    ;; they don't all start in the centre (the C's warm-up loop).
+    (loop [fc 0
+           stars (loop [m 0 ss (loop [n 0 acc []]
+                                 (if (< n MAX-STARS)
+                                   (recur (inc n) (conj acc (reset-star)))
+                                   acc))]
+                   (if (< m (int (/ WIDTH 2)))
+                     (recur (inc m) (mapv update-star ss))
+                     ss))
+           spots spots0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [stars (mapv update-star stars)
+              mp (cpp/GetMousePosition)
+              mx (+ 0.0 (.-x mp))
+              my (+ 0.0 (.-y mp))
+              spots (loop [i 0 acc []]
+                      (if (< i MAX-SPOTS)
+                        (let [s (nth spots i)]
+                          (recur (inc i)
+                                 (conj acc
+                                       (if (= i 0)
+                                         ;; shader space is bottom-up: flip the mouse y
+                                         (assoc s :x mx :y (- (+ 0.0 HEIGHT) my))
+                                         (update-spot s)))))
+                        acc))]
+
+          (loop [i 0]
+            (when (< i MAX-SPOTS)
+              (let [s (nth spots i)]
+                (cpp/jank_set_vec2 shader (:pos-loc s) (:x s) (:y s)))
+              (recur (inc i))))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/DARKBLUE)
+
+          ;; stars ("a single pixel is just too small these days")
+          (loop [i 0]
+            (when (< i MAX-STARS)
+              (let [s (nth stars i)]
+                (cpp/DrawRectangle (int (:x s)) (int (:y s)) 2 2 cpp/WHITE))
+              (recur (inc i))))
+
+          ;; sixteen raysan sprites swirling on offset Lissajous orbits
+          (loop [i 0]
+            (when (< i 16)
+              (cpp/DrawTexture tex-ray
+                               (int (- (+ (/ WIDTH 2.0)
+                                          (* (cpp/cos (/ (+ 0.0 (+ fc (* i 8))) 51.45))
+                                             (/ WIDTH 2.2)))
+                                       32.0))
+                               (int (+ (/ HEIGHT 2.0)
+                                       (* (cpp/sin (/ (+ 0.0 (+ fc (* i 8))) 17.87))
+                                          (/ HEIGHT 4.2))))
+                               cpp/WHITE)
+              (recur (inc i))))
+
+          ;; the spotlight shader alpha-masks this full-screen rectangle
+          (cpp/BeginShaderMode shader)
+          (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/WHITE)
+          (cpp/EndShaderMode)
+
+          (cpp/DrawFPS 10 10)
+          (cpp/DrawText "Move the mouse!" 10 30 20 cpp/GREEN)
+          (cpp/DrawText "Pitch Black" (int (* WIDTH 0.2)) (int (/ HEIGHT 2)) 20 cpp/GREEN)
+          (cpp/DrawText "Dark" (int (* WIDTH 0.66)) (int (/ HEIGHT 2)) 20 cpp/GREEN)
+
+          (cpp/EndDrawing)
+          (recur (inc fc) stars spots))))
+
+    (cpp/UnloadTexture tex-ray)
+    (cpp/UnloadShader shader))
+
+  (cpp/CloseWindow))

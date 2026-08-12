@@ -1,0 +1,111 @@
+(ns raylib-examples.codepoints-loading
+  "raylib [text] example - codepoints loading, ported to jank.
+
+  Japanese text (the Iroha pangram) scanned for its unicode codepoints,
+  which are deduplicated and used to rasterize a minimal TTF font atlas
+  (DotGothic16). SPACE toggles between the rendered text and the
+  generated atlas texture. ESC quits.
+  Based on raylib/examples/text/text_codepoints_loading.c
+
+  jank-native notes:
+  - LoadCodepoints returns int* + a count out-param: the (cpp/int 0) +
+    (cpp/& n) pattern, with the array read back element-wise via
+    (cpp/aget cps (cpp/int i)) - the first committed load-bearing use
+    of aget on an int*.
+  - The C's CodepointRemoveDuplicates (calloc + memcpy + triple loop)
+    becomes a jank first-occurrence dedup over a set. Writing the result
+    BACK to the int* LoadFontEx wants is the reverse problem - jank
+    can't build a native array - so a cpp/raw static buffer is filled
+    element-wise through a one-line setter shim (jank_cp_set).
+  - The TEXT literal is UTF-8 in the source, like the C. jank's lexer
+    accepts UTF-8 inside string literals; the ASCII-only rule is about
+    comments.
+  - The C's RIGHT/LEFT GetCodepointNext/Previous block only moves a
+    pointer and draws nothing - testing dead code, dropped here."
+  (:include "raylib.h"))
+
+;; jank can't construct a native int array; fill a static buffer
+;; element-wise and hand its pointer to LoadFontEx.
+(cpp/raw "static int jank_cp_buf[512] = { 0 };
+static void jank_cp_set(int i, int v) { jank_cp_buf[i] = v; }
+static int* jank_cp_ptr(void) { return jank_cp_buf; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/text/resources/")
+
+;; The Iroha pangram, UTF-8 in-source like the C original.
+(def TEXT
+  (str "いろはにほへと　ちりぬるを\n"
+       "わかよたれそ　つねならむ\n"
+       "うゐのおくやま　けふこえて\n"
+       "あさきゆめみし　ゑひもせす"))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - codepoints loading (jank)")
+
+  (let [cp-count (cpp/int 0)
+        codepoints (cpp/LoadCodepoints TEXT (cpp/& cp-count))
+        n (int (+ 0.0 cp-count))                       ; box the out-param
+        ;; snapshot the int* into a jank vector
+        cps (loop [i 0 acc []]
+              (if (< i n)
+                (recur (inc i) (conj acc (int (cpp/aget codepoints (cpp/int i)))))
+                acc))
+        ;; first-occurrence dedup (the C's CodepointRemoveDuplicates)
+        uniq (loop [i 0 seen #{} acc []]
+               (if (< i n)
+                 (let [c (nth cps i)]
+                   (if (contains? seen c)
+                     (recur (inc i) seen acc)
+                     (recur (inc i) (conj seen c) (conj acc c))))
+                 acc))
+        nu (count uniq)]
+    (cpp/UnloadCodepoints codepoints)
+
+    ;; write the deduped codepoints into the native buffer
+    (loop [i 0]
+      (when (< i nu)
+        (cpp/jank_cp_set i (nth uniq i))
+        (recur (inc i))))
+
+    (let [font (cpp/LoadFontEx (str RES "DotGothic16-Regular.ttf") 36
+                               (cpp/jank_cp_ptr) nu)]
+      (cpp/SetTextureFilter (.-texture font) cpp/TEXTURE_FILTER_BILINEAR)
+      (cpp/SetTextLineSpacing 20)
+      (cpp/SetTargetFPS 60)
+
+      ;; Thread [showing-font-atlas?].
+      (loop [atlas? false]
+        (when (cpp/! (cpp/WindowShouldClose))
+          (let [atlas? (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not atlas?) atlas?)]
+
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/RAYWHITE)
+
+            (cpp/DrawRectangle 0 0 WIDTH 70 cpp/BLACK)
+            (cpp/DrawText (str "Total codepoints contained in provided text: " n)
+                          10 10 20 cpp/GREEN)
+            (cpp/DrawText (str "Total codepoints required for font atlas (duplicates excluded): " nu)
+                          10 40 20 cpp/GREEN)
+
+            (if atlas?
+              (do
+                (cpp/DrawTexture (.-texture font) 150 100 cpp/BLACK)
+                (cpp/DrawRectangleLines 150 100 (.-width (.-texture font))
+                                        (.-height (.-texture font)) cpp/BLACK))
+              (cpp/DrawTextEx font TEXT
+                              (cpp/Vector2 (cpp/float 160.0) (cpp/float 110.0))
+                              (cpp/float 48.0) (cpp/float 5.0) cpp/BLACK))
+
+            (cpp/DrawText "Press SPACE to toggle font atlas view!"
+                          10 (- HEIGHT 30) 20 cpp/GRAY)
+
+            (cpp/EndDrawing)
+
+            (recur atlas?))))
+
+      (cpp/UnloadFont font)))
+
+  (cpp/CloseWindow))

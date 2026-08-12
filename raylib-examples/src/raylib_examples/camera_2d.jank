@@ -1,0 +1,100 @@
+(ns raylib-examples.camera-2d
+  "raylib [core] example - 2D camera, ported to jank.
+
+  A free 2D camera over a skyline. RIGHT/LEFT move the player (the camera
+  follows), mouse wheel zooms, A/S rotate, R resets, Q quits.
+  Based on raylib/examples/core/core_2d_camera.c
+  (jank-native: Camera2D built inline each frame from threaded scalars -
+  a native struct can't live in loop state - with nested Vector2s)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def N-BUILDINGS 100)
+(def PLAYER-Y 280)         ; the player only moves horizontally
+
+;; 100 skyline buildings, generated once. Colors are kept as r/g/b ints
+;; (a native Color can't be stored) and built inline when drawn.
+(defn make-buildings []
+  (loop [i 0 spacing 0.0 acc []]
+    (if (< i N-BUILDINGS)
+      (let [w (int (cpp/GetRandomValue 50 200))
+            h (int (cpp/GetRandomValue 100 800))
+            r (int (cpp/GetRandomValue 200 240))
+            g (int (cpp/GetRandomValue 200 240))
+            b (int (cpp/GetRandomValue 200 250))]
+        (recur (inc i) (+ spacing w)
+               (conj acc {:x (+ -6000.0 spacing)
+                          :y (- (- HEIGHT 130.0) h)
+                          :w w :h h
+                          ;; pack RGBA into a hex int for GetColor (avoids the
+                          ;; unsigned-char Color struct ctor)
+                          :hex (+ (* r 16777216) (* g 65536) (* b 256) 255)})))
+      acc)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - 2d camera (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [buildings (make-buildings)]
+    ;; Thread [player-x rotation zoom].
+    (loop [px 400.0 rot 0.0 zoom 1.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [px  (cond (cpp/IsKeyDown cpp/KEY_RIGHT) (+ px 2.0)
+                        (cpp/IsKeyDown cpp/KEY_LEFT)  (- px 2.0)
+                        :else px)
+              rot (cond (cpp/IsKeyDown cpp/KEY_A) (- rot 1.0)
+                        (cpp/IsKeyDown cpp/KEY_S) (+ rot 1.0)
+                        :else rot)
+              rot (if (> rot 40.0) 40.0 (if (< rot -40.0) -40.0 rot))
+              ;; Log-scaled zoom for a consistent feel.
+              z   (+ 0.0 (cpp/exp (+ (cpp/log zoom) (* (+ 0.0 (cpp/GetMouseWheelMove)) 0.1))))
+              zoom (if (> z 3.0) 3.0 (if (< z 0.1) 0.1 z))
+              reset? (cpp/IsKeyPressed cpp/KEY_R)
+              rot  (if reset? 0.0 rot)
+              zoom (if reset? 1.0 zoom)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode2D (cpp/Camera2D (cpp/Vector2 (cpp/float (/ WIDTH 2.0)) (cpp/float (/ HEIGHT 2.0)))
+                                         (cpp/Vector2 (cpp/float (+ px 20.0)) (cpp/float (+ PLAYER-Y 20.0)))
+                                         (cpp/float rot) (cpp/float zoom)))
+
+          (cpp/DrawRectangle -6000 320 13000 8000 cpp/DARKGRAY)
+
+          (loop [i 0]
+            (when (< i (count buildings))
+              (let [bld (nth buildings i)]
+                (cpp/DrawRectangle (int (:x bld)) (int (:y bld)) (:w bld) (:h bld)
+                                   (cpp/GetColor (:hex bld))))
+              (recur (inc i))))
+
+          (cpp/DrawRectangle (int px) PLAYER-Y 40 40 cpp/RED)
+          (cpp/DrawLine (int (+ px 20.0)) (* (- HEIGHT) 10) (int (+ px 20.0)) (* HEIGHT 10) cpp/GREEN)
+          (cpp/DrawLine (* (- WIDTH) 10) (+ PLAYER-Y 20) (* WIDTH 10) (+ PLAYER-Y 20) cpp/GREEN)
+
+          (cpp/EndMode2D)
+
+          ;; Screen-space UI.
+          (cpp/DrawText "SCREEN AREA" 640 10 20 cpp/RED)
+          (cpp/DrawRectangle 0 0 WIDTH 5 cpp/RED)
+          (cpp/DrawRectangle 0 5 5 (- HEIGHT 10) cpp/RED)
+          (cpp/DrawRectangle (- WIDTH 5) 5 5 (- HEIGHT 10) cpp/RED)
+          (cpp/DrawRectangle 0 (- HEIGHT 5) WIDTH 5 cpp/RED)
+
+          (cpp/DrawRectangle 10 10 250 113 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+          (cpp/DrawRectangleLines 10 10 250 113 cpp/BLUE)
+          (cpp/DrawText "Free 2D camera controls:" 20 20 10 cpp/BLACK)
+          (cpp/DrawText "- Right/Left to move player" 40 40 10 cpp/DARKGRAY)
+          (cpp/DrawText "- Mouse wheel to zoom in/out" 40 60 10 cpp/DARKGRAY)
+          (cpp/DrawText "- A / S to rotate" 40 80 10 cpp/DARKGRAY)
+          (cpp/DrawText "- R to reset, Q to quit" 40 100 10 cpp/DARKGRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur px rot zoom))))))
+
+  (cpp/CloseWindow))

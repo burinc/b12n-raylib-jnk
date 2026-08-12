@@ -1,0 +1,49 @@
+(ns raylib-examples.to-image
+  "raylib [textures] example - to image, ported to jank.
+
+  Round-trips the raylib logo VRAM<->RAM: an image becomes a texture,
+  the texture is read back to an image with LoadImageFromTexture, and
+  that image becomes a texture again - proving the GPU->CPU readback.
+  Q quits.
+  Based on raylib/examples/textures/textures_to_image.c
+
+  jank-native: pure by-value Image/Texture round-trips, each held as a
+  let-local; no pointers needed."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - to image (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [img0 (cpp/LoadImage (str RES "raylib_logo.png"))
+        tex0 (cpp/LoadTextureFromImage img0)]
+    (cpp/UnloadImage img0)
+    (let [img1 (cpp/LoadImageFromTexture tex0)]   ; VRAM -> RAM
+      (cpp/UnloadTexture tex0)
+      (let [texture (cpp/LoadTextureFromImage img1) ; RAM -> VRAM again
+            tw (int (+ 0.0 (.-width texture)))
+            th (int (+ 0.0 (.-height texture)))]
+        (cpp/UnloadImage img1)
+
+        (loop []
+          (when (cpp/! (cpp/WindowShouldClose))
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/RAYWHITE)
+
+            (cpp/DrawTexture texture (- (int (/ WIDTH 2)) (int (/ tw 2)))
+                             (- (int (/ HEIGHT 2)) (int (/ th 2))) cpp/WHITE)
+            (cpp/DrawText "this IS a texture loaded from an image! (Q quits)" 280 370 10 cpp/GRAY)
+
+            (cpp/EndDrawing)
+
+            (when-not (cpp/IsKeyDown cpp/KEY_Q)
+              (recur))))
+
+        (cpp/UnloadTexture texture))))
+
+  (cpp/CloseWindow))

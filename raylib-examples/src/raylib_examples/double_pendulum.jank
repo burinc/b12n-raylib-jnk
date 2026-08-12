@@ -1,0 +1,117 @@
+(ns raylib-examples.double-pendulum
+  "raylib [shapes] example - double pendulum, ported to jank.
+
+  A chaotic double-pendulum simulation with a fading trail of the tip.
+  Press Q to quit. Based on
+  raylib/examples/shapes/shapes_double_pendulum.c (jank-native: C math.h
+  trig, scalar line/circle drawing, in-memory trail instead of a render
+  texture)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def PI 3.141592653589793)
+(def DEG2RAD (/ PI 180.0))
+(def G 9.81)
+(def L1 15.0)
+(def M1 0.2)
+(def L2 15.0)
+(def M2 0.1)
+(def SCALER 0.1)
+(def SIM-STEPS 30)
+(def TRAIL-MAX 250)
+
+(def PIVOT-X (* WIDTH 0.5))          ; 400.0
+(def PIVOT-Y (- (* HEIGHT 0.5) 100)) ; 125.0
+
+;; World-space offset of a pendulum bob from its anchor.
+(defn end-x [l theta] (* 10.0 l (cpp/sin theta)))
+(defn end-y [l theta] (* 10.0 l (cpp/cos theta)))
+
+;; One physics tick -> [theta1 theta2 w1 w2].
+(defn step-physics [t1 t2 w1 w2 step]
+  (let [big-l1 (* L1 SCALER)
+        big-l2 (* L2 SCALER)
+        total-m (+ M1 M2)
+        step2 (* step step)
+        delta (- t1 t2)
+        sin-d (cpp/sin delta)
+        cos-d (cpp/cos delta)
+        cos-2d (cpp/cos (* 2.0 delta))
+        ww1 (* w1 w1)
+        ww2 (* w2 w2)
+        denom (- (+ (* 2.0 M1) M2) (* M2 cos-2d))
+        a1 (/ (+ (* (- G) (+ (* 2.0 M1) M2) (cpp/sin t1))
+                 (* (- M2) G (cpp/sin (- t1 (* 2.0 t2))))
+                 (* -2.0 sin-d M2 (+ (* ww2 big-l2) (* ww1 big-l1 cos-d))))
+              (* big-l1 denom))
+        a2 (/ (* 2.0 sin-d (+ (* ww1 big-l1 total-m)
+                              (* G total-m (cpp/cos t1))
+                              (* ww2 big-l2 M2 cos-d)))
+              (* big-l2 denom))]
+    [(+ t1 (* w1 step) (* 0.5 a1 step2))
+     (+ t2 (* w2 step) (* 0.5 a2 step2))
+     (+ w1 (* a1 step))
+     (+ w2 (* a2 step))]))
+
+(defn advance [t1 t2 w1 w2 step]
+  (loop [k 0 t1 t1 t2 t2 w1 w1 w2 w2]
+    (if (< k SIM-STEPS)
+      (let [nx (step-physics t1 t2 w1 w2 step)]
+        (recur (inc k) (nth nx 0) (nth nx 1) (nth nx 2) (nth nx 3)))
+      [t1 t2 w1 w2])))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - double pendulum (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [t1    (* DEG2RAD 170.0)
+         t2    0.0
+         w1    0.0
+         w2    0.0
+         trail []]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [dt   (cpp/GetFrameTime)
+            step (/ dt SIM-STEPS)
+            nx   (advance t1 t2 w1 w2 step)
+            t1   (nth nx 0)
+            t2   (nth nx 1)
+            w1   (nth nx 2)
+            w2   (nth nx 3)
+            ;; Joint + tip screen positions.
+            jx1  (+ PIVOT-X (end-x L1 t1))
+            jy1  (+ PIVOT-Y (end-y L1 t1))
+            tx   (+ jx1 (end-x L2 t2))
+            ty   (+ jy1 (end-y L2 t2))
+            trail (vec (take TRAIL-MAX (cons [tx ty] trail)))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/BLACK)
+
+        ;; Fading trail of the tip (newest bright -> oldest dim).
+        (loop [i 0]
+          (when (< i (count trail))
+            (let [p     (nth trail i)
+                  alpha (cpp/float (* 0.7 (- 1.0 (/ i 250.0))))]
+              (cpp/DrawCircle (int (nth p 0)) (int (nth p 1))
+                              (cpp/float 2.0) (cpp/Fade cpp/RED alpha)))
+            (recur (inc i))))
+
+        ;; Arms + joints.
+        (cpp/DrawLine (int PIVOT-X) (int PIVOT-Y) (int jx1) (int jy1) cpp/RAYWHITE)
+        (cpp/DrawLine (int jx1) (int jy1) (int tx) (int ty) cpp/RAYWHITE)
+        (cpp/DrawCircle (int PIVOT-X) (int PIVOT-Y) (cpp/float 6.0) cpp/GRAY)
+        (cpp/DrawCircle (int jx1) (int jy1) (cpp/float 8.0) cpp/RAYWHITE)
+        (cpp/DrawCircle (int tx) (int ty) (cpp/float 6.0) cpp/RED)
+
+        (cpp/DrawText "Double pendulum - chaotic motion - Q quits"
+                      10 10 20 cpp/RAYWHITE)
+        (cpp/DrawFPS 10 40)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur t1 t2 w1 w2 trail)))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,123 @@
+(ns raylib-examples.rlgl-triangle
+  "raylib [shapes] example - rlgl triangle, ported to jank.
+
+  A rainbow-vertex triangle drawn with the low-level rlgl immediate
+  mode. Drag the corner handles with the mouse, SPACE toggles
+  lines/filled mode, LEFT/RIGHT enable/disable backface culling,
+  R resets, Q quits.
+  Based on raylib/examples/shapes/shapes_rlgl_triangle.c
+  (jank-native: FIRST rlgl example - rlgl.h is already installed
+  next to raylib.h by jank-raylib-sys, so (:include \"rlgl.h\") is all
+  it takes; rlBegin/rlColor4ub/rlVertex2f/rlEnd work directly. The
+  C's GetMouseDelta returns a native Vector2, so the drag delta is
+  computed from a threaded previous mouse position instead.)"
+  (:include "raylib.h" "rlgl.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def HANDLE-R 8.0)
+(def START [{:x 400.0 :y 150.0} {:x 300.0 :y 300.0} {:x 500.0 :y 300.0}])
+
+(defn hover
+  "Index of the vertex handle under the mouse, or -1."
+  [verts mx my]
+  (loop [i 0]
+    (if (< i 3)
+      (let [v (nth verts i)]
+        (if (cpp/CheckCollisionPointCircle
+             (cpp/Vector2 (cpp/float mx) (cpp/float my))
+             (cpp/Vector2 (cpp/float (:x v)) (cpp/float (:y v)))
+             (cpp/float HANDLE-R))
+          i
+          (recur (inc i))))
+      -1)))
+
+(defn rl-vertex
+  "One immediate-mode vertex: color id (0 red / 1 green / 2 blue) + pos."
+  [cid x y]
+  (if (= cid 0) (cpp/rlColor4ub 255 0 0 255)
+    (if (= cid 1) (cpp/rlColor4ub 0 255 0 255)
+      (cpp/rlColor4ub 0 0 255 255)))
+  (cpp/rlVertex2f (cpp/float x) (cpp/float y))
+  nil)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - rlgl triangle (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [verts selected-index lines-mode? prev-mouse-x prev-mouse-y].
+  (loop [verts START idx -1 lines? false pmx 0.0 pmy 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+            lines? (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not lines?) lines?)
+
+            ;; Grab a handle under the mouse while LMB is down.
+            hit (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT)
+                  (hover verts mx my)
+                  -1)
+            idx (if (>= hit 0) hit idx)
+            ;; Drag by the mouse delta (threaded previous position).
+            verts (if (>= idx 0)
+                    (let [v (nth verts idx)]
+                      (assoc verts idx {:x (+ (:x v) (- mx pmx))
+                                        :y (+ (:y v) (- my pmy))}))
+                    verts)
+            idx (if (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT) -1 idx)
+
+            reset? (cpp/IsKeyPressed cpp/KEY_R)
+            verts (if reset? START verts)]
+
+        (when (cpp/IsKeyPressed cpp/KEY_LEFT) (cpp/rlEnableBackfaceCulling))
+        (when (cpp/IsKeyPressed cpp/KEY_RIGHT) (cpp/rlDisableBackfaceCulling))
+        (when reset? (cpp/rlEnableBackfaceCulling))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (let [v0 (nth verts 0) v1 (nth verts 1) v2 (nth verts 2)]
+          (if lines?
+            (do
+              (cpp/rlBegin cpp/RL_LINES)
+              (rl-vertex 0 (:x v0) (:y v0)) (rl-vertex 1 (:x v1) (:y v1))
+              (rl-vertex 1 (:x v1) (:y v1)) (rl-vertex 2 (:x v2) (:y v2))
+              (rl-vertex 2 (:x v2) (:y v2)) (rl-vertex 0 (:x v0) (:y v0))
+              (cpp/rlEnd))
+            (do
+              (cpp/rlBegin cpp/RL_TRIANGLES)
+              (rl-vertex 0 (:x v0) (:y v0))
+              (rl-vertex 1 (:x v1) (:y v1))
+              (rl-vertex 2 (:x v2) (:y v2))
+              (cpp/rlEnd))))
+
+        ;; The vertex handles.
+        (loop [i 0]
+          (when (< i 3)
+            (let [v (nth verts i)]
+              (when (cpp/CheckCollisionPointCircle
+                     (cpp/Vector2 (cpp/float mx) (cpp/float my))
+                     (cpp/Vector2 (cpp/float (:x v)) (cpp/float (:y v)))
+                     (cpp/float HANDLE-R))
+                (cpp/DrawCircleV (cpp/Vector2 (cpp/float (:x v)) (cpp/float (:y v)))
+                                 (cpp/float HANDLE-R)
+                                 (cpp/ColorAlpha cpp/DARKGRAY (cpp/float 0.5))))
+              (when (= i idx)
+                (cpp/DrawCircleV (cpp/Vector2 (cpp/float (:x v)) (cpp/float (:y v)))
+                                 (cpp/float HANDLE-R) cpp/DARKGRAY))
+              (cpp/DrawCircleLinesV (cpp/Vector2 (cpp/float (:x v)) (cpp/float (:y v)))
+                                    (cpp/float HANDLE-R) cpp/BLACK))
+            (recur (inc i))))
+
+        (cpp/DrawText "SPACE: Toggle lines mode" 10 10 20 cpp/DARKGRAY)
+        (cpp/DrawText "LEFT-RIGHT: Toggle backface culling" 10 40 20 cpp/DARKGRAY)
+        (cpp/DrawText "MOUSE: Click and drag vertex points" 10 70 20 cpp/DARKGRAY)
+        (cpp/DrawText "R: Reset triangle, Q: quit" 10 100 20 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur verts idx lines? mx my)))))
+
+  (cpp/CloseWindow))

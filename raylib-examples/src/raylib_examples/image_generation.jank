@@ -1,0 +1,94 @@
+(ns raylib-examples.image-generation
+  "raylib [textures] example - image generation, ported to jank.
+
+  Nine procedurally generated images (gradients, checked, white/perlin
+  noise, cellular) uploaded as textures. LEFT mouse or RIGHT arrow
+  cycles through them, Q quits.
+  Based on raylib/examples/textures/textures_image_generation.c
+  (jank-native: FIRST textures-category example. The C's Texture2D
+  array becomes nine outer-let bindings - native handles can't live in
+  a jank vector - with a nested-if draw dispatch on the current
+  index.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def N 9)
+
+(def NAMES
+  ["VERTICAL GRADIENT" "HORIZONTAL GRADIENT" "DIAGONAL GRADIENT"
+   "RADIAL GRADIENT" "SQUARE GRADIENT" "CHECKED"
+   "WHITE NOISE" "PERLIN NOISE" "CELLULAR"])
+(def XS [560 540 540 580 580 680 640 640 670])
+;; Label color ids per texture: 0 RAYWHITE, 1 LIGHTGRAY, 2 RED.
+(def CIDS [0 0 0 1 1 0 2 2 0])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - image generation (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [img0 (cpp/GenImageGradientLinear WIDTH HEIGHT 0 cpp/RED cpp/BLUE)
+        img1 (cpp/GenImageGradientLinear WIDTH HEIGHT 90 cpp/RED cpp/BLUE)
+        img2 (cpp/GenImageGradientLinear WIDTH HEIGHT 45 cpp/RED cpp/BLUE)
+        img3 (cpp/GenImageGradientRadial WIDTH HEIGHT (cpp/float 0.0) cpp/WHITE cpp/BLACK)
+        img4 (cpp/GenImageGradientSquare WIDTH HEIGHT (cpp/float 0.0) cpp/WHITE cpp/BLACK)
+        img5 (cpp/GenImageChecked WIDTH HEIGHT 32 32 cpp/RED cpp/BLUE)
+        img6 (cpp/GenImageWhiteNoise WIDTH HEIGHT (cpp/float 0.5))
+        img7 (cpp/GenImagePerlinNoise WIDTH HEIGHT 50 50 (cpp/float 4.0))
+        img8 (cpp/GenImageCellular WIDTH HEIGHT 32)
+        t0 (cpp/LoadTextureFromImage img0)
+        t1 (cpp/LoadTextureFromImage img1)
+        t2 (cpp/LoadTextureFromImage img2)
+        t3 (cpp/LoadTextureFromImage img3)
+        t4 (cpp/LoadTextureFromImage img4)
+        t5 (cpp/LoadTextureFromImage img5)
+        t6 (cpp/LoadTextureFromImage img6)
+        t7 (cpp/LoadTextureFromImage img7)
+        t8 (cpp/LoadTextureFromImage img8)]
+    (cpp/UnloadImage img0) (cpp/UnloadImage img1) (cpp/UnloadImage img2)
+    (cpp/UnloadImage img3) (cpp/UnloadImage img4) (cpp/UnloadImage img5)
+    (cpp/UnloadImage img6) (cpp/UnloadImage img7) (cpp/UnloadImage img8)
+
+    ;; Thread [current-texture].
+    (loop [cur 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [cur (if (or (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+                          (cpp/IsKeyPressed cpp/KEY_RIGHT))
+                    (int (mod (+ cur 1) N))
+                    cur)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; Native textures can't be nth'd out of a vector - dispatch.
+          (if (= cur 0) (cpp/DrawTexture t0 0 0 cpp/WHITE)
+            (if (= cur 1) (cpp/DrawTexture t1 0 0 cpp/WHITE)
+              (if (= cur 2) (cpp/DrawTexture t2 0 0 cpp/WHITE)
+                (if (= cur 3) (cpp/DrawTexture t3 0 0 cpp/WHITE)
+                  (if (= cur 4) (cpp/DrawTexture t4 0 0 cpp/WHITE)
+                    (if (= cur 5) (cpp/DrawTexture t5 0 0 cpp/WHITE)
+                      (if (= cur 6) (cpp/DrawTexture t6 0 0 cpp/WHITE)
+                        (if (= cur 7) (cpp/DrawTexture t7 0 0 cpp/WHITE)
+                          (cpp/DrawTexture t8 0 0 cpp/WHITE)))))))))
+
+          (cpp/DrawRectangle 30 400 325 30 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+          (cpp/DrawRectangleLines 30 400 325 30 (cpp/Fade cpp/WHITE (cpp/float 0.5)))
+          (cpp/DrawText "MOUSE LEFT BUTTON to CYCLE PROCEDURAL TEXTURES (Q quits)"
+                        40 410 10 cpp/WHITE)
+
+          (cpp/DrawText (nth NAMES cur) (nth XS cur) 10 20
+                        (let [cid (nth CIDS cur)]
+                          (if (= cid 0) cpp/RAYWHITE
+                            (if (= cid 1) cpp/LIGHTGRAY cpp/RED))))
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur cur)))))
+
+    (cpp/UnloadTexture t0) (cpp/UnloadTexture t1) (cpp/UnloadTexture t2)
+    (cpp/UnloadTexture t3) (cpp/UnloadTexture t4) (cpp/UnloadTexture t5)
+    (cpp/UnloadTexture t6) (cpp/UnloadTexture t7) (cpp/UnloadTexture t8))
+
+  (cpp/CloseWindow))

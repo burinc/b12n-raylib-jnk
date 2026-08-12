@@ -1,0 +1,50 @@
+(ns raylib-examples.input-multitouch
+  "raylib [core] example - input multitouch, ported to jank.
+
+  Draws an orange ball with an index number at every active touch
+  point. On a touchscreen each finger gets its own ball; on desktop
+  the mouse acts as touch point 0 while a button is held. Q quits.
+  Based on raylib/examples/core/core_input_multitouch.c
+  (jank-native: no fixed touch-point array is stored - GetTouchPosition
+  is queried inline in the draw loop, and its Vector2 is passed
+  straight to DrawCircleV, never carried in loop state.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-TOUCH-POINTS 10)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - input multitouch (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [raw (cpp/GetTouchPointCount)
+            tcount (if (> raw MAX-TOUCH-POINTS) MAX-TOUCH-POINTS raw)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (loop [i 0]
+          (when (< i tcount)
+            (let [pos (cpp/GetTouchPosition i)
+                  x (int (+ 0.0 (.-x pos)))
+                  y (int (+ 0.0 (.-y pos)))]
+              ;; (0,0) means "no touch" for that slot - skip it.
+              (when (and (> x 0) (> y 0))
+                (cpp/DrawCircleV pos (cpp/float 34.0) cpp/ORANGE)
+                (cpp/DrawText (str i) (- x 10) (- y 70) 40 cpp/BLACK)))
+            (recur (inc i))))
+
+        (cpp/DrawText "touch the screen at multiple locations to get multiple balls"
+                      10 10 20 cpp/DARKGRAY)
+        (cpp/DrawText "Q to quit" 10 40 10 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur)))))
+
+  (cpp/CloseWindow))

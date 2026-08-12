@@ -1,0 +1,84 @@
+(ns raylib-examples.loading-gltf
+  "raylib [models] example - loading gltf, ported to jank.
+
+  The animated glTF robot: LEFT/RIGHT switch between its animations
+  (idle, walk, dance, ...) with the current one's name on screen,
+  orbital camera. ESC quits.
+  Based on raylib/examples/models/models_loading_gltf.c
+
+  jank-native notes:
+  - The shadowmap-rendering animation shims (LoadModelAnimations
+    behind C statics, UpdateModelAnimation by index + frame) plus one
+    addition: the animation's char[32] name field folds to a jank
+    string through a const-char*-returning accessor.
+  - The animation index and frame counter thread as jank ints; the
+    frame wraps by the CURRENT animation's keyframe count."
+  (:include "raylib.h"))
+
+;; Animation array behind C statics (the shadowmap-rendering shims + name).
+(cpp/raw "static ModelAnimation *jank_anims = NULL;
+static int jank_anims_count = 0;
+static int jank_load_anims(const char* path) {
+  jank_anims = LoadModelAnimations(path, &jank_anims_count);
+  return jank_anims_count;
+}
+static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
+static const char* jank_anim_name(int i) { return jank_anims[i].name; }
+static void jank_update_anim(Model m, int i, int frame) {
+  UpdateModelAnimation(m, jank_anims[i], frame);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - loading gltf (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 6.0) (cpp/float 6.0) (cpp/float 6.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModel (str RES "models/gltf/robot.glb"))
+        anim-count (int (cpp/jank_load_anims (str RES "models/gltf/robot.glb")))]
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [animation-index animation-frame].
+    (loop [anim-index 0
+           anim-frame 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (let [anim-index (cond (cpp/IsKeyPressed cpp/KEY_RIGHT)
+                               (int (mod (inc anim-index) anim-count))
+                               (cpp/IsKeyPressed cpp/KEY_LEFT)
+                               (int (mod (+ anim-index (dec anim-count)) anim-count))
+                               :else anim-index)
+              anim-frame (int (mod (inc anim-frame)
+                                   (int (cpp/jank_anim_keyframes (int anim-index)))))]
+
+          (cpp/jank_update_anim model (int anim-index) (int anim-frame))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawModel model
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/DrawGrid 10 (cpp/float 1.0))
+          (cpp/EndMode3D)
+
+          (cpp/DrawText (str "Current animation: " (cpp/jank_anim_name (int anim-index)))
+                        10 40 20 cpp/MAROON)
+          (cpp/DrawText "Use the LEFT/RIGHT keys to switch animation" 10 10 20 cpp/GRAY)
+
+          (cpp/EndDrawing)
+          (recur anim-index anim-frame))))
+
+    (cpp/UnloadModel model))
+
+  (cpp/CloseWindow))

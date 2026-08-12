@@ -1,0 +1,129 @@
+(ns raylib-examples.hot-reloading
+  "raylib [shaders] example - hot reloading, ported to jank.
+
+  A full-screen fractal drawn by reload.fs; edit + save that shader
+  file while the example runs and it hot-swaps in. A toggles auto
+  reloading (polls the file every frame), otherwise LEFT CLICK checks
+  once. ESC quits.
+  Based on raylib/examples/shaders/shaders_hot_reloading.c
+
+  jank-native notes:
+  - The C reassigns its Shader when the file changes - a native value
+    that must persist across frames but cannot thread through
+    loop/recur (rule 2). It lives in a cpp/raw static (the
+    viewport-scaling render-target pattern): jank_load_shader /
+    jank_try_reload / jank_get_shader. The reload keeps the old shader
+    when the new one failed to compile (id == rlGetShaderIdDefault),
+    matching the C.
+  - Uniform locations DO thread through the loop as jank ints,
+    re-queried after a successful swap.
+  - GetFileModTime's time_t boxes to a jank int; asctime(localtime())
+    stays a tiny C helper returning const char*, folded to a jank
+    string with str (the monitor-detector pattern).
+  - Native bools that feed and/or logic are boxed first via
+    (if native true false) to keep both if-branch types jank."
+  (:include "raylib.h" "rlgl.h" "time.h"))
+
+;; The live shader parked as a C static so it survives reassignment across
+;; frames (rule 2). jank_try_reload returns 1 only when the updated shader
+;; compiled and was swapped in; a failed compile keeps the old shader.
+(cpp/raw "static Shader jank_shader = { 0 };
+static void jank_load_shader(const char* path) { jank_shader = LoadShader(0, path); }
+static Shader jank_get_shader(void) { return jank_shader; }
+static int jank_try_reload(const char* path) {
+  Shader updated = LoadShader(0, path);
+  if (updated.id != rlGetShaderIdDefault()) {
+    UnloadShader(jank_shader);
+    jank_shader = updated;
+    return 1;
+  }
+  return 0;
+}
+static void jank_set_float(Shader s, int loc, double v) {
+  float f = (float)v;
+  SetShaderValue(s, loc, &f, SHADER_UNIFORM_FLOAT);
+}
+static void jank_set_vec2(Shader s, int loc, double a, double b) {
+  float v[2] = { (float)a, (float)b };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}
+static const char* jank_mod_time_str(long t) {
+  time_t tt = (time_t)t;
+  return asctime(localtime(&tt));
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - hot reloading (jank)")
+
+  (let [frag-path (str RES "shaders/glsl330/reload.fs")]
+    (cpp/jank_load_shader frag-path)
+    (let [resolution-loc (int (cpp/GetShaderLocation (cpp/jank_get_shader) "resolution"))
+          mouse-loc0 (int (cpp/GetShaderLocation (cpp/jank_get_shader) "mouse"))
+          time-loc0 (int (cpp/GetShaderLocation (cpp/jank_get_shader) "time"))]
+
+      (cpp/jank_set_vec2 (cpp/jank_get_shader) resolution-loc 800.0 450.0)
+
+      (cpp/SetTargetFPS 60)
+
+      ;; Thread [elapsed-seconds auto-reload? file-mod-time time-loc mouse-loc].
+      (loop [total-time 0.0
+             auto? false
+             mod-time (int (cpp/GetFileModTime frag-path))
+             time-loc time-loc0
+             mouse-loc mouse-loc0]
+        (when (cpp/! (cpp/WindowShouldClose))
+          (let [total-time (+ total-time (+ 0.0 (cpp/GetFrameTime)))
+                mouse (cpp/GetMousePosition)]
+
+            (cpp/jank_set_float (cpp/jank_get_shader) time-loc total-time)
+            (cpp/jank_set_vec2 (cpp/jank_get_shader) mouse-loc
+                               (+ 0.0 (.-x mouse)) (+ 0.0 (.-y mouse)))
+
+            ;; hot shader reloading (auto every frame, or once per click)
+            (let [clicked? (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT) true false)
+                  current-mod (if (or auto? clicked?)
+                                (int (cpp/GetFileModTime frag-path))
+                                mod-time)
+                  swapped? (if (not= current-mod mod-time)
+                             (= 1 (int (cpp/jank_try_reload frag-path)))
+                             false)
+                  time-loc (if swapped?
+                             (int (cpp/GetShaderLocation (cpp/jank_get_shader) "time"))
+                             time-loc)
+                  mouse-loc (if swapped?
+                              (int (cpp/GetShaderLocation (cpp/jank_get_shader) "mouse"))
+                              mouse-loc)
+                  auto? (if (cpp/IsKeyPressed cpp/KEY_A) (not auto?) auto?)]
+              (when swapped?
+                (cpp/jank_set_vec2 (cpp/jank_get_shader)
+                                   (int (cpp/GetShaderLocation (cpp/jank_get_shader) "resolution"))
+                                   800.0 450.0))
+
+              (cpp/BeginDrawing)
+              (cpp/ClearBackground cpp/RAYWHITE)
+
+              ;; only a white rectangle - the frame is generated in the shader
+              (cpp/BeginShaderMode (cpp/jank_get_shader))
+              (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/WHITE)
+              (cpp/EndShaderMode)
+
+              (cpp/DrawText (str "PRESS [A] to TOGGLE SHADER AUTOLOADING: "
+                                 (if auto? "AUTO" "MANUAL"))
+                            10 10 10 (if auto? cpp/RED cpp/BLACK))
+              (when (not auto?)
+                (cpp/DrawText "MOUSE CLICK to SHADER RE-LOADING" 10 30 10 cpp/BLACK))
+              (cpp/DrawText (str "Shader last modification: "
+                                 (cpp/jank_mod_time_str current-mod))
+                            10 430 10 cpp/BLACK)
+
+              (cpp/EndDrawing)
+              (recur total-time auto? current-mod time-loc mouse-loc)))))
+
+      (cpp/UnloadShader (cpp/jank_get_shader))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,72 @@
+(ns raylib-examples.background-scrolling
+  "raylib [textures] example - background scrolling, ported to jank.
+
+  Parallax scrolling: three cyberpunk-street layers (background,
+  midground, foreground) scroll left at different speeds, each drawn
+  twice at 2x scale so the seam wraps. Q quits.
+  Cyberpunk Street Environment by Luis Zuno (@ansimuz).
+  Based on raylib/examples/textures/textures_background_scrolling.c
+  (jank-native: the three textures live as let-locals captured by the
+  frame loop; the three scroll offsets thread the loop as plain reals.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - background scrolling (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Textures must load after InitWindow (needs the OpenGL context).
+  (let [background (cpp/LoadTexture (str RES "cyberpunk_street_background.png"))
+        midground (cpp/LoadTexture (str RES "cyberpunk_street_midground.png"))
+        foreground (cpp/LoadTexture (str RES "cyberpunk_street_foreground.png"))
+        bw (* 2 (int (+ 0.0 (.-width background))))
+        mw (* 2 (int (+ 0.0 (.-width midground))))
+        fw (* 2 (int (+ 0.0 (.-width foreground))))]
+
+    ;; Thread the three scroll offsets (textures scaled 2x, so wrap at 2*width).
+    (loop [back 0.0 mid 0.0 fore 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [back (- back 0.1)
+              mid (- mid 0.5)
+              fore (- fore 1.0)
+              back (if (<= back (- 0.0 bw)) 0.0 back)
+              mid (if (<= mid (- 0.0 mw)) 0.0 mid)
+              fore (if (<= fore (- 0.0 fw)) 0.0 fore)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground (cpp/GetColor (+ (* 5 16777216) (* 44 65536) (* 70 256) 255)))
+
+          ;; Each layer drawn twice at 2x scale so it wraps seamlessly.
+          (cpp/DrawTextureEx background (cpp/Vector2 (cpp/float back) (cpp/float 20.0))
+                             (cpp/float 0.0) (cpp/float 2.0) cpp/WHITE)
+          (cpp/DrawTextureEx background (cpp/Vector2 (cpp/float (+ bw back)) (cpp/float 20.0))
+                             (cpp/float 0.0) (cpp/float 2.0) cpp/WHITE)
+
+          (cpp/DrawTextureEx midground (cpp/Vector2 (cpp/float mid) (cpp/float 20.0))
+                             (cpp/float 0.0) (cpp/float 2.0) cpp/WHITE)
+          (cpp/DrawTextureEx midground (cpp/Vector2 (cpp/float (+ mw mid)) (cpp/float 20.0))
+                             (cpp/float 0.0) (cpp/float 2.0) cpp/WHITE)
+
+          (cpp/DrawTextureEx foreground (cpp/Vector2 (cpp/float fore) (cpp/float 70.0))
+                             (cpp/float 0.0) (cpp/float 2.0) cpp/WHITE)
+          (cpp/DrawTextureEx foreground (cpp/Vector2 (cpp/float (+ fw fore)) (cpp/float 70.0))
+                             (cpp/float 0.0) (cpp/float 2.0) cpp/WHITE)
+
+          (cpp/DrawText "BACKGROUND SCROLLING & PARALLAX (Q quits)" 10 10 20 cpp/RED)
+          (cpp/DrawText "(c) Cyberpunk Street Environment by Luis Zuno (@ansimuz)"
+                        (- WIDTH 330) (- HEIGHT 20) 10 cpp/RAYWHITE)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur back mid fore)))))
+
+    (cpp/UnloadTexture background)
+    (cpp/UnloadTexture midground)
+    (cpp/UnloadTexture foreground))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,81 @@
+(ns raylib-examples.directional-billboard
+  "raylib [models] example - directional billboard, ported to jank.
+
+  A sprite-sheet character (skillbot) is drawn as a billboard that always
+  faces the camera, and the row of the sheet is chosen from the camera's
+  orbit angle so the character appears to turn as the camera circles it;
+  the column cycles through a 4-frame walk animation. ESC quits.
+  Based on raylib/examples/models/models_directional_billboard.c
+
+  jank-native notes:
+  - The C's UpdateCamera(&camera, CAMERA_ORBITAL) needs a pointer jank
+    can't form, so (like billboard_rendering) the orbit is done by
+    REBUILDING the Camera3D inline each frame from a jank-tracked angle
+    `theta`. The camera sits at (Rxz*cos t, 1, Rxz*sin t) around the
+    target, matching the C's start pose at t = PI/4.
+  - Because we own `theta`, the C's
+    `Vector2Angle((2,0),(camera.x,camera.z))` collapses to `theta`
+    itself, so the direction frame is `floor(theta/PI*4 + 0.25)` with the
+    same negative-wrap correction.
+  - The billboard texture is a native Texture2D held as an outer-let
+    local; the rebuilt native Camera3D and it are passed straight to
+    DrawBillboardPro (native values as call args are fine - rule 2 only
+    forbids returning / loop-carrying them)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def PI 3.141592653589793)
+(def RXZ 2.8284271247461903)            ; sqrt(2^2 + 2^2): XZ orbit radius
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - directional billboard (jank)")
+  (let [skillbot (cpp/LoadTexture (str RES "skillbot.png"))]
+    (cpp/SetTargetFPS 60)
+
+    ;; state: orbit angle, animation frame, animation timer
+    (loop [theta (/ PI 4.0) anim 0 anim-timer 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [dt   (+ 0.0 (cpp/GetFrameTime))
+              theta (+ theta (* 0.5 dt))          ; CAMERA_ORBITAL_SPEED = 0.5 rad/s
+              t2   (+ anim-timer dt)
+              tick? (> t2 0.5)
+              anim (if tick? (mod (+ anim 1) 4) anim)
+              anim-timer (if tick? 0.0 t2)
+              px   (* RXZ (cpp/cos theta))
+              pz   (* RXZ (cpp/sin theta))
+              ;; direction frame from the orbit angle (== Vector2Angle in the C)
+              dir0 (cpp/floor (+ (* (/ (cpp/atan2 pz px) PI) 4.0) 0.25))
+              dir  (if (< dir0 0.0) (+ 8.0 dir0) dir0)
+              diri (int dir)
+              camera (cpp/Camera3D (cpp/Vector3 (cpp/float px) (cpp/float 1.0) (cpp/float pz))
+                                   (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
+                                   (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                   (cpp/float 45.0) cpp/CAMERA_PERSPECTIVE)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawGrid 10 (cpp/float 1.0))
+          (cpp/DrawBillboardPro camera skillbot
+                                (cpp/Rectangle (cpp/float (* anim 24.0)) (cpp/float (* dir 24.0))
+                                               (cpp/float 24.0) (cpp/float 24.0))
+                                (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                                (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                (cpp/Vector2 (cpp/float 1.0) (cpp/float 1.0))
+                                (cpp/Vector2 (cpp/float 0.5) (cpp/float 0.0))
+                                (cpp/float 0.0) cpp/WHITE)
+          (cpp/EndMode3D)
+
+          (cpp/DrawText (str "animation: " anim) 10 10 20 cpp/DARKGRAY)
+          (cpp/DrawText (str "direction frame: " diri) 10 40 20 cpp/DARKGRAY)
+          (cpp/EndDrawing)
+
+          (recur theta anim anim-timer))))
+
+    (cpp/UnloadTexture skillbot))
+
+  (cpp/CloseWindow))

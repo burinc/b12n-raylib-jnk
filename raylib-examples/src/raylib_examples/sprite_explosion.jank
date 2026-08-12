@@ -1,0 +1,85 @@
+(ns raylib-examples.sprite-explosion
+  "raylib [textures] example - sprite explosion, ported to jank.
+
+  Click anywhere to spawn an explosion: a 5x5 spritesheet plays one
+  frame at a time (every 3 game frames) at the click point while a
+  boom sound plays. Only one explosion runs at a time. Q quits.
+  Based on raylib/examples/textures/textures_sprite_explosion.c
+  (jank-native: no native Vector2/Rectangle is carried in loop state -
+  the click position is kept as jank ints and the frame rectangle is
+  rebuilt inline from the current frame/line and the texture's frame
+  size.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+(def FRAMES-PER-LINE 5)
+(def LINES 5)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - sprite explosion (jank)")
+  (cpp/InitAudioDevice)
+  (cpp/SetTargetFPS 60)
+
+  ;; Textures/sounds must load after Init* (they need the GL + audio contexts).
+  (let [boom (cpp/LoadSound (str RES "boom.wav"))
+        explosion (cpp/LoadTexture (str RES "explosion.png"))
+        tw (int (+ 0.0 (.-width explosion)))
+        th (int (+ 0.0 (.-height explosion)))
+        fw (int (quot tw FRAMES-PER-LINE))
+        fh (int (quot th LINES))]
+
+    ;; state: active? = an explosion is playing, frame/line = cell in the
+    ;; sheet, fc = frames-counter (advance every 3), px/py = draw position.
+    (loop [active? false frame 0 line 0 fc 0 px 0 py 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [click? (and (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT) (not active?))
+              px (if click? (- (cpp/GetMouseX) (int (quot fw 2))) px)
+              py (if click? (- (cpp/GetMouseY) (int (quot fh 2))) py)
+              _ (when click? (cpp/PlaySound boom))
+              active? (if click? true active?)
+              frame (if click? 0 frame)
+              line (if click? 0 line)
+              fc (if click? 0 fc)
+
+              ;; advance the animation while active
+              fc2 (if active? (+ fc 1) fc)
+              tick? (and active? (> fc2 2))
+              [nframe nline nactive]
+              (if tick?
+                (let [f (+ frame 1)]
+                  (if (< f FRAMES-PER-LINE)
+                    [f line active?]
+                    (let [l (+ line 1)]
+                      (if (< l LINES)
+                        [0 l active?]
+                        [0 0 false]))))
+                [frame line active?])
+              nfc (if tick? 0 fc2)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (when nactive
+            (cpp/DrawTextureRec explosion
+                                (cpp/Rectangle (cpp/float (+ 0.0 (* fw nframe)))
+                                               (cpp/float (+ 0.0 (* fh nline)))
+                                               (cpp/float (+ 0.0 fw))
+                                               (cpp/float (+ 0.0 fh)))
+                                (cpp/Vector2 (cpp/float (+ 0.0 px)) (cpp/float (+ 0.0 py)))
+                                cpp/WHITE))
+
+          (cpp/DrawText "Click anywhere to explode! (Q quits)" 10 10 20 cpp/DARKGRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur nactive nframe nline nfc px py)))))
+
+    (cpp/UnloadTexture explosion)
+    (cpp/UnloadSound boom))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

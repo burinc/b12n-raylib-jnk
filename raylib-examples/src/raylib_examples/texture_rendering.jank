@@ -1,0 +1,61 @@
+(ns raylib-examples.texture-rendering
+  "raylib [shaders] example - texture rendering, ported to jank.
+
+  A 1024x1024 BLANK texture drawn through the cubes_panning fragment
+  shader: every visible pixel is painted and animated by the shader
+  (two layers of panning cube grids), the texture itself is empty.
+  ESC quits.
+  Based on raylib/examples/shaders/shaders_texture_rendering.c
+
+  jank-native notes:
+  - The simplest animated-uniform shader port: one FLOAT uniform
+    (uTime) re-staged every frame through the cpp/raw static float
+    buffer + jank_set_uniform wrapper (the texture-outline pattern),
+    fed from GetTime rather than an accumulated frame delta."
+  (:include "raylib.h"))
+
+;; Uniform staging (see texture-outline); only -main touches these.
+(cpp/raw "static float jank_uf_buf[4] = { 0 };
+static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
+static void jank_set_uniform(Shader s, int loc, int type) {
+  SetShaderValue(s, loc, jank_uf_buf, type);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - texture rendering (jank)")
+
+  (let [im-blank (cpp/GenImageColor 1024 1024 cpp/BLANK)
+        texture (cpp/LoadTextureFromImage im-blank)
+        _ (cpp/UnloadImage im-blank)
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/cubes_panning.fs"))
+        time-loc (int (cpp/GetShaderLocation shader "uTime"))]
+
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/jank_uf_set 0 (+ 0.0 (cpp/GetTime)))
+        (cpp/jank_set_uniform shader time-loc cpp/SHADER_UNIFORM_FLOAT)
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginShaderMode shader)
+        ;; the texture is BLANK - all rendering happens in the shader
+        (cpp/DrawTexture texture 0 0 cpp/WHITE)
+        (cpp/EndShaderMode)
+
+        (cpp/DrawText "BACKGROUND is PAINTED and ANIMATED on SHADER!" 10 10 20 cpp/MAROON)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadTexture texture))
+
+  (cpp/CloseWindow))

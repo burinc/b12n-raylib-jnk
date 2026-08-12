@@ -1,0 +1,214 @@
+(ns raylib-examples.spectrum-visualizer
+  "raylib [audio] example - spectrum visualizer, ported to jank.
+
+  A live FFT spectrum of the country song: PCM frames feed both the
+  audio stream and a Blackman-windowed Cooley-Tukey FFT whose
+  smoothed, decibel-scaled bins land in a 512x1 texture that the
+  fft.fs shader expands into the on-screen visualization. ESC quits.
+  Based on raylib/examples/audio/audio_spectrum_visualizer.c
+
+  jank-native notes:
+  - The FFT pipeline (Cooley-Tukey butterflies, Blackman window,
+    AnalyserNode-style dB smoothing, the history ring and the PCM
+    feed off the decoded Wave) is nearly the whole C file and stays a
+    verbatim shim block around C statics; jank owns the raylib setup
+    (image/texture/render texture/shader) and the per-frame calls.
+  - UpdateTexture wants image.data, so the texture refresh is a
+    one-line Image-pointer shim; the shader's sampler rebinding uses
+    the proven per-frame SetShaderValueTexture."
+  (:include "raylib.h" "raymath.h" "math.h" "stdlib.h" "string.h"))
+
+;; The C's FFT machinery, verbatim, around static state.
+(cpp/raw "#define JANK_FFT_WINDOW 1024
+#define JANK_FFT_BUFFER 512
+#define JANK_RING (JANK_FFT_WINDOW*2)
+#define JANK_SR 44100
+#define JANK_MIN_DB (-100.0f)
+#define JANK_MAX_DB (-30.0f)
+#define JANK_INV_DB_RANGE (1.0f/(JANK_MAX_DB - JANK_MIN_DB))
+#define JANK_DB_SCALE (20.0f/2.302585092994046f)
+#define JANK_SMOOTHING 0.8f
+#define JANK_WINDOW_TIME ((double)JANK_FFT_WINDOW/(double)(JANK_SR*0.5f))
+
+typedef struct { float real, imaginary; } FFTComplex;
+
+static FFTComplex *jank_spectrum = NULL;
+static FFTComplex *jank_work = NULL;
+static float *jank_prev_magnitudes = NULL;
+static float (*jank_fft_history)[JANK_FFT_BUFFER] = NULL;
+static int jank_history_len = 0;
+static int jank_history_pos = 0;
+static float jank_tapback = 0.01f;
+static Wave jank_wav = { 0 };
+static const short *jank_wav_pcm = NULL;
+static unsigned int jank_wav_cursor = 0;
+static short jank_chunk[JANK_RING] = { 0 };
+static float jank_audio_samples[JANK_FFT_WINDOW] = { 0 };
+
+static void jank_fft_init(const char* wavePath) {
+  jank_history_len = (int)ceilf(2.0f/JANK_WINDOW_TIME) + 1;
+  jank_spectrum = (FFTComplex *)RL_CALLOC(sizeof(FFTComplex), JANK_FFT_WINDOW);
+  jank_work = (FFTComplex *)RL_CALLOC(sizeof(FFTComplex), JANK_FFT_WINDOW);
+  jank_prev_magnitudes = (float *)RL_CALLOC(JANK_FFT_BUFFER, sizeof(float));
+  jank_fft_history = (float (*)[JANK_FFT_BUFFER])RL_CALLOC(jank_history_len, sizeof(float[JANK_FFT_BUFFER]));
+  jank_wav = LoadWave(wavePath);
+  WaveFormat(&jank_wav, JANK_SR, 16, 1);
+  jank_wav_pcm = (const short *)jank_wav.data;
+}
+static void jank_fft_free(void) {
+  UnloadWave(jank_wav);
+  RL_FREE(jank_spectrum);
+  RL_FREE(jank_work);
+  RL_FREE(jank_prev_magnitudes);
+  RL_FREE(jank_fft_history);
+}
+/* keep the stream fed from the decoded wave, capturing FFT input */
+static void jank_feed_stream(AudioStream stream) {
+  while (IsAudioStreamProcessed(stream)) {
+    for (int i = 0; i < JANK_RING; i++) {
+      int left = (jank_wav.channels == 2)? jank_wav_pcm[jank_wav_cursor*2 + 0] : jank_wav_pcm[jank_wav_cursor];
+      int right = (jank_wav.channels == 2)? jank_wav_pcm[jank_wav_cursor*2 + 1] : left;
+      jank_chunk[i] = (short)((left + right)/2);
+      if (++jank_wav_cursor >= jank_wav.frameCount) jank_wav_cursor = 0;
+    }
+    UpdateAudioStream(stream, jank_chunk, JANK_RING);
+    for (int i = 0; i < JANK_FFT_WINDOW; i++)
+      jank_audio_samples[i] = (jank_chunk[i*2] + jank_chunk[i*2 + 1])*0.5f/32767.0f;
+  }
+}
+/* Cooley-Tukey, verbatim */
+static void jank_fft(FFTComplex *spectrum, int n) {
+  int j = 0;
+  for (int i = 1; i < n - 1; i++) {
+    int bit = n >> 1;
+    while (j >= bit) { j -= bit; bit >>= 1; }
+    j += bit;
+    if (i < j) { FFTComplex temp = spectrum[i]; spectrum[i] = spectrum[j]; spectrum[j] = temp; }
+  }
+  for (int len = 2; len <= n; len <<= 1) {
+    float angle = -2.0f*PI/len;
+    FFTComplex twiddleUnit = { cosf(angle), sinf(angle) };
+    for (int i = 0; i < n; i += len) {
+      FFTComplex twiddleCurrent = { 1.0f, 0.0f };
+      for (int k = 0; k < len/2; k++) {
+        FFTComplex even = spectrum[i + k];
+        FFTComplex odd = spectrum[i + k + len/2];
+        FFTComplex twiddledOdd = {
+          odd.real*twiddleCurrent.real - odd.imaginary*twiddleCurrent.imaginary,
+          odd.real*twiddleCurrent.imaginary + odd.imaginary*twiddleCurrent.real
+        };
+        spectrum[i + k].real = even.real + twiddledOdd.real;
+        spectrum[i + k].imaginary = even.imaginary + twiddledOdd.imaginary;
+        spectrum[i + k + len/2].real = even.real - twiddledOdd.real;
+        spectrum[i + k + len/2].imaginary = even.imaginary - twiddledOdd.imaginary;
+        float twiddleRealNext = twiddleCurrent.real*twiddleUnit.real - twiddleCurrent.imaginary*twiddleUnit.imaginary;
+        twiddleCurrent.imaginary = twiddleCurrent.real*twiddleUnit.imaginary + twiddleCurrent.imaginary*twiddleUnit.real;
+        twiddleCurrent.real = twiddleRealNext;
+      }
+    }
+  }
+}
+/* Blackman window -> FFT -> dB smoothing -> history ring, verbatim */
+static void jank_capture_frame(void) {
+  for (int i = 0; i < JANK_FFT_WINDOW; i++) {
+    float x = (2.0f*PI*i)/(JANK_FFT_WINDOW - 1.0f);
+    float blackmanWeight = 0.42f - 0.5f*cosf(x) + 0.08f*cosf(2.0f*x);
+    jank_work[i].real = jank_audio_samples[i]*blackmanWeight;
+    jank_work[i].imaginary = 0.0f;
+  }
+  jank_fft(jank_work, JANK_FFT_WINDOW);
+  memcpy(jank_spectrum, jank_work, sizeof(FFTComplex)*JANK_FFT_WINDOW);
+
+  float smoothedSpectrum[JANK_FFT_BUFFER];
+  for (int bin = 0; bin < JANK_FFT_BUFFER; bin++) {
+    float re = jank_work[bin].real;
+    float im = jank_work[bin].imaginary;
+    float linearMagnitude = sqrtf(re*re + im*im)/JANK_FFT_WINDOW;
+    float smoothedMagnitude = JANK_SMOOTHING*jank_prev_magnitudes[bin] + (1.0f - JANK_SMOOTHING)*linearMagnitude;
+    jank_prev_magnitudes[bin] = smoothedMagnitude;
+    float db = logf(fmaxf(smoothedMagnitude, 1e-40f))*JANK_DB_SCALE;
+    float normalized = (db - JANK_MIN_DB)*JANK_INV_DB_RANGE;
+    smoothedSpectrum[bin] = Clamp(normalized, 0.0f, 1.0f);
+  }
+  memcpy(jank_fft_history[jank_history_pos], smoothedSpectrum, sizeof(smoothedSpectrum));
+  jank_history_pos = (jank_history_pos + 1)%jank_history_len;
+}
+/* write the tapback history row into the 512x1 image */
+static void jank_render_frame(Image *fftImage) {
+  float framesSinceTapback = floorf((float)(jank_tapback/JANK_WINDOW_TIME));
+  framesSinceTapback = Clamp(framesSinceTapback, 0.0f, (float)(jank_history_len - 1));
+  int historyPosition = (jank_history_pos - 1 - (int)framesSinceTapback)%jank_history_len;
+  if (historyPosition < 0) historyPosition += jank_history_len;
+  const float *amplitude = jank_fft_history[historyPosition];
+  for (int bin = 0; bin < JANK_FFT_BUFFER; bin++)
+    ImageDrawPixel(fftImage, bin, 0,
+                   ColorFromNormalized((Vector4){ amplitude[bin], 0.0f, 0.0f, 0.0f }));
+}
+static void jank_update_fft_texture(Texture2D tex, Image *img) {
+  UpdateTexture(tex, img->data);
+}
+static void jank_set_vec2(Shader s, int loc, double a, double b) {
+  float v[2] = { (float)a, (float)b };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/audio/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - spectrum visualizer (jank)")
+
+  (let [fft-image (cpp/GenImageColor 512 1 cpp/WHITE)
+        fft-texture (cpp/LoadTextureFromImage fft-image)
+        buffer-a (cpp/LoadRenderTexture WIDTH HEIGHT)
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/fft.fs"))
+        res-loc (int (cpp/GetShaderLocation shader "iResolution"))
+        chan0-loc (int (cpp/GetShaderLocation shader "iChannel0"))]
+
+    ;; iResolution once; the sampler rebinds every frame
+    (cpp/jank_set_vec2 shader res-loc 800.0 450.0)
+
+    (cpp/InitAudioDevice)
+    (cpp/SetAudioStreamBufferSizeDefault 2048)
+
+    (cpp/jank_fft_init (str RES "country.mp3"))
+
+    (let [stream (cpp/LoadAudioStream 44100 16 1)]
+      (cpp/PlayAudioStream stream)
+
+      (cpp/SetTargetFPS 60)
+
+      (loop []
+        (when (cpp/! (cpp/WindowShouldClose))
+          (cpp/jank_feed_stream stream)
+          (cpp/jank_capture_frame)
+          (cpp/jank_render_frame (cpp/& fft-image))
+          (cpp/jank_update_fft_texture fft-texture (cpp/& fft-image))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginShaderMode shader)
+          (cpp/SetShaderValueTexture shader chan0-loc fft-texture)
+          (cpp/DrawTextureRec (.-texture buffer-a)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float 800.0) (cpp/float -450.0))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              cpp/WHITE)
+          (cpp/EndShaderMode)
+
+          (cpp/EndDrawing)
+          (recur)))
+
+      (cpp/UnloadAudioStream stream))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadRenderTexture buffer-a)
+    (cpp/UnloadTexture fft-texture)
+    (cpp/UnloadImage fft-image))
+
+  (cpp/jank_fft_free)
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

@@ -1,0 +1,158 @@
+(ns raylib-examples.mouse-painting
+  "raylib [textures] example - mouse painting, ported to jank.
+
+  A paint program on a RenderTexture canvas: LEFT paints with the
+  selected color, RIGHT erases (temporarily selecting the background
+  color), the MOUSE WHEEL sizes the brush, the top strip picks one of
+  23 colors, C clears, S or the SAVE button screenshots, Q quits.
+  Based on raylib/examples/textures/textures_mouse_painting.c
+  (jank-native: the palette lives as r/g/b int triples in a jank
+  vector, resolved per draw via GetColor on a packed RGBA int; hover
+  tests are plain arithmetic instead of CheckCollisionPointRec. The
+  C exports the canvas via LoadImageFromTexture + ImageFlipVertical,
+  which take an Image pointer - not reachable from jank - so saving
+  uses TakeScreenshot of the whole window instead.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def COLOR-COUNT 23)
+
+;; The C example's palette, as r/g/b triples (raylib.h named colors).
+(def PALETTE
+  [[245 245 245] [253 249 0] [255 203 0] [255 161 0] [255 109 194]
+   [230 41 55] [190 33 55] [0 228 48] [0 158 47] [0 117 44]
+   [102 191 255] [0 121 241] [0 82 172] [200 122 255] [135 60 190]
+   [112 31 126] [211 176 131] [127 106 79] [76 63 47]
+   [200 200 200] [130 130 130] [80 80 80] [0 0 0]])
+
+(defn packed-rgba [i]
+  (let [[r g b] (nth PALETTE i)]
+    (+ (* r 16777216) (* g 65536) (* b 256) 255)))
+
+(defn hovered-color [mx my]
+  ;; Palette swatch i sits at x = 10 + 32*i, y 10..40, 30x30.
+  (if (and (>= my 10) (<= my 40))
+    (loop [i 0]
+      (if (>= i COLOR-COUNT)
+        -1
+        (let [x (+ 10 (* 32 i))]
+          (if (and (>= mx x) (<= mx (+ x 30)))
+            i
+            (recur (inc i))))))
+    -1))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - mouse painting (jank)")
+  (cpp/SetTargetFPS 120)
+
+  (let [target (cpp/LoadRenderTexture WIDTH HEIGHT)
+        tw (int (+ 0.0 (.-width (.-texture target))))
+        th (int (+ 0.0 (.-height (.-texture target))))]
+
+    ;; Start with a clean canvas.
+    (cpp/BeginTextureMode target)
+    (cpp/ClearBackground (cpp/GetColor (packed-rgba 0)))
+    (cpp/EndTextureMode)
+
+    ;; Thread [selected prev-selected brush-size rb-was-pressed save-show save-counter].
+    (loop [sel 0 prev 0 brush 20.0 rb-was false save-show false save-cnt 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mx (cpp/GetMouseX)
+              my (cpp/GetMouseY)
+              hover (hovered-color mx my)
+
+              sel (if (and (>= hover 0) (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT))
+                    hover sel)
+              prev (if (and (>= hover 0) (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT))
+                     hover prev)
+
+              brush (+ brush (* 5.0 (cpp/GetMouseWheelMove)))
+              brush (if (< brush 2.0) 2.0 (if (> brush 50.0) 50.0 brush))
+
+              ;; RIGHT down: remember the color and erase with the background.
+              rb-down (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_RIGHT)
+              prev (if (and rb-down (not rb-was)) sel prev)
+              sel (if (and rb-down (not rb-was)) 0 sel)
+              sel (if (and (not rb-down) rb-was) prev sel)
+              rb-was rb-down
+
+              btn-hover (and (>= mx 750) (<= mx 790) (>= my 10) (<= my 40))
+              save? (or (and btn-hover (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT))
+                        (cpp/IsKeyPressed cpp/KEY_S))
+              save-show (if save? true save-show)
+              save-cnt (if save? 0 save-cnt)
+              save-cnt (if save-show (+ save-cnt 1) save-cnt)
+              save-show (if (> save-cnt 240) false save-show)
+              save-cnt (if (> save-cnt 240) 0 save-cnt)]
+
+          (when (cpp/IsKeyPressed cpp/KEY_C)
+            (cpp/BeginTextureMode target)
+            (cpp/ClearBackground (cpp/GetColor (packed-rgba 0)))
+            (cpp/EndTextureMode))
+
+          ;; Paint (LEFT) or erase (RIGHT) into the canvas below the panel.
+          (when (and (or (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT) rb-down)
+                     (> my 50))
+            (cpp/BeginTextureMode target)
+            (cpp/DrawCircle mx my (cpp/float brush) (cpp/GetColor (packed-rgba sel)))
+            (cpp/EndTextureMode))
+
+          (when save?
+            (cpp/TakeScreenshot "my_amazing_painting.png"))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; The canvas, y-flipped (RenderTextures are bottom-up in OpenGL).
+          (cpp/DrawTextureRec (.-texture target)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 tw))
+                                             (cpp/float (- 0.0 th)))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              cpp/WHITE)
+
+          ;; Brush preview.
+          (when (> my 50)
+            (if rb-down
+              (cpp/DrawCircleLines mx my (cpp/float brush) cpp/GRAY)
+              (cpp/DrawCircle mx my (cpp/float brush) (cpp/GetColor (packed-rgba sel)))))
+
+          ;; Top panel with the palette.
+          (cpp/DrawRectangle 0 0 WIDTH 50 cpp/RAYWHITE)
+          (cpp/DrawLine 0 50 WIDTH 50 cpp/LIGHTGRAY)
+          (loop [i 0]
+            (when (< i COLOR-COUNT)
+              (cpp/DrawRectangle (+ 10 (* 32 i)) 10 30 30 (cpp/GetColor (packed-rgba i)))
+              (recur (inc i))))
+          (cpp/DrawRectangleLines 10 10 30 30 cpp/LIGHTGRAY)
+
+          (when (>= hover 0)
+            (cpp/DrawRectangle (+ 10 (* 32 hover)) 10 30 30
+                               (cpp/Fade cpp/WHITE (cpp/float 0.6))))
+          (cpp/DrawRectangleLinesEx (cpp/Rectangle (cpp/float (+ 0.0 (- (+ 10 (* 32 sel)) 2)))
+                                                   (cpp/float 8.0)
+                                                   (cpp/float 34.0) (cpp/float 34.0))
+                                    (cpp/float 2.0) cpp/BLACK)
+
+          ;; Save button.
+          (cpp/DrawRectangleLinesEx (cpp/Rectangle (cpp/float 750.0) (cpp/float 10.0)
+                                                   (cpp/float 40.0) (cpp/float 30.0))
+                                    (cpp/float 2.0)
+                                    (if btn-hover cpp/RED cpp/BLACK))
+          (cpp/DrawText "SAVE!" 755 20 10 (if btn-hover cpp/RED cpp/BLACK))
+
+          (when save-show
+            (cpp/DrawRectangle 0 0 WIDTH HEIGHT (cpp/Fade cpp/RAYWHITE (cpp/float 0.8)))
+            (cpp/DrawRectangle 0 150 WIDTH 80 cpp/BLACK)
+            (cpp/DrawText "IMAGE SAVED! (whole-window screenshot)" 150 180 20 cpp/RAYWHITE))
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur sel prev brush rb-was save-show save-cnt)))))
+
+    (cpp/UnloadRenderTexture target))
+
+  (cpp/CloseWindow))

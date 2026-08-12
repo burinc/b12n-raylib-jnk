@@ -1,0 +1,60 @@
+(ns raylib-examples.basic-screen-manager
+  "raylib [core] example - basic screen manager, ported to jank.
+
+  A minimal screen state machine: LOGO (waits 2s) -> TITLE -> GAMEPLAY ->
+  ENDING -> TITLE. Press ENTER to advance, Q quits.
+  Based on raylib/examples/core/core_basic_screen_manager.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+;; screen: 0 LOGO, 1 TITLE, 2 GAMEPLAY, 3 ENDING
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - basic screen manager (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [screen 0 fc 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [enter (cpp/IsKeyPressed cpp/KEY_ENTER)
+            [screen fc]
+            (cond
+              (= screen 0) (let [fc (inc fc)] (if (> fc 120) [1 fc] [0 fc]))  ; LOGO waits ~2s
+              (= screen 1) (if enter [2 fc] [1 fc])
+              (= screen 2) (if enter [3 fc] [2 fc])
+              :else        (if enter [1 fc] [3 fc]))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cond
+          (= screen 0)
+          (do
+            (cpp/DrawText "LOGO SCREEN" 20 20 40 cpp/LIGHTGRAY)
+            (cpp/DrawText "WAIT for 2 SECONDS..." 290 220 20 cpp/GRAY))
+          (= screen 1)
+          (do
+            (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/GREEN)
+            (cpp/DrawText "TITLE SCREEN" 20 20 40 cpp/DARKGREEN)
+            (cpp/DrawText "PRESS ENTER to jump to GAMEPLAY" 120 220 20 cpp/DARKGREEN))
+          (= screen 2)
+          (do
+            (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/PURPLE)
+            (cpp/DrawText "GAMEPLAY SCREEN" 20 20 40 cpp/MAROON)
+            (cpp/DrawText "PRESS ENTER to jump to ENDING" 130 220 20 cpp/MAROON))
+          :else
+          (do
+            (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/BLUE)
+            (cpp/DrawText "ENDING SCREEN" 20 20 40 cpp/DARKBLUE)
+            (cpp/DrawText "PRESS ENTER to return to TITLE" 120 220 20 cpp/DARKBLUE)))
+
+        (cpp/DrawText "Q quits" 20 (- HEIGHT 30) 20 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur screen fc)))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,448 @@
+(ns raylib-examples.decals
+  "raylib [models] example - decals, ported to jank.
+
+  Click to SPLAT raylib-logo decals onto a character model: the mouse
+  ray picks the surface, a projection box is clipped against the mesh
+  triangles and the clipped geometry becomes a new little decal model
+  hugging the surface (up to 256). A translucent green cube previews
+  the placement. HOLD RIGHT MOUSE to move the camera, H hides the
+  model (decals only!), C clears the decals. ESC quits.
+  Based on raylib/examples/models/models_decals.c
+
+  jank-native notes:
+  - The decal generator (MeshBuilder dynamic arrays, 6-plane triangle
+    clipping, UV projection - ~290 lines of pure C geometry) stays a
+    verbatim shim block, as in the C where it is module-local.
+  - The up-to-256 runtime-created decal Models live in a C static
+    array behind add/draw/clear/stat wrappers; jank feeds the add
+    call the boxed hit point + normal and the C side does the
+    MatrixLookAt splat + random spin + mesh build + material bind.
+  - The C's custom GuiButton pair becomes H (hide model) and C
+    (clear decals) keys."
+  (:require [clojure.string :as string])
+  (:include "raylib.h" "raymath.h" "string.h"))
+
+;; ---- The C's decal machinery, verbatim (MeshBuilder + clipping) ----
+(cpp/raw "#define JANK_MAX_DECALS 256
+typedef struct MeshBuilder {
+  int vertexCount;
+  int vertexCapacity;
+  Vector3 *vertices;
+  Vector2 *uvs;
+} MeshBuilder;
+
+static void AddTriangleToMeshBuilder(MeshBuilder *mb, Vector3 vertices[3]) {
+  if (mb->vertexCapacity <= (mb->vertexCount + 3)) {
+    int newVertexCapacity = (1 + (mb->vertexCapacity/256))*256;
+    Vector3 *newVertices = (Vector3 *)MemAlloc(newVertexCapacity*sizeof(Vector3));
+    if (mb->vertexCapacity > 0) {
+      memcpy(newVertices, mb->vertices, mb->vertexCount*sizeof(Vector3));
+      MemFree(mb->vertices);
+    }
+    mb->vertices = newVertices;
+    mb->vertexCapacity = newVertexCapacity;
+  }
+  int index = mb->vertexCount;
+  mb->vertexCount += 3;
+  for (int i = 0; i < 3; i++) mb->vertices[index+i] = vertices[i];
+}
+
+static void FreeMeshBuilder(MeshBuilder *mb) {
+  MemFree(mb->vertices);
+  if (mb->uvs) MemFree(mb->uvs);
+  *mb = (MeshBuilder){ 0 };
+}
+
+static Mesh BuildMesh(MeshBuilder *mb) {
+  Mesh outMesh = { 0 };
+  outMesh.vertexCount = mb->vertexCount;
+  outMesh.triangleCount = mb->vertexCount/3;
+  outMesh.vertices = (float *)MemAlloc(outMesh.vertexCount*3*sizeof(float));
+  if (mb->uvs) outMesh.texcoords = (float *)MemAlloc(outMesh.vertexCount*2*sizeof(float));
+  for (int i = 0; i < mb->vertexCount; i++) {
+    outMesh.vertices[3*i+0] = mb->vertices[i].x;
+    outMesh.vertices[3*i+1] = mb->vertices[i].y;
+    outMesh.vertices[3*i+2] = mb->vertices[i].z;
+    if (mb->uvs) {
+      outMesh.texcoords[2*i+0] = mb->uvs[i].x;
+      outMesh.texcoords[2*i+1] = mb->uvs[i].y;
+    }
+  }
+  UploadMesh(&outMesh, false);
+  return outMesh;
+}
+
+static Vector3 ClipSegment(Vector3 v0, Vector3 v1, Vector3 p, float s) {
+  float d0 = Vector3DotProduct(v0, p) - s;
+  float d1 = Vector3DotProduct(v1, p) - s;
+  float s0 = d0/(d0 - d1);
+  return Vector3Lerp(v0, v1, s0);
+}
+
+static Mesh GenMeshDecal(Model target, Matrix projection, float decalSize, float decalOffset) {
+  static MeshBuilder meshBuilders[2] = { 0 };
+  if (target.meshCount == -1) {
+    FreeMeshBuilder(&meshBuilders[0]);
+    FreeMeshBuilder(&meshBuilders[1]);
+    return (Mesh){ 0 };
+  }
+
+  Matrix invProj = MatrixInvert(projection);
+  meshBuilders[0].vertexCount = 0;
+  meshBuilders[1].vertexCount = 0;
+  int mbIndex = 0;
+
+  for (int meshIndex = 0; meshIndex < target.meshCount; meshIndex++) {
+    Mesh mesh = target.meshes[meshIndex];
+    for (int tri = 0; tri < mesh.triangleCount; tri++) {
+      Vector3 vertices[3] = { 0 };
+      if (mesh.indices == 0) {
+        for (int v = 0; v < 3; v++)
+          vertices[v] = (Vector3){ mesh.vertices[3*3*tri + 3*v + 0],
+                                   mesh.vertices[3*3*tri + 3*v + 1],
+                                   mesh.vertices[3*3*tri + 3*v + 2] };
+      } else {
+        for (int v = 0; v < 3; v++)
+          vertices[v] = (Vector3){ mesh.vertices[ 3*mesh.indices[3*tri+0] + v],
+                                   mesh.vertices[ 3*mesh.indices[3*tri+1] + v],
+                                   mesh.vertices[ 3*mesh.indices[3*tri+2] + v] };
+      }
+
+      int insideCount = 0;
+      for (int i = 0; i < 3; i++) {
+        Vector3 v = Vector3Transform(vertices[i], projection);
+        if ((fabsf(v.x) < decalSize) || (fabsf(v.y) <= decalSize) || (fabsf(v.z) <= decalSize)) insideCount++;
+        vertices[i] = v;
+      }
+      if (insideCount > 0) AddTriangleToMeshBuilder(&meshBuilders[mbIndex], vertices);
+    }
+  }
+
+  Vector3 planes[6] = {
+    {  1,  0,  0 }, { -1,  0,  0 }, {  0,  1,  0 },
+    {  0, -1,  0 }, {  0,  0,  1 }, {  0,  0, -1 }
+  };
+
+  for (int face = 0; face < 6; face++) {
+    mbIndex = 1 - mbIndex;
+    MeshBuilder *inMesh = &meshBuilders[1 - mbIndex];
+    MeshBuilder *outMesh = &meshBuilders[mbIndex];
+    outMesh->vertexCount = 0;
+    float s = 0.5f*decalSize;
+
+    for (int i = 0; i < inMesh->vertexCount; i += 3) {
+      Vector3 nV1, nV2, nV3, nV4;
+      float d1 = Vector3DotProduct(inMesh->vertices[i + 0], planes[face]) - s;
+      float d2 = Vector3DotProduct(inMesh->vertices[i + 1], planes[face]) - s;
+      float d3 = Vector3DotProduct(inMesh->vertices[i + 2], planes[face]) - s;
+      int v1Out = (d1 > 0);
+      int v2Out = (d2 > 0);
+      int v3Out = (d3 > 0);
+      int total = v1Out + v2Out + v3Out;
+
+      switch (total) {
+        case 0: {
+          AddTriangleToMeshBuilder(outMesh, (Vector3[3]){inMesh->vertices[i], inMesh->vertices[i+1], inMesh->vertices[i+2]});
+        } break;
+        case 1: {
+          if (v1Out) {
+            nV1 = inMesh->vertices[i + 1];
+            nV2 = inMesh->vertices[i + 2];
+            nV3 = ClipSegment(inMesh->vertices[i], nV1, planes[face], s);
+            nV4 = ClipSegment(inMesh->vertices[i], nV2, planes[face], s);
+          }
+          if (v2Out) {
+            nV1 = inMesh->vertices[i];
+            nV2 = inMesh->vertices[i + 2];
+            nV3 = ClipSegment(inMesh->vertices[i + 1], nV1, planes[face], s);
+            nV4 = ClipSegment(inMesh->vertices[i + 1], nV2, planes[face], s);
+            AddTriangleToMeshBuilder(outMesh, (Vector3[3]){nV3, nV2, nV1});
+            AddTriangleToMeshBuilder(outMesh, (Vector3[3]){nV2, nV3, nV4});
+            break;
+          }
+          if (v3Out) {
+            nV1 = inMesh->vertices[i];
+            nV2 = inMesh->vertices[i + 1];
+            nV3 = ClipSegment(inMesh->vertices[i + 2], nV1, planes[face], s);
+            nV4 = ClipSegment(inMesh->vertices[i + 2], nV2, planes[face], s);
+          }
+          AddTriangleToMeshBuilder(outMesh, (Vector3[3]){nV1, nV2, nV3});
+          AddTriangleToMeshBuilder(outMesh, (Vector3[3]){nV4, nV3, nV2});
+        } break;
+        case 2: {
+          if (!v1Out) {
+            nV1 = inMesh->vertices[i];
+            nV2 = ClipSegment(nV1, inMesh->vertices[i + 1], planes[face], s);
+            nV3 = ClipSegment(nV1, inMesh->vertices[i + 2], planes[face], s);
+            AddTriangleToMeshBuilder(outMesh, (Vector3[3]){nV1, nV2, nV3});
+          }
+          if (!v2Out) {
+            nV1 = inMesh->vertices[i + 1];
+            nV2 = ClipSegment(nV1, inMesh->vertices[i + 2], planes[face], s);
+            nV3 = ClipSegment(nV1, inMesh->vertices[i], planes[face], s);
+            AddTriangleToMeshBuilder(outMesh, (Vector3[3]){nV1, nV2, nV3});
+          }
+          if (!v3Out) {
+            nV1 = inMesh->vertices[i + 2];
+            nV2 = ClipSegment(nV1, inMesh->vertices[i], planes[face], s);
+            nV3 = ClipSegment(nV1, inMesh->vertices[i + 1], planes[face], s);
+            AddTriangleToMeshBuilder(outMesh, (Vector3[3]){nV1, nV2, nV3});
+          }
+        } break;
+        case 3:
+        default: break;
+      }
+    }
+  }
+
+  MeshBuilder *theMesh = &meshBuilders[mbIndex];
+  if (theMesh->vertexCount > 0) {
+    theMesh->uvs = (Vector2 *)MemAlloc(sizeof(Vector2)*theMesh->vertexCount);
+    for (int i = 0; i < theMesh->vertexCount; i++) {
+      theMesh->uvs[i].x = (theMesh->vertices[i].x/decalSize + 0.5f);
+      theMesh->uvs[i].y = (theMesh->vertices[i].y/decalSize + 0.5f);
+      theMesh->vertices[i].z -= decalOffset;
+      theMesh->vertices[i] = Vector3Transform(theMesh->vertices[i], invProj);
+    }
+    return BuildMesh(theMesh);
+  }
+  return (Mesh){ 0 };
+}
+
+/* ---- jank-facing state + wrappers ---- */
+static Model jank_decals[JANK_MAX_DECALS];
+static int jank_decal_count = 0;
+static Material jank_decal_material;
+
+static void jank_decal_set_material(Material m) { jank_decal_material = m; }
+static int jank_get_decal_count(void) { return jank_decal_count; }
+static int jank_decal_verts(int i) { return jank_decals[i].meshes[0].vertexCount; }
+static int jank_decal_tris(int i) { return jank_decals[i].meshes[0].triangleCount; }
+static int jank_model_verts(Model* m) {
+  int n = 0;
+  for (int i = 0; i < m->meshCount; i++) n += m->meshes[i].vertexCount;
+  return n;
+}
+static int jank_model_tris(Model* m) {
+  int n = 0;
+  for (int i = 0; i < m->meshCount; i++) n += m->meshes[i].triangleCount;
+  return n;
+}
+/* splat a decal at the hit point along the surface normal */
+static int jank_add_decal(Model target, double px, double py, double pz,
+                          double nx, double ny, double nz,
+                          double decalSize, double decalOffset) {
+  if (jank_decal_count >= JANK_MAX_DECALS) return jank_decal_count;
+  Vector3 point = { (float)px, (float)py, (float)pz };
+  Vector3 origin = Vector3Add(point, (Vector3){ (float)nx, (float)ny, (float)nz });
+  Matrix splat = MatrixLookAt(point, origin, (Vector3){ 0.0f, 1.0f, 0.0f });
+  splat = MatrixMultiply(splat, MatrixRotateZ(DEG2RAD*((float)GetRandomValue(-180, 180))));
+  Mesh decalMesh = GenMeshDecal(target, splat, (float)decalSize, (float)decalOffset);
+  if (decalMesh.vertexCount > 0) {
+    int i = jank_decal_count++;
+    jank_decals[i] = LoadModelFromMesh(decalMesh);
+    jank_decals[i].materials[0].maps[0] = jank_decal_material.maps[0];
+  }
+  return jank_decal_count;
+}
+static void jank_draw_decals(void) {
+  for (int i = 0; i < jank_decal_count; i++)
+    DrawModel(jank_decals[i], (Vector3){ 0 }, 1.0f, WHITE);
+}
+static void jank_clear_decals(void) {
+  for (int i = 0; i < jank_decal_count; i++) UnloadModel(jank_decals[i]);
+  jank_decal_count = 0;
+}
+static void jank_free_decal_data(void) {
+  GenMeshDecal((Model){ .meshCount = -1 }, (Matrix){ 0 }, 0.0f, 0.0f);
+}
+
+/* placement preview: transform = inverted splat matrix */
+static void jank_place_cube(Model* cube, double px, double py, double pz,
+                            double nx, double ny, double nz) {
+  Vector3 point = { (float)px, (float)py, (float)pz };
+  Vector3 origin = Vector3Add(point, (Vector3){ (float)nx, (float)ny, (float)nz });
+  Matrix splat = MatrixLookAt(point, origin, (Vector3){ 0, 1, 0 });
+  cube->transform = MatrixInvert(splat);
+}
+/* closest ray-mesh hit over all the model's meshes */
+static RayCollision jank_ray_vs_model(Ray ray, Model* m) {
+  RayCollision collision = { 0 };
+  collision.distance = 3.4e38f;
+  for (int i = 0; i < m->meshCount; i++) {
+    RayCollision hit = GetRayCollisionMesh(ray, m->meshes[i], m->transform);
+    if (hit.hit && (hit.distance < collision.distance)) collision = hit;
+  }
+  return collision;
+}
+static BoundingBox jank_model_bounds(Model* m) {
+  return GetMeshBoundingBox(m->meshes[0]);
+}
+static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}
+static void jank_model_set_map_color(Model* m, int r, int g, int b, int a) {
+  m->materials[0].maps[0].color = (Color){ (unsigned char)r, (unsigned char)g,
+                                           (unsigned char)b, (unsigned char)a };
+}
+static void jank_mat_set_color(Material* m, int r, int g, int b, int a) {
+  m->maps[0].color = (Color){ (unsigned char)r, (unsigned char)g,
+                              (unsigned char)b, (unsigned char)a };
+}
+static void jank_mat_set_texture(Material* m, Texture2D tex) {
+  m->maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - decals (jank)")
+
+  (let [model (cpp/LoadModel (str RES "models/obj/character.obj"))
+        model-texture (cpp/LoadTexture (str RES "models/obj/character_diffuse.png"))
+        _ (cpp/SetTextureFilter model-texture cpp/TEXTURE_FILTER_BILINEAR)
+        _ (cpp/jank_model_set_texture (cpp/& model) model-texture)
+        bounds (cpp/jank_model_bounds (cpp/& model))
+        bmin (.-min bounds)
+        bmax (.-max bounds)
+        ;; frame the character from its bounding box (the C's camera math)
+        cx (/ (+ (+ 0.0 (.-x bmin)) (+ 0.0 (.-x bmax))) 2.0)
+        cy (/ (+ (+ 0.0 (.-y bmin)) (+ 0.0 (.-y bmax))) 2.0)
+        cz (/ (+ (+ 0.0 (.-z bmin)) (+ 0.0 (.-z bmax))) 2.0)
+        ex (- (+ 0.0 (.-x bmax)) (+ 0.0 (.-x bmin)))
+        ey (- (+ 0.0 (.-y bmax)) (+ 0.0 (.-y bmin)))
+        ez (- (+ 0.0 (.-z bmax)) (+ 0.0 (.-z bmin)))
+        model-size (min (min (max ex (- ex)) (max ey (- ey))) (max ez (- ez)))
+        camera (cpp/Camera3D (cpp/Vector3 (cpp/float 0.0)
+                                          (cpp/float (* (+ 0.0 (.-y bmax)) 1.2))
+                                          (cpp/float (* model-size 3.0)))
+                             (cpp/Vector3 (cpp/float cx) (cpp/float cy) (cpp/float cz))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.6) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        decal-size (* model-size 0.25)
+        placement-cube (cpp/LoadModelFromMesh
+                        (cpp/GenMeshCube (cpp/float decal-size) (cpp/float decal-size)
+                                         (cpp/float decal-size)))
+        _ (cpp/jank_model_set_map_color (cpp/& placement-cube) 0 158 47 255) ;; LIME
+        decal-material (cpp/LoadMaterialDefault)]
+
+    ;; the raylib-logo decal texture (shrunk 4x, bilinear)
+    (cpp/jank_mat_set_color (cpp/& decal-material) 253 249 0 255) ;; YELLOW
+    (let [decal-image (cpp/LoadImage (str RES "raylib_logo.png"))]
+      (cpp/ImageResizeNN (cpp/& decal-image)
+                         (int (quot (int (+ 0.0 (.-width decal-image))) 4))
+                         (int (quot (int (+ 0.0 (.-height decal-image))) 4)))
+      (let [decal-texture (cpp/LoadTextureFromImage decal-image)]
+        (cpp/UnloadImage decal-image)
+        (cpp/SetTextureFilter decal-texture cpp/TEXTURE_FILTER_BILINEAR)
+        (cpp/jank_mat_set_texture (cpp/& decal-material) decal-texture)
+        (cpp/jank_mat_set_color (cpp/& decal-material) 245 245 245 255))) ;; RAYWHITE
+    (cpp/jank_decal_set_material decal-material)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [show-model?].
+    (loop [show-model? true]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (when (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_RIGHT)
+          (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_THIRD_PERSON))
+
+        (let [show-model? (if (cpp/IsKeyPressed cpp/KEY_H) (not show-model?) show-model?)
+              _ (when (cpp/IsKeyPressed cpp/KEY_C) (cpp/jank_clear_decals))
+              count-before (int (cpp/jank_get_decal_count))
+              ray (cpp/GetScreenToWorldRay (cpp/GetMousePosition) camera)
+              box-c (cpp/GetRayCollisionBox ray bounds)
+              box-hit? (if (.-hit box-c) true false)
+              ;; the mesh test only runs when the cheap box test passes
+              hit (if (and box-hit? (< count-before 256))
+                    (let [mc (cpp/jank_ray_vs_model ray (cpp/& model))
+                          mp (.-point mc)
+                          mn (.-normal mc)]
+                      (if (.-hit mc)
+                        {:hit? true
+                         :px (+ 0.0 (.-x mp)) :py (+ 0.0 (.-y mp)) :pz (+ 0.0 (.-z mp))
+                         :nx (+ 0.0 (.-x mn)) :ny (+ 0.0 (.-y mn)) :nz (+ 0.0 (.-z mn))}
+                        {:hit? false}))
+                    {:hit? false})]
+
+          ;; click: clip a new decal onto the surface
+          (when (and (:hit? hit)
+                     (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT) true false)
+                     (< count-before 256))
+            (cpp/jank_add_decal model
+                                (:px hit) (:py hit) (:pz hit)
+                                (:nx hit) (:ny hit) (:nz hit)
+                                decal-size 0.01))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (when show-model?
+            (cpp/DrawModel model
+                           (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 1.0) cpp/WHITE))
+          (cpp/jank_draw_decals)
+          (when (:hit? hit)
+            (cpp/jank_place_cube (cpp/& placement-cube)
+                                 (:px hit) (:py hit) (:pz hit)
+                                 (:nx hit) (:ny hit) (:nz hit))
+            (cpp/DrawModel placement-cube
+                           (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 1.0) (cpp/Fade cpp/WHITE (cpp/float 0.5))))
+          (cpp/DrawGrid 10 (cpp/float 10.0))
+          (cpp/EndMode3D)
+
+          ;; the vertex/triangle stats table (first 20 decals + totals)
+          (let [x0 (- WIDTH 300)
+                x1 (+ x0 100)
+                x2 (+ x1 100)
+                decal-count (int (cpp/jank_get_decal_count))
+                mv (int (cpp/jank_model_verts (cpp/& model)))
+                mt (int (cpp/jank_model_tris (cpp/& model)))]
+            (cpp/DrawText "Vertices" x1 10 10 cpp/LIME)
+            (cpp/DrawText "Triangles" x2 10 10 cpp/LIME)
+            (cpp/DrawText "Main model" x0 25 10 cpp/LIME)
+            (cpp/DrawText (str mv) x1 25 10 cpp/LIME)
+            (cpp/DrawText (str mt) x2 25 10 cpp/LIME)
+            (loop [i 0
+                   y 40
+                   tv mv
+                   tt mt]
+              (if (< i decal-count)
+                (let [dv (int (cpp/jank_decal_verts (int i)))
+                      dt (int (cpp/jank_decal_tris (int i)))]
+                  (when (= i 20) (cpp/DrawText "..." x0 y 10 cpp/LIME))
+                  (when (< i 20)
+                    (cpp/DrawText (str "Decal #" (inc i)) x0 y 10 cpp/LIME)
+                    (cpp/DrawText (str dv) x1 y 10 cpp/LIME)
+                    (cpp/DrawText (str dt) x2 y 10 cpp/LIME))
+                  (recur (inc i) (if (<= i 20) (+ y 15) y) (+ tv dv) (+ tt dt)))
+                (do (cpp/DrawText "TOTAL" x0 y 10 cpp/LIME)
+                    (cpp/DrawText (str tv) x1 y 10 cpp/LIME)
+                    (cpp/DrawText (str tt) x2 y 10 cpp/LIME)))))
+
+          (cpp/DrawText (str "LEFT CLICK splat a decal  ·  H "
+                             (if show-model? "hide" "show")
+                             " model  ·  C clear decals")
+                        10 (- HEIGHT 45) 10 cpp/DARKGRAY)
+          (cpp/DrawText "Hold RMB to move camera" 10 430 10 cpp/GRAY)
+          (cpp/DrawText "(c) Character model and texture from kenney.nl"
+                        (- WIDTH 260) (- HEIGHT 20) 10 cpp/GRAY)
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+          (recur show-model?))))
+
+    (cpp/UnloadModel model)
+    (cpp/UnloadTexture model-texture)
+    (cpp/jank_clear_decals)
+    (cpp/UnloadModel placement-cube)
+    (cpp/jank_free_decal_data))
+
+  (cpp/CloseWindow))

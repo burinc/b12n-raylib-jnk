@@ -1,0 +1,75 @@
+(ns raylib-examples.words-alignment
+  "raylib [text] example - words alignment, ported to jank.
+
+  One word (cycling each second) is aligned inside a rectangle: LEFT and
+  RIGHT arrows pick the horizontal alignment, UP and DOWN the vertical.
+  Q quits.
+  Based on raylib/examples/text/text_words_alignment.c
+  (jank-native: TextSplit becomes a literal word vector; the default
+  Font lives in a let outside the frame loop like a RenderTexture, and
+  MeasureTextEx's Vector2 return is read via .-x / .-y field access.
+  Lerp from 0 is plain multiplication.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def FSIZE 40.0)
+(def SPACING 4.0)                       ; fontSize * 0.1
+
+;; The container: x = W/2 - W/4, y = H/2 - H/3, w = W/2, h = H*2/3.
+(def RX 200.0)
+(def RY 75.0)
+(def RW 400.0)
+(def RH 300.0)
+
+(def WORDS
+  ["raylib" "is" "a" "simple" "and" "easy-to-use" "library"
+   "to" "enjoy" "videogames" "programming"])
+
+(def H-NAMES ["Left" "Centre" "Right"])
+(def V-NAMES ["Top" "Middle" "Bottom"])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - words alignment (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [font (cpp/GetFontDefault)]
+    ;; Thread [h-align v-align] (0 1 2).
+    (loop [ha 1 va 1]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [ha (if (and (cpp/IsKeyPressed cpp/KEY_LEFT) (> ha 0)) (- ha 1) ha)
+              ha (if (and (cpp/IsKeyPressed cpp/KEY_RIGHT) (< ha 2)) (+ ha 1) ha)
+              va (if (and (cpp/IsKeyPressed cpp/KEY_UP) (> va 0)) (- va 1) va)
+              va (if (and (cpp/IsKeyPressed cpp/KEY_DOWN) (< va 2)) (+ va 1) va)
+              ;; One word per second.
+              word (nth WORDS (int (mod (int (+ 0.0 (cpp/GetTime))) (count WORDS))))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/DARKBLUE)
+
+          (cpp/DrawText "Use Arrow Keys to change the text alignment (Q quits)" 20 20 20 cpp/LIGHTGRAY)
+          (cpp/DrawText (str "Alignment: Horizontal = " (nth H-NAMES ha)
+                             ", Vertical = " (nth V-NAMES va))
+                        20 40 20 cpp/LIGHTGRAY)
+
+          (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float RX) (cpp/float RY)
+                                               (cpp/float RW) (cpp/float RH))
+                                cpp/BLUE)
+
+          ;; Top-left position from the alignment: lerp(0, box - text, a/2).
+          (let [ts  (cpp/MeasureTextEx font word (cpp/float FSIZE) (cpp/float SPACING))
+                tsx (+ 0.0 (.-x ts))
+                tsy (+ 0.0 (.-y ts))
+                px  (+ RX (* (- RW tsx) (* ha 0.5)))
+                py  (+ RY (* (- RH tsy) (* va 0.5)))]
+            (cpp/DrawTextEx font word
+                            (cpp/Vector2 (cpp/float px) (cpp/float py))
+                            (cpp/float FSIZE) (cpp/float SPACING) cpp/RAYWHITE))
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur ha va))))))
+
+  (cpp/CloseWindow))

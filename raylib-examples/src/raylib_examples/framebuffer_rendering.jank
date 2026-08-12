@@ -1,0 +1,153 @@
+(ns raylib-examples.framebuffer-rendering
+  "raylib [textures] example - framebuffer rendering, ported to jank.
+
+  Two views of one scene: the right half is an orbiting 'subject' camera
+  looking at a gold cube; the left half is a free-look 'observer' camera
+  watching the same world plus a green prism visualizing the subject
+  camera's frustum. A crop of the subject view overlays top-right (WASD
+  + mouse move the observer, R re-targets it). ESC quits.
+  Based on raylib/examples/textures/textures_framebuffer_rendering.c
+
+  jank-native notes:
+  - Two UpdateCamera((cpp/& cam) mode) cameras at once (FREE observer +
+    ORBITAL subject), each an outer-let Camera3D mutated in place.
+  - The C's DrawCameraPrism is example-defined C over raymath matrices
+    (GetCameraMatrix / MatrixPerspective / MatrixInvert) with no jank
+    surface - kept verbatim in a cpp/raw shim taking the camera by
+    pointer (color fixed to GREEN inside; raymath.h is header-only, so
+    including it provides the implementations).
+  - Both half-screen RenderTextures are create-once outer-let locals;
+    the y-flipped source/dest/crop rects build inline at each
+    DrawTexturePro."
+  (:include "raylib.h" "raymath.h"))
+
+;; The C example's DrawCameraPrism, verbatim (example-defined C, not
+;; raylib API): unproject the NDC far plane at the target distance and
+;; draw the frustum edges. Plus the R-key re-target field write.
+(cpp/raw "static void jank_draw_camera_prism(Camera3D* cam, double aspect) {
+  Camera3D camera = *cam;
+  Color color = GREEN;
+  float length = Vector3Distance(camera.position, camera.target);
+  Vector3 planeNDC[4] = {
+    { -1.0f, -1.0f, 1.0f }, { 1.0f, -1.0f, 1.0f },
+    { 1.0f, 1.0f, 1.0f }, { -1.0f, 1.0f, 1.0f }
+  };
+  Matrix view = GetCameraMatrix(camera);
+  Matrix proj = MatrixPerspective(camera.fovy*DEG2RAD, (float)aspect, 0.05f, length);
+  Matrix viewProj = MatrixMultiply(view, proj);
+  Matrix inv = MatrixInvert(viewProj);
+  Vector3 corners[4];
+  for (int i = 0; i < 4; i++) {
+    float x = planeNDC[i].x, y = planeNDC[i].y, z = planeNDC[i].z;
+    float vx = inv.m0*x + inv.m4*y + inv.m8*z + inv.m12;
+    float vy = inv.m1*x + inv.m5*y + inv.m9*z + inv.m13;
+    float vz = inv.m2*x + inv.m6*y + inv.m10*z + inv.m14;
+    float vw = inv.m3*x + inv.m7*y + inv.m11*z + inv.m15;
+    corners[i] = (Vector3){ vx/vw, vy/vw, vz/vw };
+  }
+  DrawLine3D(corners[0], corners[1], color);
+  DrawLine3D(corners[1], corners[2], color);
+  DrawLine3D(corners[2], corners[3], color);
+  DrawLine3D(corners[3], corners[0], color);
+  for (int i = 0; i < 4; i++) DrawLine3D(camera.position, corners[i], color);
+}
+static void jank_cam_retarget(Camera3D* c) { c->target = (Vector3){ 0.0f, 0.0f, 0.0f }; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SPLIT 400)
+(def CAPTURE 128.0)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - framebuffer rendering (jank)")
+
+  (let [subject (cpp/Camera3D (cpp/Vector3 (cpp/float 5.0) (cpp/float 5.0) (cpp/float 5.0))
+                              (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                              (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                              (cpp/float 45.0) cpp/CAMERA_PERSPECTIVE)
+        observer (cpp/Camera3D (cpp/Vector3 (cpp/float 10.0) (cpp/float 10.0) (cpp/float 10.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                               (cpp/float 45.0) cpp/CAMERA_PERSPECTIVE)
+        observer-rt (cpp/LoadRenderTexture SPLIT HEIGHT)
+        subject-rt (cpp/LoadRenderTexture SPLIT HEIGHT)
+        aspect (/ (+ 0.0 SPLIT) HEIGHT)]
+    (cpp/SetTargetFPS 60)
+    (cpp/DisableCursor)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& observer) cpp/CAMERA_FREE)
+        (cpp/UpdateCamera (cpp/& subject) cpp/CAMERA_ORBITAL)
+
+        (when (cpp/IsKeyPressed cpp/KEY_R)
+          (cpp/jank_cam_retarget (cpp/& observer)))
+
+        ;; left half: the observer watching the world + the subject frustum
+        (cpp/BeginTextureMode observer-rt)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/BeginMode3D observer)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                      (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/GOLD)
+        (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/PINK)
+        (cpp/jank_draw_camera_prism (cpp/& subject) aspect)
+        (cpp/EndMode3D)
+        (cpp/DrawText "Observer View" 10 (- HEIGHT 30) 20 cpp/BLACK)
+        (cpp/DrawText "WASD + Mouse to Move" 10 10 20 cpp/DARKGRAY)
+        (cpp/DrawText "Scroll to Zoom" 10 30 20 cpp/DARKGRAY)
+        (cpp/DrawText "R to Reset Observer Target" 10 50 20 cpp/DARKGRAY)
+        (cpp/EndTextureMode)
+
+        ;; right half: what the subject camera sees
+        (cpp/BeginTextureMode subject-rt)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/BeginMode3D subject)
+        (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                      (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/GOLD)
+        (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/PINK)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndMode3D)
+        (cpp/DrawRectangleLines 136 161 (int CAPTURE) (int CAPTURE) cpp/GREEN)
+        (cpp/DrawText "Subject View" 10 (- HEIGHT 30) 20 cpp/BLACK)
+        (cpp/EndTextureMode)
+
+        ;; compose: observer left, subject right, crop overlay on top
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/BLACK)
+        (cpp/DrawTexturePro (.-texture observer-rt)
+                            (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                           (cpp/float 400.0) (cpp/float -450.0))
+                            (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                           (cpp/float 400.0) (cpp/float 450.0))
+                            (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                            (cpp/float 0.0) cpp/WHITE)
+        (cpp/DrawTexturePro (.-texture subject-rt)
+                            (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                           (cpp/float 400.0) (cpp/float -450.0))
+                            (cpp/Rectangle (cpp/float 400.0) (cpp/float 0.0)
+                                           (cpp/float 400.0) (cpp/float 450.0))
+                            (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                            (cpp/float 0.0) cpp/WHITE)
+        (cpp/DrawTexturePro (.-texture subject-rt)
+                            (cpp/Rectangle (cpp/float 136.0) (cpp/float 161.0)
+                                           (cpp/float CAPTURE) (cpp/float (- 0.0 CAPTURE)))
+                            (cpp/Rectangle (cpp/float 420.0) (cpp/float 20.0)
+                                           (cpp/float CAPTURE) (cpp/float CAPTURE))
+                            (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                            (cpp/float 0.0) cpp/WHITE)
+        (cpp/DrawRectangleLinesEx (cpp/Rectangle (cpp/float 420.0) (cpp/float 20.0)
+                                                 (cpp/float CAPTURE) (cpp/float CAPTURE))
+                                  (cpp/float 2.0) cpp/BLACK)
+        (cpp/DrawLine SPLIT 0 SPLIT HEIGHT cpp/BLACK)
+        (cpp/EndDrawing)
+
+        (recur)))
+
+    (cpp/UnloadRenderTexture observer-rt)
+    (cpp/UnloadRenderTexture subject-rt))
+
+  (cpp/CloseWindow))

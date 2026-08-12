@@ -1,0 +1,74 @@
+(ns raylib-examples.collision-area
+  "raylib [shapes] example - collision area, ported to jank.
+
+  A gold box bounces horizontally; move the blue box with the mouse.
+  When they overlap the header turns red and the intersection is drawn.
+  SPACE pauses the gold box, Q quits.
+  Based on raylib/examples/shapes/shapes_collision_area.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def HEADER 40)
+(def BOX-A-W 200)
+(def BOX-A-H 100)
+(def BOX-A-SPEED 4)
+(def BOX-B-W 60)
+(def BOX-B-H 60)
+(def AY (int (- (quot HEIGHT 2) (quot BOX-A-H 2))))   ; gold box y (fixed)
+(def HALF-B (int (quot BOX-B-W 2)))
+(def HALF-W (int (quot WIDTH 2)))
+(def HALF-H (int (quot HEIGHT 2)))
+
+(defn clamp [v lo hi] (max lo (min hi v)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - collision area (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [ax      10
+         speed   BOX-A-SPEED
+         paused? false]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [paused? (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not paused?) paused?)
+            ;; Advance + bounce the gold box unless paused.
+            nax   (if paused? ax (+ ax speed))
+            hit-r (>= (+ nax BOX-A-W) WIDTH)
+            hit-l (<= nax 0)
+            ax    (cond hit-r (- WIDTH BOX-A-W) hit-l 0 :else nax)
+            speed (if (or hit-r hit-l) (- speed) speed)
+            ;; Blue box follows the mouse (centered, clamped).
+            bx    (clamp (- (cpp/GetMouseX) HALF-B) 0 (- WIDTH BOX-B-W))
+            by    (clamp (- (cpp/GetMouseY) HALF-B) HEADER (- HEIGHT BOX-B-H))
+            ;; AABB overlap test (strict, matching raylib's CheckCollisionRecs).
+            hit?  (and (< ax (+ bx BOX-B-W)) (> (+ ax BOX-A-W) bx)
+                       (< AY (+ by BOX-B-H)) (> (+ AY BOX-A-H) by))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawRectangle 0 0 WIDTH HEADER (if hit? cpp/RED cpp/BLACK))
+        (cpp/DrawRectangle ax AY BOX-A-W BOX-A-H cpp/GOLD)
+        (cpp/DrawRectangle bx by BOX-B-W BOX-B-H cpp/BLUE)
+
+        (when hit?
+          (let [ix (max ax bx)
+                iy (max AY by)
+                iw (- (min (+ ax BOX-A-W) (+ bx BOX-B-W)) ix)
+                ih (- (min (+ AY BOX-A-H) (+ by BOX-B-H)) iy)]
+            (cpp/DrawRectangle ix iy iw ih cpp/LIME)
+            (cpp/DrawText "COLLISION!" (- HALF-W 60) 10 20 cpp/BLACK)
+            (cpp/DrawText (str "Collision Area: " (* iw ih))
+                          (- HALF-W 80) (+ HEADER 10) 20 cpp/BLACK)))
+
+        (cpp/DrawText "SPACE pause/resume - Q quits" 20 (- HEIGHT 35) 20 cpp/LIGHTGRAY)
+        (when paused?
+          (cpp/DrawText "PAUSED" (- HALF-W 40) HALF-H 30 cpp/GRAY))
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur ax speed paused?)))))
+
+  (cpp/CloseWindow))

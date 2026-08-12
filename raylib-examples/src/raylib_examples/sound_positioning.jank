@@ -1,0 +1,98 @@
+(ns raylib-examples.sound-positioning
+  "raylib [audio] example - sound positioning, ported to jank.
+
+  Spatial audio: a coin sound loops from a red sphere circling the
+  listener; volume attenuates with distance (and behind-the-listener
+  direction) while stereo pan tracks the horizontal angle. The first
+  3D-mode port (BeginMode3D + a Camera3D). Q quits.
+  Based on raylib/examples/audio/audio_sound_positioning.c
+  (jank-native: the camera is FIXED - the C's free-look UpdateCamera
+  takes a &camera pointer jank cannot form. The raymath Vector3
+  helpers return native structs, so the attenuation/pan math is
+  plain scalar jank arithmetic instead. The orbit angle threads the
+  loop as an accumulated frame-time sum so the chain stays boxed.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def COIN "../jank-raylib-sys/raylib/examples/audio/resources/coin.wav")
+(def ORBIT 5.0)
+;; Listener (camera) at (0,5,5) looking at the origin.
+(def LX 0.0)
+(def LY 5.0)
+(def LZ 5.0)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - sound positioning (jank)")
+  (cpp/InitAudioDevice)
+  (cpp/SetTargetFPS 60)
+
+  (let [sound (cpp/LoadSound COIN)
+        camera (cpp/Camera3D (cpp/Vector3 (cpp/float LX) (cpp/float LY) (cpp/float LZ))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 60.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        ;; Forward = normalize(target - position); right = normalize(up x forward).
+        flen (cpp/sqrt (+ (* LX LX) (+ (* LY LY) (* LZ LZ))))
+        fx (/ (- 0.0 LX) flen)
+        fy (/ (- 0.0 LY) flen)
+        fz (/ (- 0.0 LZ) flen)
+        ;; up = (0,1,0): up x forward = (fz, 0, -fx), then normalized.
+        rlen (cpp/sqrt (+ (* fz fz) (* fx fx)))
+        rx (/ fz rlen)
+        rz (/ (- 0.0 fx) rlen)]
+
+    ;; Thread the orbit angle (accumulated frame time).
+    (loop [t 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [t (+ t (+ 0.0 (cpp/GetFrameTime)))
+              sx (* ORBIT (cpp/cos t))
+              sz (* ORBIT (cpp/sin t))
+
+              ;; Distance attenuation, clamped to [0,1].
+              dx (- sx LX)
+              dy (- 0.0 LY)
+              dz (- sz LZ)
+              ;; nth re-boxes sqrt's native return so the att/pan chains
+              ;; stay jank objects (the cpp/float all-native-chain trap)
+              dist (nth [(cpp/sqrt (+ (* dx dx) (+ (* dy dy) (* dz dz))))] 0)
+              att (/ 1.0 (+ 1.0 dist))
+              ;; Quieter behind the listener (dot of forward and direction).
+              ndx (/ dx dist)
+              ndy (/ dy dist)
+              ndz (/ dz dist)
+              dot (+ (* fx ndx) (+ (* fy ndy) (* fz ndz)))
+              att (if (< dot 0.0) (* att (+ 1.0 (* dot 0.5))) att)
+              att (if (< att 0.0) 0.0 (if (> att 1.0) 1.0 att))
+              ;; Stereo pan from the right-vector dot.
+              pan (+ 0.5 (* 0.5 (+ (* rx ndx) (* rz ndz))))]
+
+          (cpp/SetSoundVolume sound (cpp/float att))
+          (cpp/SetSoundPan sound (cpp/float pan))
+          (when (cpp/! (cpp/IsSoundPlaying sound))
+            (cpp/PlaySound sound))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawGrid 10 (cpp/float 2.0))
+          (cpp/DrawSphere (cpp/Vector3 (cpp/float sx) (cpp/float 0.0) (cpp/float sz))
+                          (cpp/float 0.5)
+                          cpp/RED)
+          (cpp/EndMode3D)
+
+          (cpp/DrawText "The coin sound pans and fades as the sphere orbits (Q quits)"
+                        10 10 20 cpp/GRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur t)))))
+
+    (cpp/UnloadSound sound))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

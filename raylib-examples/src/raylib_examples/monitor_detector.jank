@@ -1,0 +1,118 @@
+(ns raylib-examples.monitor-detector
+  "raylib [core] example - monitor detector, ported to jank.
+
+  Draws a scaled map of every attached monitor with its name,
+  resolution, refresh rate, physical size and position; the current
+  monitor is outlined in red and a translucent green rectangle shows the
+  window's place on it. ENTER moves the window to the next monitor (when
+  more than one is attached). ESC quits.
+  Based on raylib/examples/core/core_monitor_detector.c
+
+  jank-native notes:
+  - GetMonitorName returns a native `const char *`; jank's `str` folds it
+    straight into a jank string - `(str (cpp/GetMonitorName i))` (proven
+    here, see docs/guide/jank-interop-lessons.md).
+  - The C original caches monitors in a native `MonitorInfo[]` struct
+    array. jank can't hold native values in a collection, so each
+    monitor's Vector2 position + int fields are BOXED into a jank map the
+    instant they're read (`(int (+ 0.0 (.-x pos)))`); the layout math and
+    draw helper then run over plain jank data (sidesteps rule 2).
+  - GOTCHA that cost real debugging here: do NOT wrap an already-boxed
+    jank int in `(int x)` INSIDE a `(str ...)` call. The redundant cast
+    inside the string builder made jank emit C++ that member-accesses an
+    `i64` and the whole file failed to compile with `member reference
+    base type 'i64'`. Passing the boxed value directly - `(str ... x)`
+    not `(str ... (int x))` - compiles. The plain `.-x` reads and the
+    const-char* fold were both fine; the cast-inside-str was the trigger.
+  - `currentMonitorIndex` cycles on ENTER, so it lives in loop/recur
+    state (a plain jank int)."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn- draw-monitor
+  "Draw one monitor's rectangle + info. Takes a single map (>3 fields, so
+  keyword args per the project convention): the boxed monitor fields plus
+  the per-frame :i, :current?, :scale and :offset-x context."
+  [{:keys [x y name w h pw ph rr i current? scale offset-x]}]
+  (let [rx  (+ (* (+ x offset-x) scale) 140.0)
+        ry  (+ (* y scale) 80.0)
+        rw  (* w scale)
+        rh  (* h scale)
+        rec (cpp/Rectangle (cpp/float rx) (cpp/float ry) (cpp/float rw) (cpp/float rh))
+        tx  (+ (int rx) 10)]
+    (cpp/DrawText (str "[" i "] " name)
+                  tx (+ (int ry) (int (* 100.0 scale))) (int (* 120.0 scale)) cpp/BLUE)
+    (cpp/DrawText (str "Resolution: [" w "px x " h "px]\n"
+                       "RefreshRate: [" rr "hz]\n"
+                       "Physical Size: [" pw "mm x " ph "mm]\n"
+                       "Position: " x " x " y)
+                  tx (+ (int ry) (int (* 200.0 scale))) (int (* 120.0 scale)) cpp/DARKGRAY)
+    (cpp/DrawRectangleLinesEx rec (cpp/float 5.0) (if current? cpp/RED cpp/GRAY))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - monitor detector (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [cmi (int (cpp/GetCurrentMonitor))]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mcount (int (cpp/GetMonitorCount))
+            ;; Read every monitor's fields, boxing each into a jank map.
+            mons (loop [k 0 acc []]
+                   (if (< k mcount)
+                     (let [ci  (cpp/int k)
+                           pos (cpp/GetMonitorPosition ci)
+                           px  (int (+ 0.0 (.-x pos)))
+                           py  (int (+ 0.0 (.-y pos)))]
+                       (recur (+ k 1)
+                              (conj acc {:x    px
+                                         :y    py
+                                         :name (str (cpp/GetMonitorName ci))
+                                         :w    (int (cpp/GetMonitorWidth ci))
+                                         :h    (int (cpp/GetMonitorHeight ci))
+                                         :pw   (int (cpp/GetMonitorPhysicalWidth ci))
+                                         :ph   (int (cpp/GetMonitorPhysicalHeight ci))
+                                         :rr   (int (cpp/GetMonitorRefreshRate ci))})))
+                     acc))
+            ;; monitorOffsetX: if any monitor sits at negative x, shift right by the most-negative
+            offset-x (reduce (fn [acc m] (if (< (:x m) acc) (- 0.0 (:x m)) acc)) 0.0 mons)
+            max-w (reduce (fn [acc m] (max acc (+ (:x m) (:w m)))) 1.0 mons)
+            max-h (reduce (fn [acc m] (max acc (+ (:y m) (:h m)))) 1.0 mons)
+            ;; cycle to next monitor on ENTER (only when >1 attached)
+            enter? (and (cpp/IsKeyPressed cpp/KEY_ENTER) (> mcount 1))
+            cmi (if enter?
+                  (let [nxt (mod (+ cmi 1) mcount)]
+                    (cpp/SetWindowMonitor nxt)
+                    nxt)
+                  (int (cpp/GetCurrentMonitor)))
+            scale (* 0.6 (if (> max-h (+ max-w offset-x))
+                           (/ HEIGHT max-h)
+                           (/ WIDTH (+ max-w offset-x))))
+            ;; window position (native read; re-boxed via nth per rule 4)
+            wp  (cpp/GetWindowPosition)
+            wpx (nth [(+ 0.0 (.-x wp))] 0)
+            wpy (nth [(+ 0.0 (.-y wp))] 0)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/DrawText "Press [Enter] to move window to next monitor available" 20 20 20 cpp/DARKGRAY)
+        (cpp/DrawRectangleLines 20 60 (- WIDTH 40) (- HEIGHT 100) cpp/DARKGRAY)
+
+        (dotimes [i mcount]
+          (draw-monitor (assoc (nth mons i)
+                               :i i :current? (= i cmi)
+                               :scale scale :offset-x offset-x)))
+
+        ;; translucent green box: the window's place on its current monitor
+        (let [wx (+ (* (+ wpx offset-x) scale) 140.0)
+              wy (+ (* wpy scale) 80.0)]
+          (cpp/DrawRectangleV (cpp/Vector2 (cpp/float wx) (cpp/float wy))
+                              (cpp/Vector2 (cpp/float (* WIDTH scale)) (cpp/float (* HEIGHT scale)))
+                              (cpp/Fade cpp/GREEN (cpp/float 0.5))))
+
+        (cpp/EndDrawing)
+        (recur cmi))))
+
+  (cpp/CloseWindow))

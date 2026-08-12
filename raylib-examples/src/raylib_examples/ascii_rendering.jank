@@ -1,0 +1,89 @@
+(ns raylib-examples.ascii-rendering
+  "raylib [shaders] example - ASCII rendering, ported to jank.
+
+  A post-process fragment shader re-renders the scene as ASCII glyphs.
+  Two sprites (one bouncing) are drawn into a RenderTexture, then the
+  whole texture is drawn back through the ascii shader. LEFT/RIGHT
+  change the glyph cell size (9..15); ESC quits.
+  Based on raylib/examples/shaders/shaders_ascii_rendering.c
+
+  jank-native notes:
+  - Same postprocess-over-RenderTexture pipeline as custom-uniform: draw
+    the 2D scene into `target`, then draw target.texture once through
+    BeginShaderMode, y-flipped via a negative-height source Rectangle.
+  - Uniforms: resolution VEC2 (set once) + fontSize FLOAT (per frame),
+    both via the scalar C setters. All animation state (the bounce x, its
+    speed, the font size) threads through recur as plain jank doubles -
+    no native value crosses the loop."
+  (:include "raylib.h"))
+
+;; VEC2 + FLOAT uniform setters (build the arrays in C from scalars).
+(cpp/raw "static void jank_set_vec2(Shader s, int loc, double a, double b) {
+  float v[2] = { (float)a, (float)b };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}
+static void jank_set_float(Shader s, int loc, double a) {
+  float v = (float)a;
+  SetShaderValue(s, loc, &v, SHADER_UNIFORM_FLOAT);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - ascii rendering (jank)")
+
+  (let [fudesumi (cpp/LoadTexture (str RES "fudesumi.png"))
+        raysan (cpp/LoadTexture (str RES "raysan.png"))
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/ascii.fs"))
+        resolution-loc (int (cpp/GetShaderLocation shader "resolution"))
+        fontsize-loc (int (cpp/GetShaderLocation shader "fontSize"))
+        target (cpp/LoadRenderTexture WIDTH HEIGHT)]
+    (cpp/jank_set_vec2 shader resolution-loc (+ 0.0 WIDTH) (+ 0.0 HEIGHT))
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [bounce-x bounce-speed font-size]; the raysan sprite bounces
+    ;; between x 40 and 200, the ascii cell size ranges 9..15.
+    (loop [cx 40.0 speed 1.0 font-size 9.0]
+      (if (cpp/! (cpp/WindowShouldClose))
+        (let [cx (+ cx speed)
+              speed (if (or (> cx 200.0) (< cx 40.0)) (* speed -1.0) speed)
+              font-size (cond (and (cpp/IsKeyPressed cpp/KEY_LEFT) (> font-size 9.0)) (- font-size 1.0)
+                              (and (cpp/IsKeyPressed cpp/KEY_RIGHT) (< font-size 15.0)) (+ font-size 1.0)
+                              :else font-size)]
+          (cpp/jank_set_float shader fontsize-loc font-size)
+
+          ;; Draw the 2D scene into the render texture.
+          (cpp/BeginTextureMode target)
+          (cpp/ClearBackground cpp/WHITE)
+          (cpp/DrawTexture fudesumi 500 -30 cpp/WHITE)
+          (cpp/DrawTextureV raysan (cpp/Vector2 (cpp/float cx) (cpp/float 225.0)) cpp/WHITE)
+          (cpp/EndTextureMode)
+
+          ;; Draw the whole render texture back through the ascii shader.
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+          (cpp/BeginShaderMode shader)
+          (cpp/DrawTextureRec (.-texture target)
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float 800.0) (cpp/float -450.0))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              cpp/WHITE)
+          (cpp/EndShaderMode)
+
+          (cpp/DrawRectangle 0 0 WIDTH 40 cpp/BLACK)
+          (cpp/DrawText (str "Ascii effect - FontSize:" (int font-size) " - [Left] -1 [Right] +1")
+                        120 10 20 cpp/LIGHTGRAY)
+          (cpp/DrawFPS 10 10)
+          (cpp/EndDrawing)
+
+          (recur cx speed font-size))
+        (do
+          (cpp/UnloadRenderTexture target)
+          (cpp/UnloadShader shader)
+          (cpp/UnloadTexture fudesumi)
+          (cpp/UnloadTexture raysan)))))
+
+  (cpp/CloseWindow))

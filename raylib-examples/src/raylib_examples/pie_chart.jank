@@ -1,0 +1,156 @@
+(ns raylib-examples.pie-chart
+  "raylib [shapes] example - pie chart, ported to jank.
+
+  An interactive pie chart: hovering a slice pops it out, the panel
+  lists every slice. Z/X change the slice count, N/M select a slice,
+  hold LEFT/RIGHT to change the selected slice's value, V toggles
+  value labels, P percentage labels, D the donut hole, A/S resize the
+  hole. Q quits.
+  Based on raylib/examples/shapes/shapes_pie_chart.c
+  (jank-native: the raygui spinner/checkboxes/per-slice editors become
+  keys with a text panel; label editing is dropped since labels never
+  appear on the chart itself; the donut hole draws once after the
+  slices instead of once per slice.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def PANEL-X 525.0)                  ; WIDTH - margin 5 - panel 270
+(def CX 262.5)                       ; canvas center
+(def CY 225.0)
+(def RADIUS 205.0)
+(def MAX-SLICES 10)
+(def DEG2RAD 0.017453292519943295)
+(def RAD2DEG 57.29577951308232)
+
+(defn fmt1
+  "A non-negative real formatted with one decimal."
+  [x]
+  (let [c (int (+ (* x 10.0) 0.5))]
+    (str (int (quot c 10)) "." (int (mod c 10)))))
+
+(defn total-of
+  "Sum of the first n slice values."
+  [vals n]
+  (loop [i 0 t 0.0]
+    (if (< i n) (recur (inc i) (+ t (nth vals i))) t)))
+
+(defn hovered-slice
+  "Index of the slice under the mouse, or -1."
+  [vals n total mx my]
+  (let [dx (- mx CX) dy (- my CY)
+        dist (+ 0.0 (cpp/sqrt (+ (* dx dx) (* dy dy))))]
+    (if (and (< mx PANEL-X) (<= dist RADIUS) (> total 0.0))
+      (let [a (let [a (* (+ 0.0 (cpp/atan2 dy dx)) RAD2DEG)]
+                (if (< a 0.0) (+ a 360.0) a))]
+        (loop [i 0 cur 0.0]
+          (if (< i n)
+            (let [sw (* (/ (nth vals i) total) 360.0)]
+              (if (and (>= a cur) (< a (+ cur sw)))
+                i
+                (recur (inc i) (+ cur sw))))
+            -1)))
+      -1)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - pie chart (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [font (cpp/GetFontDefault)]
+    ;; Thread [values slice-count selected show-values? show-pcts?
+    ;;         donut? inner-radius].
+    (loop [vals [300.0 100.0 450.0 350.0 600.0 380.0 750.0 0.0 0.0 0.0]
+           n 7 sel 0 showv? true showp? false donut? false inner 25.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [n (if (and (cpp/IsKeyPressed cpp/KEY_Z) (> n 1)) (- n 1) n)
+              n (if (and (cpp/IsKeyPressed cpp/KEY_X) (< n MAX-SLICES)) (+ n 1) n)
+              sel (if (>= sel n) (- n 1) sel)
+              sel (if (and (cpp/IsKeyPressed cpp/KEY_N) (> sel 0)) (- sel 1) sel)
+              sel (if (and (cpp/IsKeyPressed cpp/KEY_M) (< sel (- n 1))) (+ sel 1) sel)
+              v (nth vals sel)
+              v (if (cpp/IsKeyDown cpp/KEY_LEFT) (- v 10.0) v)
+              v (if (cpp/IsKeyDown cpp/KEY_RIGHT) (+ v 10.0) v)
+              v (if (< v 0.0) 0.0 (if (> v 1000.0) 1000.0 v))
+              vals (assoc vals sel v)
+              showv? (if (cpp/IsKeyPressed cpp/KEY_V) (not showv?) showv?)
+              showp? (if (cpp/IsKeyPressed cpp/KEY_P) (not showp?) showp?)
+              donut? (if (cpp/IsKeyPressed cpp/KEY_D) (not donut?) donut?)
+              inner (let [r (if (cpp/IsKeyDown cpp/KEY_A) (- inner 2.0) inner)
+                          r (if (cpp/IsKeyDown cpp/KEY_S) (+ r 2.0) r)]
+                      (if (< r 5.0) 5.0 (if (> r 195.0) 195.0 r)))
+
+              total (total-of vals n)
+              mx (+ 0.0 (cpp/GetMouseX))
+              my (+ 0.0 (cpp/GetMouseY))
+              hov (hovered-slice vals n total mx my)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; The slices (hovered one pops out by 20px), then labels.
+          (loop [i 0 start 0.0]
+            (when (< i n)
+              (let [sw (if (> total 0.0) (* (/ (nth vals i) total) 360.0) 0.0)
+                    r (if (= i hov) (+ RADIUS 20.0) RADIUS)]
+                (cpp/DrawCircleSector (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                                      (cpp/float r)
+                                      (cpp/float start) (cpp/float (+ start sw)) 120
+                                      (cpp/ColorFromHSV (cpp/float (* (/ (+ 0.0 i) n) 360.0))
+                                                        (cpp/float 0.75) (cpp/float 0.9)))
+                (when (and (> (nth vals i) 0.0) (or showv? showp?))
+                  (let [sv (nth vals i)
+                        pct (int (+ (* (/ sv total) 100.0) 0.5))
+                        txt (if (and showv? showp?)
+                              (str (fmt1 sv) " (" pct "%)")
+                              (if showv? (fmt1 sv) (str pct "%")))
+                        mid (* (+ start (/ sw 2.0)) DEG2RAD)
+                        ts (cpp/MeasureTextEx font txt (cpp/float 20.0) (cpp/float 1.0))
+                        lx (- (+ CX (* (+ 0.0 (cpp/cos mid)) (* RADIUS 0.7)))
+                              (/ (+ 0.0 (.-x ts)) 2.0))
+                        ly (- (+ CY (* (+ 0.0 (cpp/sin mid)) (* RADIUS 0.7)))
+                              (/ (+ 0.0 (.-y ts)) 2.0))]
+                    (cpp/DrawText txt (int lx) (int ly) 20 cpp/WHITE)))
+                (recur (inc i) (+ start sw)))))
+
+          ;; Donut hole (the C draws this per slice; once is identical).
+          (when donut?
+            (cpp/DrawCircleV (cpp/Vector2 (cpp/float CX) (cpp/float CY))
+                             (cpp/float inner) cpp/RAYWHITE))
+
+          ;; Control panel.
+          (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float PANEL-X) (cpp/float 5.0)
+                                               (cpp/float 270.0) (cpp/float 440.0))
+                                (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.5)))
+          (cpp/DrawRectangleLines 525 5 270 440 cpp/GRAY)
+
+          (cpp/DrawText (str "Slices: " n "  (Z/X)") 545 20 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "[V] Show Values: " (if showv? "ON" "OFF")) 545 40 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "[P] Show Percentages: " (if showp? "ON" "OFF")) 545 60 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "[D] Make Donut: " (if donut? "ON" "OFF")) 545 80 10 cpp/DARKGRAY)
+          (cpp/DrawText (str "Inner Radius: " (int inner) "  (A/S)") 545 100 10 cpp/DARKGRAY)
+          (cpp/DrawText "N/M select slice, LEFT/RIGHT its value" 545 120 10 cpp/DARKGRAY)
+          (cpp/DrawText "[Q] quit" 545 140 10 cpp/DARKGRAY)
+          (cpp/DrawLine 535 160 785 160 cpp/GRAY)
+
+          ;; Slice rows: swatch, name, value; the selected row is framed.
+          (loop [i 0]
+            (when (< i n)
+              (let [ry (+ 175 (* i 26))]
+                (cpp/DrawRectangle 545 ry 20 20
+                                   (cpp/ColorFromHSV (cpp/float (* (/ (+ 0.0 i) n) 360.0))
+                                                     (cpp/float 0.75) (cpp/float 0.9)))
+                (cpp/DrawText (str "Slice " (+ i 1)) 575 (+ ry 5) 10 cpp/DARKGRAY)
+                (cpp/DrawText (fmt1 (nth vals i)) 660 (+ ry 5) 10 cpp/DARKGRAY)
+                (when (= i sel)
+                  (cpp/DrawRectangleLines 540 (- ry 3) 240 26 cpp/MAROON)))
+              (recur (inc i))))
+
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur vals n sel showv? showp? donut? inner))))))
+
+  (cpp/CloseWindow))

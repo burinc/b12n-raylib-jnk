@@ -1,0 +1,34 @@
+(ns raylib-examples.input-mouse-wheel
+  "raylib [core] example - mouse wheel input, ported to jank.
+
+  Scroll the mouse wheel to move a box up and down. Q quits.
+  Based on raylib/examples/core/core_input_mouse_wheel.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SPEED 4)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - mouse wheel (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [box-y (- (quot HEIGHT 2) 40)]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [box-y (- box-y (int (* (+ 0.0 (cpp/GetMouseWheelMove)) SPEED)))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawRectangle (- (quot WIDTH 2) 40) box-y 80 80 cpp/MAROON)
+
+        (cpp/DrawText "Use the mouse wheel to move the box - Q quits" 10 10 20 cpp/GRAY)
+        (cpp/DrawText (str "Box position Y: " box-y) 10 40 20 cpp/LIGHTGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur box-y)))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,92 @@
+(ns raylib-examples.image-channel
+  "raylib [textures] example - image channel, ported to jank.
+
+  The fudesumi sprite split into its R, G, B and A channels with
+  ImageFromChannel; each colour channel is alpha-masked by the sprite's
+  own alpha, then all five (plus the original) are drawn over a checked
+  background. Q quits. Fudesumi sprite by Eiden Marsal.
+  Based on raylib/examples/textures/textures_image_channel.c
+
+  jank-native: ImageFromChannel / GenImageChecked return Images by
+  value (bound to let-locals); ImageAlphaMask takes an Image* formed
+  with (cpp/& img). The sprite's width/height are captured as jank ints
+  before UnloadImage, since the freed struct can't be read afterward."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - image channel (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [fudesumi (cpp/LoadImage (str RES "fudesumi.png"))
+        im-alpha (cpp/ImageFromChannel fudesumi 3)]
+    (cpp/ImageAlphaMask (cpp/& im-alpha) im-alpha)
+    (let [im-red (cpp/ImageFromChannel fudesumi 0)
+          im-green (cpp/ImageFromChannel fudesumi 1)
+          im-blue (cpp/ImageFromChannel fudesumi 2)]
+      (cpp/ImageAlphaMask (cpp/& im-red) im-alpha)
+      (cpp/ImageAlphaMask (cpp/& im-green) im-alpha)
+      (cpp/ImageAlphaMask (cpp/& im-blue) im-alpha)
+
+      (let [bg (cpp/GenImageChecked WIDTH HEIGHT (int (/ WIDTH 20)) (int (/ HEIGHT 20)) cpp/ORANGE cpp/YELLOW)
+            fw (int (+ 0.0 (.-width fudesumi)))
+            fh (int (+ 0.0 (.-height fudesumi)))
+            t-bg (cpp/LoadTextureFromImage bg)
+            t-fud (cpp/LoadTextureFromImage fudesumi)
+            t-alpha (cpp/LoadTextureFromImage im-alpha)
+            t-red (cpp/LoadTextureFromImage im-red)
+            t-green (cpp/LoadTextureFromImage im-green)
+            t-blue (cpp/LoadTextureFromImage im-blue)]
+        (cpp/UnloadImage fudesumi)
+        (cpp/UnloadImage im-alpha)
+        (cpp/UnloadImage im-red)
+        (cpp/UnloadImage im-green)
+        (cpp/UnloadImage im-blue)
+        (cpp/UnloadImage bg)
+
+        (loop []
+          (when (cpp/! (cpp/WindowShouldClose))
+            (let [rec (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                     (cpp/float (+ 0.0 fw)) (cpp/float (+ 0.0 fh)))
+                  origin (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                  fpw (* fw 0.8) fph (* fh 0.8)
+                  hw (/ (* fw 0.8) 2.0) hh (/ (* fh 0.8) 2.0)]
+
+              (cpp/BeginDrawing)
+              (cpp/DrawTexture t-bg 0 0 cpp/WHITE)
+
+              (cpp/DrawTexturePro t-fud rec
+                                  (cpp/Rectangle (cpp/float 50.0) (cpp/float 10.0) (cpp/float fpw) (cpp/float fph))
+                                  origin (cpp/float 0.0) cpp/WHITE)
+              (cpp/DrawTexturePro t-red rec
+                                  (cpp/Rectangle (cpp/float 410.0) (cpp/float 10.0) (cpp/float hw) (cpp/float hh))
+                                  origin (cpp/float 0.0) cpp/RED)
+              (cpp/DrawTexturePro t-green rec
+                                  (cpp/Rectangle (cpp/float 600.0) (cpp/float 10.0) (cpp/float hw) (cpp/float hh))
+                                  origin (cpp/float 0.0) cpp/GREEN)
+              (cpp/DrawTexturePro t-blue rec
+                                  (cpp/Rectangle (cpp/float 410.0) (cpp/float 230.0) (cpp/float hw) (cpp/float hh))
+                                  origin (cpp/float 0.0) cpp/BLUE)
+              (cpp/DrawTexturePro t-alpha rec
+                                  (cpp/Rectangle (cpp/float 600.0) (cpp/float 230.0) (cpp/float hw) (cpp/float hh))
+                                  origin (cpp/float 0.0) cpp/WHITE)
+
+              (cpp/DrawText "R / G / B / A channels, alpha-masked - Q quits" 10 425 10 cpp/DARKGRAY)
+
+              (cpp/EndDrawing)
+
+              (when-not (cpp/IsKeyDown cpp/KEY_Q)
+                (recur)))))
+
+        (cpp/UnloadTexture t-bg)
+        (cpp/UnloadTexture t-fud)
+        (cpp/UnloadTexture t-alpha)
+        (cpp/UnloadTexture t-red)
+        (cpp/UnloadTexture t-green)
+        (cpp/UnloadTexture t-blue))))
+
+  (cpp/CloseWindow))

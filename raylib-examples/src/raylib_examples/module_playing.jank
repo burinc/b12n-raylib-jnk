@@ -1,0 +1,114 @@
+(ns raylib-examples.module-playing
+  "raylib [audio] example - module playing, ported to jank.
+
+  A chiptune XM tracker module streams while 64 colored circle waves
+  pulse in and out. SPACE restarts, P pauses/resumes, UP/DOWN change
+  the pitch, Q quits.
+  Based on raylib/examples/audio/audio_module_playing.c
+  (jank-native: circles are jank maps with a palette color-id,
+  resolved per draw via Fade over GetColor on packed RGBA ints. The
+  C sets music.looping = false - a native struct-field write jank
+  has no surface for - so here the module simply loops.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def XM "../jank-raylib-sys/raylib/examples/audio/resources/mini1111.xm")
+(def MAX-CIRCLES 64)
+
+;; ORANGE RED GOLD LIME BLUE VIOLET BROWN LIGHTGRAY PINK YELLOW GREEN
+;; SKYBLUE PURPLE BEIGE - as r/g/b triples.
+(def PALETTE
+  [[255 161 0] [230 41 55] [255 203 0] [0 158 47] [0 121 241]
+   [135 60 190] [127 106 79] [200 200 200] [255 109 194] [253 249 0]
+   [0 228 48] [102 191 255] [200 122 255] [211 176 131]])
+
+(defn packed-rgba [i]
+  (let [[r g b] (nth PALETTE i)]
+    (+ (* r 16777216) (* g 65536) (* b 256) 255)))
+
+(defn fresh-circle []
+  (let [radius (+ 0.0 (cpp/GetRandomValue 10 40))]
+    {:x (+ 0.0 (cpp/GetRandomValue (int radius) (int (- WIDTH radius))))
+     :y (+ 0.0 (cpp/GetRandomValue (int radius) (int (- HEIGHT radius))))
+     :radius radius
+     :alpha 0.0
+     :speed (/ (+ 0.0 (cpp/GetRandomValue 1 100)) 2000.0)
+     :cid (cpp/GetRandomValue 0 13)}))
+
+(defn update-circle [c]
+  (let [alpha (+ (:alpha c) (:speed c))
+        radius (+ (:radius c) (* (:speed c) 10.0))
+        speed (if (> alpha 1.0) (- 0.0 (:speed c)) (:speed c))]
+    (if (<= alpha 0.0)
+      (fresh-circle)
+      (assoc c :alpha alpha :radius radius :speed speed))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - module playing (jank)")
+  (cpp/InitAudioDevice)
+  (cpp/SetTargetFPS 60)
+
+  (let [music (cpp/LoadMusicStream XM)]
+    (cpp/PlayMusicStream music)
+
+    ;; Thread [circles paused? pitch].
+    (loop [circles (vec (repeatedly MAX-CIRCLES fresh-circle))
+           paused false
+           pitch 1.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateMusicStream music)
+
+        (when (cpp/IsKeyPressed cpp/KEY_SPACE)
+          (cpp/StopMusicStream music)
+          (cpp/PlayMusicStream music))
+
+        (let [paused (if (cpp/IsKeyPressed cpp/KEY_P) (not paused) paused)
+              _ (when (cpp/IsKeyPressed cpp/KEY_P)
+                  (if paused
+                    (cpp/PauseMusicStream music)
+                    (cpp/ResumeMusicStream music)))
+
+              pitch (if (cpp/IsKeyDown cpp/KEY_DOWN) (- pitch 0.01) pitch)
+              pitch (if (cpp/IsKeyDown cpp/KEY_UP) (+ pitch 0.01) pitch)
+              _ (cpp/SetMusicPitch music (cpp/float pitch))
+
+              played (+ 0.0 (cpp/GetMusicTimePlayed music))
+              length (+ 0.0 (cpp/GetMusicTimeLength music))
+              bar (if (> length 0.0) (* (/ played length) (- WIDTH 40)) 0.0)
+
+              circles (if paused circles (mapv update-circle circles))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (doseq [c circles]
+            (cpp/DrawCircleV (cpp/Vector2 (cpp/float (:x c)) (cpp/float (:y c)))
+                             (cpp/float (:radius c))
+                             (cpp/Fade (cpp/GetColor (packed-rgba (:cid c)))
+                                       (cpp/float (:alpha c)))))
+
+          ;; Time bar.
+          (cpp/DrawRectangle 20 (- HEIGHT 32) (- WIDTH 40) 12 cpp/LIGHTGRAY)
+          (cpp/DrawRectangle 20 (- HEIGHT 32) (int bar) 12 cpp/MAROON)
+          (cpp/DrawRectangleLines 20 (- HEIGHT 32) (- WIDTH 40) 12 cpp/GRAY)
+
+          ;; Help panel.
+          (cpp/DrawRectangle 20 20 425 145 cpp/WHITE)
+          (cpp/DrawRectangleLines 20 20 425 145 cpp/GRAY)
+          (cpp/DrawText "PRESS SPACE TO RESTART MUSIC" 40 40 20 cpp/BLACK)
+          (cpp/DrawText "PRESS P TO PAUSE/RESUME" 40 70 20 cpp/BLACK)
+          (cpp/DrawText "PRESS UP/DOWN TO CHANGE SPEED (Q quits)" 40 100 20 cpp/BLACK)
+          (cpp/DrawText (str "SPEED: " pitch) 40 130 20 cpp/MAROON)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur circles paused pitch)))))
+
+    (cpp/UnloadMusicStream music))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

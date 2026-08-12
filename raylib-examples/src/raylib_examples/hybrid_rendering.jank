@@ -1,0 +1,148 @@
+(ns raylib-examples.hybrid-rendering
+  "raylib [shaders] example - hybrid rendering, ported to jank.
+
+  Raymarching and rasterization in ONE scene: a raymarch shader draws
+  spheres and writes real gl_FragDepth, then ordinary rasterized
+  cubes draw into the same depth-texture framebuffer - the two
+  worlds occlude each other correctly. An orbital camera circles the
+  mix. ESC quits.
+  Based on raylib/examples/shaders/shaders_hybrid_rendering.c
+
+  jank-native notes:
+  - Same verbatim rlgl depth-texture FBO shim pair as depth-writing.
+  - The per-frame camPos/camDir VEC3 push extends raymarching's
+    Camera3D-pointer shim: camDir = normalize(target - position) *
+    camDist is computed inside the C shim (hand-written vector math,
+    no raymath include), reading fields straight off (cpp/& camera).
+  - rlEnableDepthTest is a direct rlgl call (depth testing must be
+    on manually while mixing rendering methods inside the FBO)."
+  (:include "raylib.h" "rlgl.h" "math.h"))
+
+;; Depth-texture FBO (the depth-writing shim) + the camera uniform push.
+(cpp/raw "static RenderTexture2D jank_load_rt_depth(int width, int height) {
+  RenderTexture2D target = { 0 };
+  target.id = rlLoadFramebuffer();
+  if (target.id > 0) {
+    rlEnableFramebuffer(target.id);
+    target.texture.id = rlLoadTexture(0, width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
+    target.texture.width = width;
+    target.texture.height = height;
+    target.texture.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    target.texture.mipmaps = 1;
+    target.depth.id = rlLoadTextureDepth(width, height, false);
+    target.depth.width = width;
+    target.depth.height = height;
+    target.depth.format = 19; /* DEPTH_COMPONENT_24BIT: not defined in raylib */
+    target.depth.mipmaps = 1;
+    rlFramebufferAttach(target.id, target.texture.id, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
+    rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+    if (rlFramebufferComplete(target.id)) TraceLog(LOG_INFO, \"FBO: [ID %i] Framebuffer object created successfully\", target.id);
+    rlDisableFramebuffer();
+  } else TraceLog(LOG_WARNING, \"FBO: Framebuffer object can not be created\");
+  return target;
+}
+static void jank_unload_rt_depth(RenderTexture2D target) {
+  if (target.id > 0) {
+    rlUnloadTexture(target.texture.id);
+    rlUnloadTexture(target.depth.id);
+    rlUnloadFramebuffer(target.id);
+  }
+}
+static void jank_set_vec2(Shader s, int loc, double a, double b) {
+  float v[2] = { (float)a, (float)b };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}
+/* camPos straight off the camera; camDir = normalize(target - position) * camDist */
+static void jank_push_march_cam(Shader s, int posLoc, int dirLoc, Camera3D* c, double camDist) {
+  float pos[3] = { c->position.x, c->position.y, c->position.z };
+  float dx = c->target.x - c->position.x;
+  float dy = c->target.y - c->position.y;
+  float dz = c->target.z - c->position.z;
+  float len = sqrtf(dx*dx + dy*dy + dz*dz);
+  float k = (len > 0.0f) ? ((float)camDist/len) : 0.0f;
+  float dir[3] = { dx*k, dy*k, dz*k };
+  SetShaderValue(s, posLoc, pos, SHADER_UNIFORM_VEC3);
+  SetShaderValue(s, dirLoc, dir, SHADER_UNIFORM_VEC3);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - hybrid rendering (jank)")
+
+  (let [shdr-raymarch (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/hybrid_raymarch.fs"))
+        shdr-raster (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/hybrid_raster.fs"))
+        cam-pos-loc (int (cpp/GetShaderLocation shdr-raymarch "camPos"))
+        cam-dir-loc (int (cpp/GetShaderLocation shdr-raymarch "camDir"))
+        screen-center-loc (int (cpp/GetShaderLocation shdr-raymarch "screenCenter"))
+        target (cpp/jank_load_rt_depth WIDTH HEIGHT)
+        camera (cpp/Camera3D (cpp/Vector3 (cpp/float 0.5) (cpp/float 1.0) (cpp/float 1.5))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        ;; FOV pre-baked into the ray direction length: 1/tan(fovy/2)
+        cam-dist (/ 1.0 (+ 0.0 (cpp/tan (* 45.0 0.5 (/ 3.141592653589793 180.0)))))]
+
+    (cpp/jank_set_vec2 shdr-raymarch screen-center-loc (/ WIDTH 2.0) (/ HEIGHT 2.0))
+
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+        (cpp/jank_push_march_cam shdr-raymarch cam-pos-loc cam-dir-loc
+                                 (cpp/& camera) cam-dist)
+
+        (cpp/BeginTextureMode target)
+        (cpp/ClearBackground cpp/WHITE)
+
+        ;; raymarched spheres (the shader writes real gl_FragDepth)
+        (cpp/rlEnableDepthTest)
+        (cpp/BeginShaderMode shdr-raymarch)
+        (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float 800.0) (cpp/float 450.0))
+                              cpp/WHITE)
+        (cpp/EndShaderMode)
+
+        ;; rasterized cubes into the same depth buffer
+        (cpp/BeginMode3D camera)
+        (cpp/BeginShaderMode shdr-raster)
+        (cpp/DrawCubeWiresV (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 1.0))
+                            (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                            cpp/RED)
+        (cpp/DrawCubeV (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 1.0))
+                       (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                       cpp/PURPLE)
+        (cpp/DrawCubeWiresV (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float -1.0))
+                            (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                            cpp/DARKGREEN)
+        (cpp/DrawCubeV (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float -1.0))
+                       (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                       cpp/YELLOW)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndShaderMode)
+        (cpp/EndMode3D)
+        (cpp/EndTextureMode)
+
+        ;; blit to screen (y-flipped)
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/DrawTextureRec (.-texture target)
+                            (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                           (cpp/float 800.0) (cpp/float -450.0))
+                            (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                            cpp/WHITE)
+        (cpp/DrawFPS 10 10)
+        (cpp/EndDrawing)
+
+        (recur)))
+
+    (cpp/jank_unload_rt_depth target)
+    (cpp/UnloadShader shdr-raymarch)
+    (cpp/UnloadShader shdr-raster))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,65 @@
+(ns raylib-examples.camera-3d-free
+  "raylib [core] example - 3d camera free, ported to jank.
+
+  A free-look 3D camera around a red cube: right-mouse drag to look,
+  mouse wheel to zoom, wheel-press to pan, Z re-targets the origin.
+  ESC quits (the cursor is captured while running).
+  Based on raylib/examples/core/core_3d_camera_free.c
+
+  jank-native notes:
+  - THE UpdateCamera(&camera, mode) blocker falls: (cpp/& camera) on the
+    outer-let Camera3D forms the pointer (the image-processing address-of
+    pattern) and the mutation PERSISTS across frames - the let-local is
+    the same storage every loop iteration.
+  - The C's 'camera.target = {0,0,0}' field write has no jank syntax;
+    a one-line pointer shim does it (jank_cam_retarget)."
+  (:include "raylib.h"))
+
+;; jank can't assign struct fields; re-target through a pointer.
+(cpp/raw "static void jank_cam_retarget(Camera3D* c) { c->target = (Vector3){ 0.0f, 0.0f, 0.0f }; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - 3d camera free (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 10.0) (cpp/float 10.0) (cpp/float 10.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)]
+    (cpp/DisableCursor)
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FREE)
+
+        (when (cpp/IsKeyPressed cpp/KEY_Z)
+          (cpp/jank_cam_retarget (cpp/& camera)))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                      (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/RED)
+        (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/MAROON)
+        (cpp/DrawGrid 10 (cpp/float 1.0))
+        (cpp/EndMode3D)
+
+        (cpp/DrawRectangle 10 10 320 93 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+        (cpp/DrawRectangleLines 10 10 320 93 cpp/BLUE)
+        (cpp/DrawText "Free camera default controls:" 20 20 10 cpp/BLACK)
+        (cpp/DrawText "- Mouse Wheel to Zoom in-out" 40 40 10 cpp/DARKGRAY)
+        (cpp/DrawText "- Mouse Wheel Pressed to Pan" 40 60 10 cpp/DARKGRAY)
+        (cpp/DrawText "- Z to zoom to (0, 0, 0)" 40 80 10 cpp/DARKGRAY)
+
+        (cpp/EndDrawing)
+
+        (recur))))
+
+  (cpp/CloseWindow))

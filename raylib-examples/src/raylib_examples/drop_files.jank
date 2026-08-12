@@ -1,0 +1,69 @@
+(ns raylib-examples.drop-files
+  "raylib [core] example - drop files, ported to jank.
+
+  Drag files from your OS file manager onto the window and their paths are
+  listed (new drops append to the list). ESC quits.
+  Based on raylib/examples/core/core_drop_files.c
+
+  jank-native notes:
+  - The C preallocates a fixed char*[4096] and TextCopy's each dropped path
+    into it. jank just keeps a growing vector of path strings and conj's new
+    drops on - no preallocation, no fixed cap.
+  - IsFileDropped + LoadDroppedFiles return a FilePathList (char** paths) by
+    value; jank can't carry it across frames (rule 2), so each drop is
+    snapshotted into the jank vector immediately (paths[i] via the same
+    cpp/raw subscript shim directory-files uses) and UnloadDroppedFiles frees
+    the native list."
+  (:include "raylib.h"))
+
+;; Subscript the FilePathList's char** paths in raw C++ (jank can't index a
+;; raw char**); hand back the element pointer for `str` to copy.
+(cpp/raw "static const char* jank_dropped_at(char** paths, int i) { return paths[i]; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - drop files (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; state: the accumulated vector of dropped file-path strings.
+  (loop [paths []]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [paths (if (cpp/IsFileDropped)
+                    (let [dropped (cpp/LoadDroppedFiles)
+                          n (+ 0 (.-count dropped))
+                          pp (loop [i 0 acc paths]
+                               (if (< i n)
+                                 (recur (inc i)
+                                        (conj acc (str (cpp/jank_dropped_at (.-paths dropped) i))))
+                                 acc))]
+                      (cpp/UnloadDroppedFiles dropped)
+                      pp)
+                    paths)
+            n (count paths)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (if (= n 0)
+          (cpp/DrawText "Drop your files to this window!" 100 40 20 cpp/DARKGRAY)
+          (do
+            (cpp/DrawText "Dropped files:" 100 40 20 cpp/DARKGRAY)
+            (loop [i 0]
+              (when (< i n)
+                ;; alternating row shading, like the C's LIGHTGRAY fades
+                (cpp/DrawRectangle 0 (+ 85 (* 40 i)) WIDTH 40
+                                   (if (= (int (mod i 2)) 0)
+                                     (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.5))
+                                     (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.3))))
+                (cpp/DrawText (nth paths i) 120 (+ 100 (* 40 i)) 10 cpp/GRAY)
+                (recur (inc i))))
+            (cpp/DrawText "Drop new files..." 100 (+ 110 (* 40 n)) 20 cpp/DARKGRAY)))
+
+        (cpp/EndDrawing)
+
+        (recur paths))))
+
+  (cpp/CloseWindow))

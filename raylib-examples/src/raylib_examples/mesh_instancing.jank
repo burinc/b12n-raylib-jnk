@@ -1,0 +1,112 @@
+(ns raylib-examples.mesh-instancing
+  "raylib [shaders] example - mesh instancing, ported to jank.
+
+  Ten thousand cubes drawn in ONE draw call: DrawMeshInstanced streams
+  a per-instance transform array to the lighting_instancing vertex
+  shader (red, lit), flanked by two ordinary blue DrawMesh cubes for
+  contrast. Orbital camera. ESC quits.
+  Based on raylib/examples/shaders/shaders_mesh_instancing.c
+
+  jank-native notes:
+  - First DrawMeshInstanced + first bare-Material use: the 10k Matrix
+    transform array lives as a C static (640 KB) filled by a shim
+    (random translate x rotate, raymath in C); DrawMeshInstanced is
+    called through a shim that hands over the array pointer.
+  - LoadMaterialDefault returns a Material by value into a let-local;
+    its .shader / .maps[].color writes are (cpp/& material) shims,
+    exactly like the Model material pattern.
+  - DrawMesh takes the Mesh, Material and an inline MatrixTranslate
+    all by value - direct call."
+  (:include "raylib.h" "raymath.h" "jank_rlights.h"))
+
+;; The instance transforms + Material field writes.
+(cpp/raw "#define JANK_MAX_INSTANCES 10000
+static Matrix jank_transforms[JANK_MAX_INSTANCES];
+static void jank_build_transforms(void) {
+  for (int i = 0; i < JANK_MAX_INSTANCES; i++) {
+    Matrix translation = MatrixTranslate((float)GetRandomValue(-50, 50),
+                                         (float)GetRandomValue(-50, 50),
+                                         (float)GetRandomValue(-50, 50));
+    Vector3 axis = Vector3Normalize((Vector3){ (float)GetRandomValue(0, 360),
+                                               (float)GetRandomValue(0, 360),
+                                               (float)GetRandomValue(0, 360) });
+    float angle = (float)GetRandomValue(0, 180)*DEG2RAD;
+    jank_transforms[i] = MatrixMultiply(MatrixRotate(axis, angle), translation);
+  }
+}
+static void jank_draw_instanced(Mesh mesh, Material mat) {
+  DrawMeshInstanced(mesh, mat, jank_transforms, JANK_MAX_INSTANCES);
+}
+static void jank_mat_set_shader(Material* m, Shader s) { m->shader = s; }
+static void jank_mat_set_color(Material* m, int map, int r, int g, int b, int a) {
+  m->maps[map].color = (Color){ (unsigned char)r, (unsigned char)g,
+                                (unsigned char)b, (unsigned char)a };
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - mesh instancing (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float -125.0) (cpp/float 125.0) (cpp/float -125.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        cube (cpp/GenMeshCube (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+        shader (cpp/LoadShader (str RES "shaders/glsl330/lighting_instancing.vs")
+                               (str RES "shaders/glsl330/lighting.fs"))
+        view-loc (int (cpp/GetShaderLocation shader "viewPos"))
+        ambient-loc (int (cpp/GetShaderLocation shader "ambient"))
+        mat-instances (cpp/LoadMaterialDefault)
+        mat-default (cpp/LoadMaterialDefault)]
+
+    (cpp/jank_build_transforms)
+
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MATRIX_MVP
+                                (int (cpp/GetShaderLocation shader "mvp")))
+    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (cpp/jank_rl_set_vec4 shader ambient-loc 0.2 0.2 0.2 1.0)
+
+    ;; one white directional light
+    (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_DIRECTIONAL)
+                              50.0 50.0 0.0 0.0 0.0 0.0
+                              255 255 255 255 shader)
+
+    ;; instanced cubes: RED + the instancing shader; plain cubes: BLUE default
+    (cpp/jank_mat_set_shader (cpp/& mat-instances) shader)
+    (cpp/jank_mat_set_color (cpp/& mat-instances) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
+                            230 41 55 255)
+    (cpp/jank_mat_set_color (cpp/& mat-default) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
+                            0 121 241 255)
+
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+        (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/DrawMesh cube mat-default
+                      (cpp/MatrixTranslate (cpp/float -10.0) (cpp/float 0.0) (cpp/float 0.0)))
+        ;; 10000 cubes, one draw call
+        (cpp/jank_draw_instanced cube mat-instances)
+        (cpp/DrawMesh cube mat-default
+                      (cpp/MatrixTranslate (cpp/float 10.0) (cpp/float 0.0) (cpp/float 0.0)))
+        (cpp/EndMode3D)
+
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadMesh cube))
+
+  (cpp/CloseWindow))

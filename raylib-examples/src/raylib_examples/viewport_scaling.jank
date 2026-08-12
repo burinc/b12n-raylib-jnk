@@ -1,0 +1,210 @@
+(ns raylib-examples.viewport-scaling
+  "raylib [core] example - viewport scaling, ported to jank.
+
+  A game scene rendered at a fixed 'game resolution' into a RenderTexture,
+  scaled into a resizable window under six viewport policies (keep aspect /
+  height / width, each with an integer pixel-snap variant). Two < > button
+  pairs cycle the game resolution (64x64 / 256x240 / 320x180 / 4K) and the
+  policy; a LIME circle tracks the mouse mapped into game space. Resize the
+  window to see each policy react. ESC quits.
+  Based on raylib/examples/core/core_viewport_scaling.c
+
+  jank-native notes:
+  - The C recreates its RenderTexture2D on every resize/mode change with a
+    size computed from the CURRENT window - a native value that must
+    persist across frames but cannot thread through loop/recur (rule 2).
+    NEW pattern: the target lives in a cpp/raw static
+    (jank_resize_target / jank_get_target); each frame re-fetches it into
+    a let-local, which never crosses a jank fn boundary.
+  - The C's six Keep* helpers write through Rectangle* out-params; the
+    port computes plain jank maps {:sx .. :dh} instead - pure math, no
+    pointers. (The C's KeepHeightCentered[Integer] pair and
+    KeepWidthCentered[Integer] pair are character-identical, so the port
+    shares one fn per axis and keeps all six mode names.)
+  - Screen2RenderTexturePosition scales BOTH axes by the x ratio in the C;
+    kept faithful.
+  - TextFormat %.2f becomes a str + str/index-of + subs trim; C's
+    (float)(int) truncations become (+ 0.0 (int ...))."
+  (:require [clojure.string :as str])
+  (:include "raylib.h"))
+
+;; The render target parked as a C static so it survives across frames
+;; without living in jank loop state (rule 2). UnloadRenderTexture guards
+;; id 0 internally, so the first resize call is safe.
+(cpp/raw "static RenderTexture2D jank_target = { 0 };
+static void jank_resize_target(int w, int h) {
+  UnloadRenderTexture(jank_target);
+  jank_target = LoadRenderTexture(w, h);
+}
+static RenderTexture2D jank_get_target(void) { return jank_target; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RESOLUTIONS [[64 64] [256 240] [320 180] [3840 2160]])
+(def TYPE-NAMES ["KEEP_ASPECT_INTEGER" "KEEP_HEIGHT_INTEGER" "KEEP_WIDTH_INTEGER"
+                 "KEEP_ASPECT" "KEEP_HEIGHT" "KEEP_WIDTH"])
+
+(defn- fmt2
+  "The C's %.2f, via trimming str two digits past the dot."
+  [v]
+  (let [s (str v)
+        dot (str/index-of s ".")]
+    (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
+
+(defn- keep-aspect-rects
+  "KEEP_ASPECT[_INTEGER]: letterbox both axes; integer? snaps the scale
+  ratio to a whole number (pixel-perfect)."
+  [integer? sw sh gw gh]
+  (let [rr (if integer?
+             (+ 0.0 (min (int (quot sw gw)) (int (quot sh gh))))
+             (min (/ (+ 0.0 sw) gw) (/ (+ 0.0 sh) gh)))]
+    {:sx 0.0 :sy (+ 0.0 gh) :sw (+ 0.0 gw) :sh (- 0.0 gh)
+     :dx (+ 0.0 (int (* (- sw (* gw rr)) 0.5)))
+     :dy (+ 0.0 (int (* (- sh (* gh rr)) 0.5)))
+     :dw (+ 0.0 (int (* gw rr)))
+     :dh (+ 0.0 (int (* gh rr)))}))
+
+(defn- keep-height-rects
+  "KEEP_HEIGHT[_INTEGER]: fill the window height, widen the game view."
+  [sw sh gw gh]
+  (let [rr (/ (+ 0.0 sh) gh)
+        srcw (+ 0.0 (int (/ (+ 0.0 sw) rr)))]
+    {:sx 0.0 :sy 0.0 :sw srcw :sh (- 0.0 gh)
+     :dx (+ 0.0 (int (* (- sw (* srcw rr)) 0.5)))
+     :dy (+ 0.0 (int (* (- sh (* gh rr)) 0.5)))
+     :dw (+ 0.0 (int (* srcw rr)))
+     :dh (+ 0.0 (int (* gh rr)))}))
+
+(defn- keep-width-rects
+  "KEEP_WIDTH[_INTEGER]: fill the window width, deepen the game view."
+  [sw sh gw gh]
+  (let [rr (/ (+ 0.0 sw) gw)
+        srch (+ 0.0 (int (/ (+ 0.0 sh) rr)))]
+    {:sx 0.0 :sy 0.0 :sw (+ 0.0 gw) :sh (- 0.0 srch)
+     :dx (+ 0.0 (int (* (- sw (* gw rr)) 0.5)))
+     :dy (+ 0.0 (int (* (- sh (* srch rr)) 0.5)))
+     :dw (+ 0.0 (int (* gw rr)))
+     :dh (+ 0.0 (int (* srch rr)))}))
+
+(defn- compute-rects
+  "Source + destination rects (a jank map) for viewport type 0..5 at
+  window size sw x sh and game size gw x gh."
+  [vtype sw sh gw gh]
+  (cond (= vtype 0) (keep-aspect-rects true sw sh gw gh)
+        (= vtype 1) (keep-height-rects sw sh gw gh)
+        (= vtype 2) (keep-width-rects sw sh gw gh)
+        (= vtype 3) (keep-aspect-rects false sw sh gw gh)
+        (= vtype 4) (keep-height-rects sw sh gw gh)
+        :else (keep-width-rects sw sh gw gh)))
+
+(defn- over-button?
+  "Mouse over the 10x10 button at bx,by (boxed jank bool)."
+  [mx my bx by]
+  (if (cpp/CheckCollisionPointRec
+       (cpp/Vector2 (cpp/float mx) (cpp/float my))
+       (cpp/Rectangle (cpp/float bx) (cpp/float by) (cpp/float 10.0) (cpp/float 10.0)))
+    true false))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_RESIZABLE)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - viewport scaling (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; initial target for the starting 64x64 KEEP_ASPECT_INTEGER state
+  (let [r0 (compute-rects 0 (int (cpp/GetScreenWidth)) (int (cpp/GetScreenHeight)) 64 64)]
+    (cpp/jank_resize_target (int (:sw r0)) (int (- (:sh r0))))
+
+    ;; Thread [resolution-index game-w game-h viewport-type rects-map].
+    (loop [ri 0 gw 64 gh 64 vtype 0 rects r0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [mx (+ 0.0 (cpp/GetMouseX))
+              my (+ 0.0 (cpp/GetMouseY))
+              resized? (if (cpp/IsWindowResized) true false)
+              pressed? (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT) true false)
+              dec-res? (and pressed? (over-button? mx my 200.0 30.0))
+              inc-res? (and pressed? (over-button? mx my 215.0 30.0))
+              dec-type? (and pressed? (over-button? mx my 200.0 45.0))
+              inc-type? (and pressed? (over-button? mx my 215.0 45.0))
+
+              ri (cond dec-res? (int (mod (+ ri 3) 4))
+                       inc-res? (int (mod (+ ri 1) 4))
+                       :else ri)
+              gw (nth (nth RESOLUTIONS ri) 0)
+              gh (nth (nth RESOLUTIONS ri) 1)
+              vtype (cond dec-type? (int (mod (+ vtype 5) 6))
+                          inc-type? (int (mod (+ vtype 1) 6))
+                          :else vtype)
+
+              dirty? (or resized? dec-res? inc-res? dec-type? inc-type?)
+              rects (if dirty?
+                      (compute-rects vtype (int (cpp/GetScreenWidth))
+                                     (int (cpp/GetScreenHeight)) gw gh)
+                      rects)
+
+              ;; mouse mapped into render-texture space (the C scales both
+              ;; axes by the x ratio)
+              ratio-x (/ (:sw rects) (:dw rects))
+              tmx (* (- mx (:dx rects)) ratio-x)
+              tmy (* (- my (:dy rects)) ratio-x)
+
+              scale-x (/ (:dw rects) (:sw rects))
+              scale-y (- 0.0 (/ (:dh rects) (:sh rects)))]
+
+          (when dirty?
+            (cpp/jank_resize_target (int (:sw rects)) (int (- (:sh rects)))))
+
+          ;; draw the scene at game resolution into the render texture
+          (let [target (cpp/jank_get_target)]
+            (cpp/BeginTextureMode target)
+            (cpp/ClearBackground cpp/WHITE)
+            (cpp/DrawCircleV (cpp/Vector2 (cpp/float tmx) (cpp/float tmy))
+                             (cpp/float 20.0) cpp/LIME)
+            (cpp/EndTextureMode)
+
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/BLACK)
+
+            ;; the scaled render texture
+            (cpp/DrawTexturePro (.-texture target)
+                                (cpp/Rectangle (cpp/float (:sx rects)) (cpp/float (:sy rects))
+                                               (cpp/float (:sw rects)) (cpp/float (:sh rects)))
+                                (cpp/Rectangle (cpp/float (:dx rects)) (cpp/float (:dy rects))
+                                               (cpp/float (:dw rects)) (cpp/float (:dh rects)))
+                                (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                (cpp/float 0.0) cpp/WHITE))
+
+          ;; info box at native window resolution
+          (let [info (cpp/Rectangle (cpp/float 5.0) (cpp/float 5.0)
+                                    (cpp/float 330.0) (cpp/float 105.0))]
+            (cpp/DrawRectangleRec info (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.7)))
+            (cpp/DrawRectangleLinesEx info (cpp/float 1.0) cpp/BLUE))
+          (cpp/DrawText (str "Window Resolution: " (int (cpp/GetScreenWidth))
+                             " x " (int (cpp/GetScreenHeight)))
+                        15 15 10 cpp/BLACK)
+          (cpp/DrawText (str "Game Resolution: " gw " x " gh) 15 30 10 cpp/BLACK)
+          (cpp/DrawText (str "Type: " (nth TYPE-NAMES vtype)) 15 45 10 cpp/BLACK)
+          (if (or (< scale-x 0.001) (< scale-y 0.001))
+            (cpp/DrawText "Scale ratio: INVALID" 15 60 10 cpp/BLACK)
+            (cpp/DrawText (str "Scale ratio: " (fmt2 scale-x) " x " (fmt2 scale-y))
+                          15 60 10 cpp/BLACK))
+          (cpp/DrawText (str "Source size: " (fmt2 (:sw rects)) " x " (fmt2 (- (:sh rects))))
+                        15 75 10 cpp/BLACK)
+          (cpp/DrawText (str "Destination size: " (fmt2 (:dw rects)) " x " (fmt2 (:dh rects)))
+                        15 90 10 cpp/BLACK)
+
+          ;; the < > buttons
+          (cpp/DrawRectangle 200 30 10 10 cpp/SKYBLUE)
+          (cpp/DrawRectangle 215 30 10 10 cpp/SKYBLUE)
+          (cpp/DrawRectangle 200 45 10 10 cpp/SKYBLUE)
+          (cpp/DrawRectangle 215 45 10 10 cpp/SKYBLUE)
+          (cpp/DrawText "<" 203 31 10 cpp/BLACK)
+          (cpp/DrawText ">" 218 31 10 cpp/BLACK)
+          (cpp/DrawText "<" 203 46 10 cpp/BLACK)
+          (cpp/DrawText ">" 218 46 10 cpp/BLACK)
+
+          (cpp/EndDrawing)
+
+          (recur ri gw gh vtype rects)))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,118 @@
+(ns raylib-examples.storage-values
+  "raylib [core] example - storage values, ported to jank.
+
+  A score / hi-score pair persisted to a binary storage file. R rolls new
+  random values, ENTER saves them to storage.data, SPACE loads them back
+  (0 when the file is missing). ESC quits.
+  Based on raylib/examples/core/core_storage_values.c
+
+  jank-native notes:
+  - SaveStorageValue / LoadStorageValue are the C example's own module
+    functions, not raylib API. The save half is RL_REALLOC buffer surgery
+    (grow the file to fit a byte position, poke an i32 into it) with no
+    jank surface at all, so it stays C, kept verbatim in a cpp/raw shim.
+  - The load half IS expressed in jank: LoadFileData with the int*
+    out-param pattern ((cpp/int 0) + (cpp/& size), the gif-player trick),
+    a one-line cpp/raw shim for the ((int*)data)[pos] read (cpp/aget can
+    subscript, but not reinterpret unsigned char* as int*), and
+    UnloadFileData when done (free(NULL) is safe on the missing-file path).
+  - The C's TextFormat readouts become str; the storage file lands in the
+    working directory like the C (gitignored)."
+  (:include "raylib.h"))
+
+;; The C example's SaveStorageValue, verbatim (example-defined C, not
+;; raylib API): grow-or-reuse the file buffer, poke value at position.
+(cpp/raw "static bool jank_save_slot(const char* f, int position, int value) {
+  bool success = false;
+  int dataSize = 0;
+  unsigned int newDataSize = 0;
+  unsigned char* fileData = LoadFileData(f, &dataSize);
+  unsigned char* newFileData = NULL;
+  if (fileData != NULL) {
+    if (dataSize <= (int)(position*sizeof(int))) {
+      newDataSize = (position + 1)*sizeof(int);
+      newFileData = (unsigned char*)RL_REALLOC(fileData, newDataSize);
+      if (newFileData != NULL) { ((int*)newFileData)[position] = value; }
+      else { newFileData = fileData; newDataSize = dataSize; }
+    } else {
+      newFileData = fileData;
+      newDataSize = dataSize;
+      ((int*)newFileData)[position] = value;
+    }
+    success = SaveFileData(f, newFileData, newDataSize);
+    RL_FREE(newFileData);
+  } else {
+    dataSize = (position + 1)*sizeof(int);
+    fileData = (unsigned char*)RL_MALLOC(dataSize);
+    ((int*)fileData)[position] = value;
+    success = SaveFileData(f, fileData, dataSize);
+    UnloadFileData(fileData);
+  }
+  return success;
+}
+static int jank_i32_at(unsigned char* data, int i) { return ((int*)data)[i]; }")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def STORAGE-FILE "storage.data")
+(def POS-SCORE 0)
+(def POS-HISCORE 1)
+
+(defn- save-slot!
+  "The C's SaveStorageValue(position, value) via the shim; jank-bool result
+  (a jank fn can't return the shim's native bool, rule 2)."
+  [pos value]
+  (if (cpp/jank_save_slot STORAGE-FILE (int pos) (int value)) true false))
+
+(defn- load-slot
+  "The C's LoadStorageValue: the i32 at byte position `pos`, or 0 when the
+  file is missing or too short."
+  [pos]
+  (let [size (cpp/int 0)
+        data (cpp/LoadFileData STORAGE-FILE (cpp/& size))
+        n (int (+ 0.0 size))                  ; box the out-param
+        v (if (>= n (* (inc pos) 4))
+            (int (cpp/jank_i32_at data pos))
+            0)]
+    (cpp/UnloadFileData data)                 ; free(NULL) is a no-op
+    v))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - storage values (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [score hiscore frames-counter].
+  (loop [score 0 hiscore 0 fc 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [roll? (if (cpp/IsKeyPressed cpp/KEY_R) true false)
+            enter? (if (cpp/IsKeyPressed cpp/KEY_ENTER) true false)
+            space? (if (cpp/IsKeyPressed cpp/KEY_SPACE) true false)
+            score (if roll? (cpp/GetRandomValue 1000 2000) score)
+            hiscore (if roll? (cpp/GetRandomValue 2000 4000) hiscore)
+            ;; the C's else-if: SPACE loads only when ENTER didn't save
+            load? (and (not enter?) space?)
+            score (if load? (load-slot POS-SCORE) score)
+            hiscore (if load? (load-slot POS-HISCORE) hiscore)]
+
+        (when enter?
+          (save-slot! POS-SCORE score)
+          (save-slot! POS-HISCORE hiscore))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText (str "SCORE: " score) 280 130 40 cpp/MAROON)
+        (cpp/DrawText (str "HI-SCORE: " hiscore) 210 200 50 cpp/BLACK)
+
+        (cpp/DrawText (str "frames: " fc) 10 10 20 cpp/LIME)
+
+        (cpp/DrawText "Press R to generate random numbers" 220 40 20 cpp/LIGHTGRAY)
+        (cpp/DrawText "Press ENTER to SAVE values" 250 310 20 cpp/LIGHTGRAY)
+        (cpp/DrawText "Press SPACE to LOAD values" 252 350 20 cpp/LIGHTGRAY)
+
+        (cpp/EndDrawing)
+
+        (recur score hiscore (inc fc)))))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,117 @@
+(ns raylib-examples.logo-anim
+  "raylib [shapes] example - logo animation, ported to jank.
+
+  The raylib logo assembles itself via a small state machine:
+  0) blinking square  1) top+left bars grow  2) bottom+right bars grow
+  3) letters appear then fade  4) press R to replay. Q quits.
+  Based on raylib/examples/shapes/shapes_logo_raylib_anim.c"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+;; quot returns a real in jank; int-cast so these feed raylib's int params.
+(def CX (int (quot WIDTH 2)))
+(def CY (int (quot HEIGHT 2)))
+(def LOGO-X (- CX 128))
+(def LOGO-Y (- CY 128))
+(def WHITE-X (- CX 112))
+(def WHITE-Y (- CY 112))
+(def TEXT-X (- CX 44))
+(def TEXT-Y (+ CY 48))
+
+(defn initial-state []
+  {:state 0 :frames-counter 0 :letters-count 0
+   :top-width 16 :left-height 16 :bottom-width 16 :right-height 16
+   :alpha 1.0})
+
+(defn tick [g]
+  (let [state (:state g)]
+    (cond
+      (= state 0)
+      (let [fc (inc (:frames-counter g))]
+        (if (= fc 120)
+          (assoc g :state 1 :frames-counter 0)
+          (assoc g :frames-counter fc)))
+
+      (= state 1)
+      (let [tw (+ (:top-width g) 4)
+            lh (+ (:left-height g) 4)]
+        (cond-> (assoc g :top-width tw :left-height lh)
+          (= tw 256) (assoc :state 2)))
+
+      (= state 2)
+      (let [bw (+ (:bottom-width g) 4)
+            rh (+ (:right-height g) 4)]
+        (cond-> (assoc g :bottom-width bw :right-height rh)
+          (= bw 256) (assoc :state 3)))
+
+      (= state 3)
+      (let [fc0 (inc (:frames-counter g))
+            [fc lc] (if (pos? (quot fc0 12))
+                      [0 (inc (:letters-count g))]
+                      [fc0 (:letters-count g)])]
+        (if (>= lc 10)
+          (let [a (- (:alpha g) 0.02)]
+            (if (<= a 0.0)
+              (assoc g :alpha 0.0 :state 4 :frames-counter fc :letters-count lc)
+              (assoc g :alpha a :frames-counter fc :letters-count lc)))
+          (assoc g :frames-counter fc :letters-count lc)))
+
+      (= state 4)
+      (if (cpp/IsKeyPressed cpp/KEY_R) (initial-state) g)
+
+      :else g)))
+
+(defn draw [g]
+  (let [state (:state g)]
+    (cond
+      (= state 0)
+      (when (< (mod (:frames-counter g) 32) 16.0)
+        (cpp/DrawRectangle LOGO-X LOGO-Y 16 16 cpp/BLACK))
+
+      (= state 1)
+      (do
+        (cpp/DrawRectangle LOGO-X LOGO-Y (:top-width g) 16 cpp/BLACK)
+        (cpp/DrawRectangle LOGO-X LOGO-Y 16 (:left-height g) cpp/BLACK))
+
+      (= state 2)
+      (do
+        (cpp/DrawRectangle LOGO-X LOGO-Y (:top-width g) 16 cpp/BLACK)
+        (cpp/DrawRectangle LOGO-X LOGO-Y 16 (:left-height g) cpp/BLACK)
+        (cpp/DrawRectangle (+ LOGO-X 240) LOGO-Y 16 (:right-height g) cpp/BLACK)
+        (cpp/DrawRectangle LOGO-X (+ LOGO-Y 240) (:bottom-width g) 16 cpp/BLACK))
+
+      (= state 3)
+      (let [a  (cpp/float (:alpha g))
+            fb (cpp/Fade cpp/BLACK a)
+            fw (cpp/Fade cpp/RAYWHITE a)
+            n  (min (:letters-count g) 6)]
+        (cpp/DrawRectangle LOGO-X LOGO-Y (:top-width g) 16 fb)
+        (cpp/DrawRectangle LOGO-X (+ LOGO-Y 16) 16 (- (:left-height g) 32) fb)
+        (cpp/DrawRectangle (+ LOGO-X 240) (+ LOGO-Y 16) 16 (- (:right-height g) 32) fb)
+        (cpp/DrawRectangle LOGO-X (+ LOGO-Y 240) (:bottom-width g) 16 fb)
+        (cpp/DrawRectangle WHITE-X WHITE-Y 224 224 fw)
+        (cpp/DrawText (subs "raylib" 0 n) TEXT-X TEXT-Y 50 fb))
+
+      (= state 4)
+      (cpp/DrawText "[R] REPLAY - Q quits" 300 200 20 cpp/GRAY)
+
+      :else nil)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - logo animation (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop [g (initial-state)]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [g (tick g)]
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (draw g)
+        (cpp/EndDrawing)
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur g)))))
+
+  (cpp/CloseWindow))

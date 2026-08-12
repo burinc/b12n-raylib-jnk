@@ -1,0 +1,81 @@
+(ns raylib-examples.vector-angle
+  "raylib [shapes] example - vector angle, ported to jank.
+
+  Shows two ways to measure an angle. MODE 0: the angle between line
+  v0->v1 and line v0->v2 (right-click moves v1). MODE 1: the angle of
+  line v0->v2 from horizontal. SPACE switches mode, Q quits.
+  Based on raylib/examples/shapes/shapes_vector_angle.c
+  (jank-native: Vector2Angle/Vector2LineAngle reimplemented via C atan2)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def PI 3.141592653589793)
+(def RAD2DEG (/ 180.0 PI))
+(def V0X (/ WIDTH 2.0))    ; 400.0
+(def V0Y (/ HEIGHT 2.0))   ; 225.0
+
+;; raymath's Vector2LineAngle(start,end)*RAD2DEG (degrees).
+(defn line-angle-deg [sx sy ex ey]
+  (* (- (cpp/atan2 (- ey sy) (- ex sx))) RAD2DEG))
+
+;; raymath's Vector2Angle(a,b)*RAD2DEG - signed angle between two vectors
+;; (magnitude-independent, so no normalization needed).
+(defn vec-angle-deg [ax ay bx by]
+  (* (cpp/atan2 (- (* ax by) (* ay bx)) (+ (* ax bx) (* ay by))) RAD2DEG))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - vector angle (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread v1 (draggable in mode 0) and the current mode.
+  (loop [v1x 500.0 v1y 305.0 mode 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [v2x  (+ 0.0 (cpp/GetMouseX))
+            v2y  (+ 0.0 (cpp/GetMouseY))
+            mode (if (cpp/IsKeyPressed cpp/KEY_SPACE) (- 1 mode) mode)
+            ;; Right-click moves v1 in mode 0.
+            drag (and (= mode 0) (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_RIGHT))
+            v1x  (if drag v2x v1x)
+            v1y  (if drag v2y v1y)
+            mode0? (= mode 0)
+            start-angle (if mode0? (- (line-angle-deg V0X V0Y v1x v1y)) 0.0)
+            angle (if mode0?
+                    (vec-angle-deg (- v1x V0X) (- v1y V0Y) (- v2x V0X) (- v2y V0Y))
+                    (line-angle-deg V0X V0Y v2x v2y))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (if mode0?
+          (do
+            (cpp/DrawText "MODE 0: Angle between V1 and V2" 10 10 20 cpp/BLACK)
+            (cpp/DrawText "Right-click to move V2's reference (V1)" 10 30 20 cpp/DARKGRAY)
+            (cpp/DrawLineEx (cpp/Vector2 (cpp/float V0X) (cpp/float V0Y))
+                            (cpp/Vector2 (cpp/float v1x) (cpp/float v1y)) (cpp/float 2.0) cpp/BLACK)
+            (cpp/DrawLineEx (cpp/Vector2 (cpp/float V0X) (cpp/float V0Y))
+                            (cpp/Vector2 (cpp/float v2x) (cpp/float v2y)) (cpp/float 2.0) cpp/RED)
+            (cpp/DrawCircleSector (cpp/Vector2 (cpp/float V0X) (cpp/float V0Y)) (cpp/float 40.0)
+                                  (cpp/float start-angle) (cpp/float (+ start-angle angle))
+                                  32 (cpp/Fade cpp/GREEN (cpp/float 0.6))))
+          (do
+            (cpp/DrawText "MODE 1: Angle of line V0-V2 from horizontal" 10 10 20 cpp/BLACK)
+            (cpp/DrawLine 0 (quot HEIGHT 2) WIDTH (quot HEIGHT 2) cpp/LIGHTGRAY)
+            (cpp/DrawLineEx (cpp/Vector2 (cpp/float V0X) (cpp/float V0Y))
+                            (cpp/Vector2 (cpp/float v2x) (cpp/float v2y)) (cpp/float 2.0) cpp/RED)
+            (cpp/DrawCircleSector (cpp/Vector2 (cpp/float V0X) (cpp/float V0Y)) (cpp/float 40.0)
+                                  (cpp/float start-angle) (cpp/float (- start-angle angle))
+                                  32 (cpp/Fade cpp/GREEN (cpp/float 0.6)))))
+
+        (cpp/DrawText "v0" (int V0X) (int V0Y) 10 cpp/DARKGRAY)
+        (cpp/DrawText "v2" (- (int v2x) 10) (- (int v2y) 10) 10 cpp/DARKGRAY)
+        (cpp/DrawText "Press SPACE to change MODE - Q quits" 400 10 20 cpp/DARKGRAY)
+        (cpp/DrawText (str "ANGLE: " angle) 10 70 20 cpp/LIME)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur v1x v1y mode)))))
+
+  (cpp/CloseWindow))

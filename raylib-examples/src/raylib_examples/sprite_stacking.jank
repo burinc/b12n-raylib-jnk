@@ -1,0 +1,75 @@
+(ns raylib-examples.sprite-stacking
+  "raylib [textures] example - sprite stacking, ported to jank.
+
+  A voxel-style booth built by stacking 122 horizontal slices of one
+  spritesheet with DrawTexturePro, each rotated to the same angle and
+  offset vertically to fake height. A/D (or LEFT/RIGHT) spin it, the
+  mouse wheel changes the slice separation. Q quits. Redbooth model
+  (c) kluchek under CC 4.0.
+  Based on raylib/examples/textures/textures_sprite_stacking.c
+  (jank-native: rotation/spacing/speed are plain jank reals in loop
+  state; every slice's source/dest Rectangle and origin Vector2 is
+  constructed inline as a DrawTexturePro argument, never carried.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+(def STACK-COUNT 122)
+(def STACK-SCALE 3.0)
+(def SPEED-CHANGE 0.25)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - sprite stacking (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [booth (cpp/LoadTexture (str RES "booth.png"))
+        tw (int (+ 0.0 (.-width booth)))
+        th (int (+ 0.0 (.-height booth)))
+        frame-w (+ 0.0 tw)              ; one slice spans the full width
+        frame-h (/ (+ 0.0 th) STACK-COUNT) ; height split across all slices
+        scaled-w (* frame-w STACK-SCALE)
+        scaled-h (* frame-h STACK-SCALE)]
+
+    ;; state: rotation angle, slice spacing, rotation speed (all reals).
+    (loop [rotation 0.0 spacing 2.0 speed 30.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [spacing (+ spacing (* 0.1 (+ 0.0 (cpp/GetMouseWheelMove))))
+              spacing (max 0.0 (min 5.0 spacing))
+              speed (if (or (cpp/IsKeyDown cpp/KEY_LEFT) (cpp/IsKeyDown cpp/KEY_A))
+                      (- speed SPEED-CHANGE) speed)
+              speed (if (or (cpp/IsKeyDown cpp/KEY_RIGHT) (cpp/IsKeyDown cpp/KEY_D))
+                      (+ speed SPEED-CHANGE) speed)
+              rotation (+ rotation (* speed (+ 0.0 (cpp/GetFrameTime))))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; Draw back-to-front (top slice last) so the stack reads as solid.
+          (loop [i (- STACK-COUNT 1)]
+            (when (>= i 0)
+              (let [dest-y (- (+ (/ HEIGHT 2.0) (* i spacing))
+                              (/ (* spacing STACK-COUNT) 2.0))]
+                (cpp/DrawTexturePro booth
+                                    (cpp/Rectangle (cpp/float 0.0) (cpp/float (* i frame-h))
+                                                   (cpp/float frame-w) (cpp/float frame-h))
+                                    (cpp/Rectangle (cpp/float (/ WIDTH 2.0)) (cpp/float dest-y)
+                                                   (cpp/float scaled-w) (cpp/float scaled-h))
+                                    (cpp/Vector2 (cpp/float (/ scaled-w 2.0)) (cpp/float (/ scaled-h 2.0)))
+                                    (cpp/float rotation) cpp/WHITE))
+              (recur (- i 1))))
+
+          (cpp/DrawText "A/D to spin\nmouse wheel to change separation" 10 10 20 cpp/DARKGRAY)
+          (cpp/DrawText (str "current spacing: " (/ (int (* spacing 10.0)) 10.0)) 10 60 20 cpp/DARKGRAY)
+          (cpp/DrawText (str "current speed: " (/ (int (* speed 100.0)) 100.0)) 10 82 20 cpp/DARKGRAY)
+          (cpp/DrawText "redbooth model (c) kluchek under cc 4.0 - Q quits" 10 420 20 cpp/DARKGRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur rotation spacing speed)))))
+
+    (cpp/UnloadTexture booth))
+
+  (cpp/CloseWindow))

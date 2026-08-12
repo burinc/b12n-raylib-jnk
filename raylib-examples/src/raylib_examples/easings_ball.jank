@@ -1,0 +1,83 @@
+(ns raylib-examples.easings-ball
+  "raylib [shapes] example - easings ball, ported to jank.
+
+  A ball animates through three easing stages: elastic slide-in, elastic
+  grow, then a cubic fade to green. ENTER replays, R restarts the current
+  stage, Q quits. Based on raylib/examples/shapes/shapes_easings_ball.c
+  (jank-native: easing fns from reasings.h via C pow/sin)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def PI 3.141592653589793)
+
+;; Easing functions transcribed from raylib's reasings.h
+;; (t=time, b=begin, c=change, d=duration).
+(defn ease-elastic-out [t b c d]
+  (if (= t 0.0) b
+    (let [tt (/ t d)]
+      (if (= tt 1.0) (+ b c)
+        (let [p (* d 0.3)
+              s (/ p 4.0)]
+          (+ (* c (cpp/pow 2.0 (* -10.0 tt))
+                (cpp/sin (/ (* (- (* tt d) s) (* 2.0 PI)) p)))
+             c b))))))
+
+(defn ease-elastic-in [t b c d]
+  (if (= t 0.0) b
+    (let [tt (/ t d)]
+      (if (= tt 1.0) (+ b c)
+        (let [p    (* d 0.3)
+              s    (/ p 4.0)
+              t1   (- tt 1.0)
+              post (* c (cpp/pow 2.0 (* 10.0 t1)))]
+          (+ (- (* post (cpp/sin (/ (* (- (* t1 d) s) (* 2.0 PI)) p)))) b))))))
+
+(defn ease-cubic-out [t b c d]
+  (let [tt (- (/ t d) 1.0)]
+    (+ (* c (+ (* tt tt tt) 1.0)) b)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - easings ball (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [state frames-counter ball-x ball-radius alpha].
+  (loop [state 0 fc 0 bx -100 radius 20 alpha 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [[state fc bx radius alpha]
+            (cond
+              (= state 0) (let [fc (inc fc)
+                                bx (int (ease-elastic-out (+ 0.0 fc) -100.0 (+ (/ WIDTH 2.0) 100.0) 120.0))]
+                            (if (>= fc 120) [1 0 bx radius alpha] [0 fc bx radius alpha]))
+              (= state 1) (let [fc (inc fc)
+                                radius (int (ease-elastic-in (+ 0.0 fc) 20.0 500.0 200.0))]
+                            (if (>= fc 200) [2 0 bx radius alpha] [1 fc bx radius alpha]))
+              (= state 2) (let [fc (inc fc)
+                                alpha (ease-cubic-out (+ 0.0 fc) 0.0 1.0 200.0)]
+                            (if (>= fc 200) [3 0 bx radius alpha] [2 fc bx radius alpha]))
+              :else (if (cpp/IsKeyPressed cpp/KEY_ENTER)
+                      [0 0 -100 20 0.0]
+                      [state fc bx radius alpha]))
+            fc (if (cpp/IsKeyPressed cpp/KEY_R) 0 fc)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (when (>= state 2)
+          (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/GREEN))
+
+        (cpp/DrawCircle bx 200 (cpp/float (+ 0.0 radius))
+                        (cpp/Fade cpp/RED (cpp/float (- 1.0 alpha))))
+
+        (when (= state 3)
+          (cpp/DrawText "PRESS [ENTER] TO PLAY AGAIN!" 240 200 20 cpp/BLACK))
+
+        (cpp/DrawText "R restart stage - Q quit" 10 (- HEIGHT 30) 20 cpp/GRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur state fc bx radius alpha)))))
+
+  (cpp/CloseWindow))

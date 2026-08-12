@@ -1,0 +1,90 @@
+(ns raylib-examples.music-stream
+  "raylib [audio] example - music stream, ported to jank.
+
+  An MP3 streamed with UpdateMusicStream called every frame, with a
+  progress bar and live pan/volume sliders. SPACE restarts, P
+  pauses/resumes, LEFT/RIGHT pan, UP/DOWN volume, Q quits.
+  Based on raylib/examples/audio/audio_music_stream.c
+  (jank-native: the Music struct is an outer-let local like a
+  Texture2D; GetMusicTimePlayed/GetMusicTimeLength returns are boxed
+  with (+ 0.0 ...) at the binding site before jank arithmetic.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MP3 "../jank-raylib-sys/raylib/examples/audio/resources/country.mp3")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - music stream (jank)")
+  (cpp/InitAudioDevice)
+  (cpp/SetTargetFPS 30)
+
+  (let [music (cpp/LoadMusicStream MP3)]
+    (cpp/PlayMusicStream music)
+    (cpp/SetMusicPan music (cpp/float 0.0))
+    (cpp/SetMusicVolume music (cpp/float 0.8))
+
+    ;; Thread [paused? pan volume].
+    (loop [paused false pan 0.0 volume 0.8]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateMusicStream music)
+
+        (when (cpp/IsKeyPressed cpp/KEY_SPACE)
+          (cpp/StopMusicStream music)
+          (cpp/PlayMusicStream music))
+
+        (let [paused (if (cpp/IsKeyPressed cpp/KEY_P) (not paused) paused)
+              _ (when (cpp/IsKeyPressed cpp/KEY_P)
+                  (if paused
+                    (cpp/PauseMusicStream music)
+                    (cpp/ResumeMusicStream music)))
+
+              pan (if (cpp/IsKeyDown cpp/KEY_LEFT) (- pan 0.05) pan)
+              pan (if (cpp/IsKeyDown cpp/KEY_RIGHT) (+ pan 0.05) pan)
+              pan (if (< pan -1.0) -1.0 (if (> pan 1.0) 1.0 pan))
+              _ (when (or (cpp/IsKeyDown cpp/KEY_LEFT) (cpp/IsKeyDown cpp/KEY_RIGHT))
+                  (cpp/SetMusicPan music (cpp/float pan)))
+
+              volume (if (cpp/IsKeyDown cpp/KEY_DOWN) (- volume 0.05) volume)
+              volume (if (cpp/IsKeyDown cpp/KEY_UP) (+ volume 0.05) volume)
+              volume (if (< volume 0.0) 0.0 (if (> volume 1.0) 1.0 volume))
+              _ (when (or (cpp/IsKeyDown cpp/KEY_DOWN) (cpp/IsKeyDown cpp/KEY_UP))
+                  (cpp/SetMusicVolume music (cpp/float volume)))
+
+              played (+ 0.0 (cpp/GetMusicTimePlayed music))
+              length (+ 0.0 (cpp/GetMusicTimeLength music))
+              t (if (> length 0.0) (/ played length) 0.0)
+              t (if (> t 1.0) 1.0 t)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/DrawText "MUSIC SHOULD BE PLAYING! (Q quits)" 230 150 20 cpp/LIGHTGRAY)
+
+          (cpp/DrawText "LEFT-RIGHT for PAN CONTROL" 320 74 10 cpp/DARKBLUE)
+          (cpp/DrawRectangle 300 100 200 12 cpp/LIGHTGRAY)
+          (cpp/DrawRectangleLines 300 100 200 12 cpp/GRAY)
+          (cpp/DrawRectangle (int (- (+ 300 (* (/ (+ pan 1.0) 2.0) 200)) 5)) 92 10 28 cpp/DARKGRAY)
+
+          (cpp/DrawRectangle 200 200 400 12 cpp/LIGHTGRAY)
+          (cpp/DrawRectangle 200 200 (int (* t 400.0)) 12 cpp/MAROON)
+          (cpp/DrawRectangleLines 200 200 400 12 cpp/GRAY)
+
+          (cpp/DrawText "PRESS SPACE TO RESTART MUSIC" 215 250 20 cpp/LIGHTGRAY)
+          (cpp/DrawText "PRESS P TO PAUSE/RESUME MUSIC" 208 280 20 cpp/LIGHTGRAY)
+
+          (cpp/DrawText "UP-DOWN for VOLUME CONTROL" 320 334 10 cpp/DARKGREEN)
+          (cpp/DrawRectangle 300 360 200 12 cpp/LIGHTGRAY)
+          (cpp/DrawRectangleLines 300 360 200 12 cpp/GRAY)
+          (cpp/DrawRectangle (int (- (+ 300 (* volume 200)) 5)) 352 10 28 cpp/DARKGRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur paused pan volume)))))
+
+    (cpp/UnloadMusicStream music))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

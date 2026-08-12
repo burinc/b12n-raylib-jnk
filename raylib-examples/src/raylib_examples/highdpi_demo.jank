@@ -1,0 +1,125 @@
+(ns raylib-examples.highdpi-demo
+  "raylib [core] example - highdpi demo, ported to jank.
+
+  Visualises the difference between logical points and physical pixels on
+  a HighDPI display: an orange grid measured in logical points and a
+  translucent-blue grid measured in physical pixels, plus the live DPI
+  scale. Resize the window to watch the grids diverge; [N] moves to the
+  next monitor. ESC quits.
+  Based on raylib/examples/core/core_highdpi_demo.c
+
+  jank-native notes:
+  - GetWindowScaleDPI returns a native Vector2; its .-x is read once per
+    frame in -main and re-boxed via `(nth [...] 0)` (rule 4).
+  - The centred-text helper measures with MeasureTextEx (native Vector2
+    return, .-x/.-y read inside the helper - fine) and picks its Color
+    inline by keyword id, since a jank fn can't take a native Color arg
+    (rule 2). Colours are chosen with nested lookups that always end in a
+    concrete cpp/Color.
+  - The CLITERAL(Color){0,121,241,100} pixel-grid fill is BLUE at alpha
+    100/255, so it's built with `(cpp/Fade cpp/BLUE (cpp/float 0.392))`
+    (cpp/Color's unsigned-char ctor rejects jank ints - see the guide)."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def CELL 50)
+
+;; vertical layout of the two grids (mirrors the C offsets)
+(def LG-DESC-Y 120)
+(def LG-LABEL-Y 150)
+(def LG-TOP 180)
+(def LG-BOTTOM 260)
+(def PX-TOP 240)
+(def PX-BOTTOM 320)
+(def PX-LABEL-Y 350)
+(def PX-DESC-Y 380)
+
+(defn- draw-text-center
+  "Draw `text` horizontally+vertically centred on (x, y). Colour is chosen
+  by keyword id INLINE at the draw call - a jank fn can neither receive
+  nor return a native Color (rule 2), so the nested `if` picks a concrete
+  cpp/Color right in the argument position."
+  [text x y font-size cid]
+  (let [font (cpp/GetFontDefault)
+        fs   (cpp/float (+ 0.0 font-size))
+        sz   (cpp/MeasureTextEx font text fs (cpp/float 3.0))
+        w    (nth [(+ 0.0 (.-x sz))] 0)
+        h    (nth [(+ 0.0 (.-y sz))] 0)
+        px   (- x (/ w 2.0))
+        py   (- y (/ h 2.0))]
+    (cpp/DrawTextEx font text (cpp/Vector2 (cpp/float px) (cpp/float py))
+                    fs (cpp/float 3.0)
+                    (if (= cid :dark) cpp/DARKGRAY
+                        (if (= cid :orange) cpp/ORANGE
+                            (if (= cid :blue) cpp/BLUE cpp/LIGHTGRAY))))))
+
+(defn -main [& args]
+  ;; SetConfigFlags ORs each call into its state, so call once per flag
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_RESIZABLE)
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - highdpi demo (jank)")
+  (cpp/SetWindowMinSize 450 450)
+  (cpp/SetTargetFPS 60)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mcount (int (cpp/GetMonitorCount))]
+        (when (and (> mcount 1) (cpp/IsKeyPressed cpp/KEY_N))
+          (cpp/SetWindowMonitor (mod (+ (int (cpp/GetCurrentMonitor)) 1) mcount)))
+
+        (let [cur (int (cpp/GetCurrentMonitor))
+              dpi (cpp/GetWindowScaleDPI)
+              dpx (nth [(+ 0.0 (.-x dpi))] 0)
+              cell-px (int (/ CELL dpx))
+              sw  (int (cpp/GetScreenWidth))
+              rw  (int (cpp/GetRenderWidth))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (let [wc (int (/ sw 2))]
+            (draw-text-center (str "Dpi Scale: " dpx) wc 30 40 :dark)
+            (draw-text-center (str "Monitor: " (+ cur 1) "/" mcount " ([N] next monitor)") wc 70 20 :light)
+            (draw-text-center (str "Window is " sw " \"logical points\" wide") wc LG-DESC-Y 20 :orange)
+
+            ;; logical-points grid (orange)
+            (loop [i CELL odd true]
+              (when (< i sw)
+                (when odd
+                  (cpp/DrawRectangle i LG-TOP CELL (- LG-BOTTOM LG-TOP) cpp/ORANGE))
+                (draw-text-center (str i) i LG-LABEL-Y 10 :light)
+                (cpp/DrawLine i (+ LG-LABEL-Y 10) i LG-BOTTOM cpp/GRAY)
+                (recur (+ i CELL) (not odd))))
+
+            ;; physical-pixels grid (translucent blue), with min text spacing
+            (loop [i CELL odd true last-text-x -30]
+              (if (< i rw)
+                (let [x (int (/ i dpx))
+                      show? (>= (- x last-text-x) 30)]
+                  (when odd
+                    (cpp/DrawRectangle x PX-TOP cell-px (- PX-BOTTOM PX-TOP)
+                                       (cpp/Fade cpp/BLUE (cpp/float 0.392))))
+                  (cpp/DrawLine x PX-TOP x (- PX-LABEL-Y 10) cpp/GRAY)
+                  (when show?
+                    (draw-text-center (str i) x PX-LABEL-Y 10 :light))
+                  (recur (+ i CELL) (not odd) (if show? x last-text-x)))
+                nil))
+
+            (draw-text-center (str "Window is " rw " \"physical pixels\" wide") wc PX-DESC-Y 20 :blue)
+
+            ;; bottom-right proof text
+            (let [font (cpp/GetFontDefault)
+                  msg  "Can you see this?"
+                  sz   (cpp/MeasureTextEx font msg (cpp/float 20.0) (cpp/float 3.0))
+                  mw   (nth [(+ 0.0 (.-x sz))] 0)
+                  mh   (nth [(+ 0.0 (.-y sz))] 0)]
+              (cpp/DrawTextEx font msg
+                              (cpp/Vector2 (cpp/float (- (- sw mw) 5.0))
+                                           (cpp/float (- (- (int (cpp/GetScreenHeight)) mh) 5.0)))
+                              (cpp/float 20.0) (cpp/float 3.0) cpp/LIGHTGRAY)))
+
+          (cpp/EndDrawing)
+          (recur)))))
+
+  (cpp/CloseWindow))

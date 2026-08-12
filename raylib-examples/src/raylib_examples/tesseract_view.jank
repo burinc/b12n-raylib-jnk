@@ -1,0 +1,87 @@
+(ns raylib-examples.tesseract-view
+  "raylib [models] example - tesseract view, ported to jank.
+
+  A rotating 4D hypercube: the XW plane spins, then each vertex
+  projects from perspective point (0,0,0,3) down to XYZ. Sphere size
+  shows each vertex's W value; edges connect vertices differing in
+  exactly one coordinate. Q quits.
+  Based on raylib/examples/models/models_tesseract_view.c
+  (jank-native: the 16 Vector4 vertices are jank [x y z w] vectors,
+  the 32 edges are precomputed once at load, and the rotation /
+  projection is scalar jank math; only the final DrawSphere /
+  DrawLine3D calls build native Vector3s inline.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def DEG2RAD 0.017453293)
+
+;; The 16 corners of the unit tesseract: every +-1 combination.
+(def VERTS
+  (vec (for [x [1 -1] y [1 -1] z [1 -1] w [1 -1]] [x y z w])))
+
+;; Edges connect vertices that differ in exactly one coordinate.
+(def EDGES
+  (vec (for [i (range 16)
+             j (range 16)
+             :when (and (< i j)
+                        (= 3 (count (filter true? (map = (nth VERTS i) (nth VERTS j))))))]
+         [i j])))
+
+(defn transform-vertex [[x y z w] r]
+  ;; Rotate the XW plane by r, then project from (0,0,0,3) to W=0.
+  (let [xr (- (* x (cpp/cos r)) (* w (cpp/sin r)))
+        wr (+ (* x (cpp/sin r)) (* w (cpp/cos r)))
+        c (/ 3.0 (- 3.0 wr))]
+    [(* c xr) (* c y) (* c z) wr]))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - tesseract view (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 4.0) (cpp/float 4.0) (cpp/float 4.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 1.0))
+                             (cpp/float 50.0)
+                             cpp/CAMERA_PERSPECTIVE)]
+
+    ;; Thread the accumulated time.
+    (loop [t 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [t (+ t (+ 0.0 (cpp/GetFrameTime)))
+              r (* DEG2RAD (* 45.0 t))
+              transformed (mapv (fn [v] (transform-vertex v r)) VERTS)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+
+          ;; Vertex spheres sized by |W|.
+          (doseq [[tx ty tz w] transformed]
+            (let [aw (if (< w 0.0) (- 0.0 w) w)]
+              (cpp/DrawSphere (cpp/Vector3 (cpp/float tx) (cpp/float ty) (cpp/float tz))
+                              (cpp/float (* 0.1 aw))
+                              cpp/RED)))
+
+          ;; The 32 edges.
+          (doseq [[i j] EDGES]
+            (let [[ax ay az] (nth transformed i)
+                  [bx by bz] (nth transformed j)]
+              (cpp/DrawLine3D (cpp/Vector3 (cpp/float ax) (cpp/float ay) (cpp/float az))
+                              (cpp/Vector3 (cpp/float bx) (cpp/float by) (cpp/float bz))
+                              cpp/MAROON)))
+
+          (cpp/EndMode3D)
+
+          (cpp/DrawText "A 4D hypercube projected to 3D (Q quits)" 10 10 20 cpp/GRAY)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur t)))))
+
+    nil)
+
+  (cpp/CloseWindow))

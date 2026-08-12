@@ -1,0 +1,539 @@
+(ns raylib-examples.text-3d-drawing
+  "raylib [text] example - 3d drawing, ported to jank.
+
+  Draws a 2D bitmap font as textured quads in 3D space: each glyph is a
+  quad (or two, for the backface) whose UVs map into the font atlas, so
+  the whole string floats above a spinning cube. The `~~World~~` markup
+  waves via per-codepoint sine offsets. Controls:
+    F1 letter boundary, F2 text boundary, F3 camera (ORBITAL/FREE),
+    Left/Right font size, Up/Down font spacing, PgUp/PgDown line
+    spacing, Insert/Delete (held) layer distance, Home/End layer count,
+    Tab multicolor, click the cube for new colors, drag-drop a .ttf/.fnt
+    to swap fonts, and just type to edit the text.
+  Based on raylib/examples/text/text_3d_drawing.c (4/4 complexity).
+
+  jank-native notes:
+  - The rlgl glyph-quad core (DrawTextCodepoint3D / DrawText3D /
+    DrawTextWave3D / MeasureTextWave3D / GenerateRandomColor) works on
+    native Font/Color/Vector3/WaveTextConfig values and the two global
+    SHOW_*_BOUNDRY toggles - none of which a jank fn may return or
+    carry through loop/recur - so they live verbatim in one C shim next
+    to the per-frame update, the 3D scene draw, and the quads-counted
+    HUD stats. jank owns the window lifecycle, the frame loop, the
+    frame boundaries, the 2D instruction text and DrawFPS. Nothing is
+    simplified: drag-drop font swap and live text typing stay faithful
+    because they run inside the C update shim jank calls each frame."
+  (:include "raylib.h" "rlgl.h" "math.h" "stddef.h"))
+
+;; The whole rlgl text engine + per-frame state, near-verbatim from the C.
+(cpp/raw "
+#define JANK_TD_LETTER_BOUNDRY_SIZE   0.25f
+#define JANK_TD_TEXT_MAX_LAYERS       32
+#define JANK_TD_LETTER_BOUNDRY_COLOR  VIOLET
+
+typedef struct JankWaveTextConfig {
+  Vector3 waveRange;
+  Vector3 waveSpeed;
+  Vector3 waveOffset;
+} JankWaveTextConfig;
+
+/* --- global toggles (F1/F2) --- */
+static bool JANK_SHOW_LETTER_BOUNDRY = false;
+static bool JANK_SHOW_TEXT_BOUNDRY = false;
+
+/* --- per-frame state (all native, so it stays C-side) --- */
+static Font jank_td_font;
+static Camera3D jank_td_camera;
+static int jank_td_camera_mode = CAMERA_ORBITAL;
+static Shader jank_td_alpha_discard;
+static JankWaveTextConfig jank_td_wcfg;
+static Color jank_td_light;
+static Color jank_td_dark;
+static Color jank_td_multi[JANK_TD_TEXT_MAX_LAYERS] = { 0 };
+static char jank_td_text[64] = \"Hello ~~World~~ in 3D!\";
+static Vector3 jank_td_tbox = { 0 };
+static Vector3 jank_td_cube_position = { 0.0f, 1.0f, 0.0f };
+static Vector3 jank_td_cube_size = { 2.0f, 2.0f, 2.0f };
+static float jank_td_font_size = 0.8f;
+static float jank_td_font_spacing = 0.05f;
+static float jank_td_line_spacing = -0.1f;
+static float jank_td_layer_distance = 0.01f;
+static float jank_td_time = 0.0f;
+static int jank_td_layers = 1;
+static int jank_td_quads = 0;
+static bool jank_td_spin = true;
+static bool jank_td_multicolor = false;
+
+/* Draw a codepoint at a position in 3D space (a textured quad). */
+static void jank_DrawTextCodepoint3D(Font font, int codepoint, Vector3 position, float fontSize, bool backface, Color tint) {
+  int index = GetGlyphIndex(font, codepoint);
+  float scale = fontSize/(float)font.baseSize;
+
+  position.x += (float)(font.glyphs[index].offsetX - font.glyphPadding)*scale;
+  position.z += (float)(font.glyphs[index].offsetY - font.glyphPadding)*scale;
+
+  Rectangle srcRec = { font.recs[index].x - (float)font.glyphPadding, font.recs[index].y - (float)font.glyphPadding,
+                       font.recs[index].width + 2.0f*font.glyphPadding, font.recs[index].height + 2.0f*font.glyphPadding };
+
+  float width = (float)(font.recs[index].width + 2.0f*font.glyphPadding)*scale;
+  float height = (float)(font.recs[index].height + 2.0f*font.glyphPadding)*scale;
+
+  if (font.texture.id > 0) {
+    const float x = 0.0f;
+    const float y = 0.0f;
+    const float z = 0.0f;
+
+    const float tx = srcRec.x/font.texture.width;
+    const float ty = srcRec.y/font.texture.height;
+    const float tw = (srcRec.x+srcRec.width)/font.texture.width;
+    const float th = (srcRec.y+srcRec.height)/font.texture.height;
+
+    if (JANK_SHOW_LETTER_BOUNDRY) DrawCubeWiresV((Vector3){ position.x + width/2, position.y, position.z + height/2}, (Vector3){ width, JANK_TD_LETTER_BOUNDRY_SIZE, height }, JANK_TD_LETTER_BOUNDRY_COLOR);
+
+    rlCheckRenderBatchLimit(4 + 4*backface);
+    rlSetTexture(font.texture.id);
+
+    rlPushMatrix();
+      rlTranslatef(position.x, position.y, position.z);
+
+      rlBegin(RL_QUADS);
+        rlColor4ub(tint.r, tint.g, tint.b, tint.a);
+
+        /* Front Face */
+        rlNormal3f(0.0f, 1.0f, 0.0f);
+        rlTexCoord2f(tx, ty); rlVertex3f(x,         y, z);
+        rlTexCoord2f(tx, th); rlVertex3f(x,         y, z + height);
+        rlTexCoord2f(tw, th); rlVertex3f(x + width, y, z + height);
+        rlTexCoord2f(tw, ty); rlVertex3f(x + width, y, z);
+
+        if (backface) {
+          /* Back Face */
+          rlNormal3f(0.0f, -1.0f, 0.0f);
+          rlTexCoord2f(tx, ty); rlVertex3f(x,         y, z);
+          rlTexCoord2f(tw, ty); rlVertex3f(x + width, y, z);
+          rlTexCoord2f(tw, th); rlVertex3f(x + width, y, z + height);
+          rlTexCoord2f(tx, th); rlVertex3f(x,         y, z + height);
+        }
+      rlEnd();
+    rlPopMatrix();
+
+    rlSetTexture(0);
+  }
+}
+
+/* Draw a 2D text in 3D space. */
+static void jank_DrawText3D(Font font, const char *text, Vector3 position, float fontSize, float fontSpacing, float lineSpacing, bool backface, Color tint) {
+  int length = TextLength(text);
+  float textOffsetY = 0.0f;
+  float textOffsetX = 0.0f;
+  float scale = fontSize/(float)font.baseSize;
+
+  for (int i = 0; i < length;) {
+    int codepointByteCount = 0;
+    int codepoint = GetCodepoint(&text[i], &codepointByteCount);
+    int index = GetGlyphIndex(font, codepoint);
+    if (codepoint == 0x3f) codepointByteCount = 1;
+
+    if (codepoint == '\\n') {
+      textOffsetY += fontSize + lineSpacing;
+      textOffsetX = 0.0f;
+    } else {
+      if ((codepoint != ' ') && (codepoint != '\\t')) {
+        jank_DrawTextCodepoint3D(font, codepoint, (Vector3){ position.x + textOffsetX, position.y, position.z + textOffsetY }, fontSize, backface, tint);
+      }
+      if (font.glyphs[index].advanceX == 0) textOffsetX += (float)font.recs[index].width*scale + fontSpacing;
+      else textOffsetX += (float)font.glyphs[index].advanceX*scale + fontSpacing;
+    }
+    i += codepointByteCount;
+  }
+}
+
+/* Draw a 2D text in 3D space, waving the parts wrapped in `~~`. */
+static void jank_DrawTextWave3D(Font font, const char *text, Vector3 position, float fontSize, float fontSpacing, float lineSpacing, bool backface, JankWaveTextConfig *config, float time, Color tint) {
+  int length = TextLength(text);
+  float textOffsetY = 0.0f;
+  float textOffsetX = 0.0f;
+  float scale = fontSize/(float)font.baseSize;
+  bool wave = false;
+
+  for (int i = 0, k = 0; i < length; ++k) {
+    int codepointByteCount = 0;
+    int codepoint = GetCodepoint(&text[i], &codepointByteCount);
+    int index = GetGlyphIndex(font, codepoint);
+    if (codepoint == 0x3f) codepointByteCount = 1;
+
+    if (codepoint == '\\n') {
+      textOffsetY += fontSize + lineSpacing;
+      textOffsetX = 0.0f;
+      k = 0;
+    } else if (codepoint == '~') {
+      if (GetCodepoint(&text[i+1], &codepointByteCount) == '~') {
+        codepointByteCount += 1;
+        wave = !wave;
+      }
+    } else {
+      if ((codepoint != ' ') && (codepoint != '\\t')) {
+        Vector3 pos = position;
+        if (wave) {
+          pos.x += sinf(time*config->waveSpeed.x-k*config->waveOffset.x)*config->waveRange.x;
+          pos.y += sinf(time*config->waveSpeed.y-k*config->waveOffset.y)*config->waveRange.y;
+          pos.z += sinf(time*config->waveSpeed.z-k*config->waveOffset.z)*config->waveRange.z;
+        }
+        jank_DrawTextCodepoint3D(font, codepoint, (Vector3){ pos.x + textOffsetX, pos.y, pos.z + textOffsetY }, fontSize, backface, tint);
+      }
+      if (font.glyphs[index].advanceX == 0) textOffsetX += (float)font.recs[index].width*scale + fontSpacing;
+      else textOffsetX += (float)font.glyphs[index].advanceX*scale + fontSpacing;
+    }
+    i += codepointByteCount;
+  }
+}
+
+/* Measure 3D text, ignoring the `~~` markup. */
+static Vector3 jank_MeasureTextWave3D(Font font, const char *text, float fontSize, float fontSpacing, float lineSpacing) {
+  int len = TextLength(text);
+  int tempLen = 0;
+  int lenCounter = 0;
+  float tempTextWidth = 0.0f;
+  float scale = fontSize/(float)font.baseSize;
+  float textHeight = scale;
+  float textWidth = 0.0f;
+  int letter = 0;
+  int index = 0;
+
+  for (int i = 0; i < len; i++) {
+    int next = 0;
+    letter = GetCodepoint(&text[i], &next);
+    index = GetGlyphIndex(font, letter);
+    if (letter == 0x3f) next = 1;
+    i += next - 1;
+
+    if (letter != '\\n') {
+      if (letter == '~' && GetCodepoint(&text[i+1], &next) == '~') {
+        i++;
+      } else {
+        lenCounter++;
+        if (font.glyphs[index].advanceX != 0) textWidth += font.glyphs[index].advanceX*scale;
+        else textWidth += (font.recs[index].width + font.glyphs[index].offsetX)*scale;
+      }
+    } else {
+      if (tempTextWidth < textWidth) tempTextWidth = textWidth;
+      lenCounter = 0;
+      textWidth = 0.0f;
+      textHeight += fontSize + lineSpacing;
+    }
+    if (tempLen < lenCounter) tempLen = lenCounter;
+  }
+  if (tempTextWidth < textWidth) tempTextWidth = textWidth;
+
+  Vector3 vec = { 0 };
+  vec.x = tempTextWidth + (float)((tempLen - 1)*fontSpacing);
+  vec.y = 0.25f;
+  vec.z = textHeight;
+  return vec;
+}
+
+/* A nice color with a random, golden-ratio-spread hue. */
+static Color jank_GenerateRandomColor(float s, float v) {
+  const float Phi = 0.618033988749895f;
+  float h = (float)GetRandomValue(0, 360);
+  h = fmodf((h + h*Phi), 360.0f);
+  return ColorFromHSV(h, s, v);
+}
+
+/* ---- jank-callable entry points ---- */
+
+static void jank_td_init(void) {
+  jank_td_camera = (Camera3D){ 0 };
+  jank_td_camera.position = (Vector3){ -10.0f, 15.0f, -10.0f };
+  jank_td_camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
+  jank_td_camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+  jank_td_camera.fovy = 45.0f;
+  jank_td_camera.projection = CAMERA_PERSPECTIVE;
+  jank_td_camera_mode = CAMERA_ORBITAL;
+
+  jank_td_font = GetFontDefault();
+  jank_td_light = MAROON;
+  jank_td_dark = RED;
+
+  jank_td_wcfg.waveSpeed.x = jank_td_wcfg.waveSpeed.y = 3.0f; jank_td_wcfg.waveSpeed.z = 0.5f;
+  jank_td_wcfg.waveOffset.x = jank_td_wcfg.waveOffset.y = jank_td_wcfg.waveOffset.z = 0.35f;
+  jank_td_wcfg.waveRange.x = jank_td_wcfg.waveRange.y = jank_td_wcfg.waveRange.z = 0.45f;
+
+  jank_td_alpha_discard = LoadShader(NULL, \"../jank-raylib-sys/raylib/examples/text/resources/shaders/glsl330/alpha_discard.fs\");
+
+  DisableCursor();
+  SetTargetFPS(60);
+}
+
+static void jank_td_update(void) {
+  UpdateCamera(&jank_td_camera, jank_td_camera_mode);
+
+  /* Handle font files dropped */
+  if (IsFileDropped()) {
+    FilePathList droppedFiles = LoadDroppedFiles();
+    if (IsFileExtension(droppedFiles.paths[0], \".ttf\")) {
+      UnloadFont(jank_td_font);
+      jank_td_font = LoadFontEx(droppedFiles.paths[0], (int)jank_td_font_size, 0, 0);
+    } else if (IsFileExtension(droppedFiles.paths[0], \".fnt\")) {
+      UnloadFont(jank_td_font);
+      jank_td_font = LoadFont(droppedFiles.paths[0]);
+      jank_td_font_size = (float)jank_td_font.baseSize;
+    }
+    UnloadDroppedFiles(droppedFiles);
+  }
+
+  /* Handle events */
+  if (IsKeyPressed(KEY_F1)) JANK_SHOW_LETTER_BOUNDRY = !JANK_SHOW_LETTER_BOUNDRY;
+  if (IsKeyPressed(KEY_F2)) JANK_SHOW_TEXT_BOUNDRY = !JANK_SHOW_TEXT_BOUNDRY;
+  if (IsKeyPressed(KEY_F3)) {
+    jank_td_spin = !jank_td_spin;
+    jank_td_camera = (Camera3D){ 0 };
+    jank_td_camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
+    jank_td_camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    jank_td_camera.fovy = 45.0f;
+    jank_td_camera.projection = CAMERA_PERSPECTIVE;
+    if (jank_td_spin) {
+      jank_td_camera.position = (Vector3){ -10.0f, 15.0f, -10.0f };
+      jank_td_camera_mode = CAMERA_ORBITAL;
+    } else {
+      jank_td_camera.position = (Vector3){ 10.0f, 10.0f, -10.0f };
+      jank_td_camera_mode = CAMERA_FREE;
+    }
+  }
+
+  /* Handle clicking the cube */
+  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    Ray ray = GetScreenToWorldRay(GetMousePosition(), jank_td_camera);
+    RayCollision collision = GetRayCollisionBox(ray,
+      (BoundingBox){(Vector3){ jank_td_cube_position.x - jank_td_cube_size.x/2, jank_td_cube_position.y - jank_td_cube_size.y/2, jank_td_cube_position.z - jank_td_cube_size.z/2 },
+                    (Vector3){ jank_td_cube_position.x + jank_td_cube_size.x/2, jank_td_cube_position.y + jank_td_cube_size.y/2, jank_td_cube_position.z + jank_td_cube_size.z/2 }});
+    if (collision.hit) {
+      jank_td_light = jank_GenerateRandomColor(0.5f, 0.78f);
+      jank_td_dark = jank_GenerateRandomColor(0.4f, 0.58f);
+    }
+  }
+
+  /* Handle text layers changes */
+  if (IsKeyPressed(KEY_HOME)) { if (jank_td_layers > 1) --jank_td_layers; }
+  else if (IsKeyPressed(KEY_END)) { if (jank_td_layers < JANK_TD_TEXT_MAX_LAYERS) ++jank_td_layers; }
+
+  /* Handle text changes */
+  if (IsKeyPressed(KEY_LEFT)) jank_td_font_size -= 0.5f;
+  else if (IsKeyPressed(KEY_RIGHT)) jank_td_font_size += 0.5f;
+  else if (IsKeyPressed(KEY_UP)) jank_td_font_spacing -= 0.1f;
+  else if (IsKeyPressed(KEY_DOWN)) jank_td_font_spacing += 0.1f;
+  else if (IsKeyPressed(KEY_PAGE_UP)) jank_td_line_spacing -= 0.1f;
+  else if (IsKeyPressed(KEY_PAGE_DOWN)) jank_td_line_spacing += 0.1f;
+  else if (IsKeyDown(KEY_INSERT)) jank_td_layer_distance -= 0.001f;
+  else if (IsKeyDown(KEY_DELETE)) jank_td_layer_distance += 0.001f;
+  else if (IsKeyPressed(KEY_TAB)) {
+    jank_td_multicolor = !jank_td_multicolor;
+    if (jank_td_multicolor) {
+      for (int i = 0; i < JANK_TD_TEXT_MAX_LAYERS; i++) {
+        jank_td_multi[i] = jank_GenerateRandomColor(0.5f, 0.8f);
+        jank_td_multi[i].a = GetRandomValue(0, 255);
+      }
+    }
+  }
+
+  /* Handle text input */
+  int ch = GetCharPressed();
+  if (IsKeyPressed(KEY_BACKSPACE)) {
+    int len = TextLength(jank_td_text);
+    if (len > 0) jank_td_text[len - 1] = '\\0';
+  } else if (IsKeyPressed(KEY_ENTER)) {
+    int len = TextLength(jank_td_text);
+    if (len < (int)sizeof(jank_td_text) - 1) {
+      jank_td_text[len] = '\\n';
+      jank_td_text[len+1] = '\\0';
+    }
+  } else {
+    int len = TextLength(jank_td_text);
+    if (len < (int)sizeof(jank_td_text) - 1) {
+      jank_td_text[len] = ch;
+      jank_td_text[len+1] = '\\0';
+    }
+  }
+
+  /* Measure 3D text so we can center it */
+  jank_td_tbox = jank_MeasureTextWave3D(jank_td_font, jank_td_text, jank_td_font_size, jank_td_font_spacing, jank_td_line_spacing);
+
+  jank_td_quads = 0;
+  jank_td_time += GetFrameTime();
+}
+
+static void jank_td_draw_3d(void) {
+  BeginMode3D(jank_td_camera);
+    DrawCubeV(jank_td_cube_position, jank_td_cube_size, jank_td_dark);
+    DrawCubeWires(jank_td_cube_position, 2.1f, 2.1f, 2.1f, jank_td_light);
+    DrawGrid(10, 2.0f);
+
+    BeginShaderMode(jank_td_alpha_discard);
+      /* The 3D text above the cube */
+      rlPushMatrix();
+        rlRotatef(90.0f, 1.0f, 0.0f, 0.0f);
+        rlRotatef(90.0f, 0.0f, 0.0f, -1.0f);
+        for (int i = 0; i < jank_td_layers; i++) {
+          Color clr = jank_td_light;
+          if (jank_td_multicolor) clr = jank_td_multi[i];
+          jank_DrawTextWave3D(jank_td_font, jank_td_text, (Vector3){ -jank_td_tbox.x/2.0f, jank_td_layer_distance*i, -4.5f }, jank_td_font_size, jank_td_font_spacing, jank_td_line_spacing, true, &jank_td_wcfg, jank_td_time, clr);
+        }
+        if (JANK_SHOW_TEXT_BOUNDRY) DrawCubeWiresV((Vector3){ 0.0f, 0.0f, -4.5f + jank_td_tbox.z/2 }, jank_td_tbox, jank_td_dark);
+      rlPopMatrix();
+
+      /* Don't draw the letter boundaries for the option/info text below */
+      bool slb = JANK_SHOW_LETTER_BOUNDRY;
+      JANK_SHOW_LETTER_BOUNDRY = false;
+
+      /* 3D option text (default font) */
+      rlPushMatrix();
+        rlRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+        char *opt = (char *)TextFormat(\"< SIZE: %2.1f >\", jank_td_font_size);
+        jank_td_quads += TextLength(opt);
+        Vector2 m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
+        Vector3 pos = { -m.x/2.0f, 0.01f, 2.0f};
+        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, BLUE);
+        pos.z += 0.5f + m.y;
+
+        opt = (char *)TextFormat(\"< SPACING: %2.1f >\", jank_td_font_spacing);
+        jank_td_quads += TextLength(opt);
+        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
+        pos.x = -m.x/2.0f;
+        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, BLUE);
+        pos.z += 0.5f + m.y;
+
+        opt = (char *)TextFormat(\"< LINE: %2.1f >\", jank_td_line_spacing);
+        jank_td_quads += TextLength(opt);
+        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
+        pos.x = -m.x/2.0f;
+        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, BLUE);
+        pos.z += 0.5f + m.y;
+
+        opt = (char *)TextFormat(\"< LBOX: %3s >\", slb? \"ON\" : \"OFF\");
+        jank_td_quads += TextLength(opt);
+        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
+        pos.x = -m.x/2.0f;
+        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, RED);
+        pos.z += 0.5f + m.y;
+
+        opt = (char *)TextFormat(\"< TBOX: %3s >\", JANK_SHOW_TEXT_BOUNDRY? \"ON\" : \"OFF\");
+        jank_td_quads += TextLength(opt);
+        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
+        pos.x = -m.x/2.0f;
+        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, RED);
+        pos.z += 0.5f + m.y;
+
+        opt = (char *)TextFormat(\"< LAYER DISTANCE: %.3f >\", jank_td_layer_distance);
+        jank_td_quads += TextLength(opt);
+        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
+        pos.x = -m.x/2.0f;
+        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, DARKPURPLE);
+      rlPopMatrix();
+
+      /* 3D info text (default font) */
+      opt = (char *)\"All the text displayed here is in 3D\";
+      jank_td_quads += 36;
+      m = MeasureTextEx(GetFontDefault(), opt, 1.0f, 0.05f);
+      pos = (Vector3){-m.x/2.0f, 0.01f, 2.0f};
+      jank_DrawText3D(GetFontDefault(), opt, pos, 1.0f, 0.05f, 0.0f, false, DARKBLUE);
+      pos.z += 1.5f + m.y;
+
+      opt = (char *)\"press [Left]/[Right] to change the font size\";
+      jank_td_quads += 44;
+      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
+      pos.x = -m.x/2.0f;
+      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
+      pos.z += 0.5f + m.y;
+
+      opt = (char *)\"press [Up]/[Down] to change the font spacing\";
+      jank_td_quads += 44;
+      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
+      pos.x = -m.x/2.0f;
+      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
+      pos.z += 0.5f + m.y;
+
+      opt = (char *)\"press [PgUp]/[PgDown] to change the line spacing\";
+      jank_td_quads += 48;
+      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
+      pos.x = -m.x/2.0f;
+      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
+      pos.z += 0.5f + m.y;
+
+      opt = (char *)\"press [F1] to toggle the letter boundry\";
+      jank_td_quads += 39;
+      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
+      pos.x = -m.x/2.0f;
+      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
+      pos.z += 0.5f + m.y;
+
+      opt = (char *)\"press [F2] to toggle the text boundry\";
+      jank_td_quads += 37;
+      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
+      pos.x = -m.x/2.0f;
+      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
+
+      JANK_SHOW_LETTER_BOUNDRY = slb;
+    EndShaderMode();
+  EndMode3D();
+}
+
+/* The quads-dependent, right-aligned 2D HUD stats. */
+static void jank_td_draw_stats(int screenWidth) {
+  jank_td_quads += TextLength(jank_td_text)*2*jank_td_layers;
+  char *tmp = (char *)TextFormat(\"%2i layer(s) | %s camera | %4i quads (%4i verts)\", jank_td_layers, jank_td_spin? \"ORBITAL\" : \"FREE\", jank_td_quads, jank_td_quads*4);
+  int width = MeasureText(tmp, 10);
+  DrawText(tmp, screenWidth - 20 - width, 10, 10, DARKGREEN);
+
+  tmp = (char *)\"[Home]/[End] to add/remove 3D text layers\";
+  width = MeasureText(tmp, 10);
+  DrawText(tmp, screenWidth - 20 - width, 25, 10, DARKGRAY);
+
+  tmp = (char *)\"[Insert]/[Delete] to increase/decrease distance between layers\";
+  width = MeasureText(tmp, 10);
+  DrawText(tmp, screenWidth - 20 - width, 40, 10, DARKGRAY);
+
+  tmp = (char *)\"click the [CUBE] for a random color\";
+  width = MeasureText(tmp, 10);
+  DrawText(tmp, screenWidth - 20 - width, 55, 10, DARKGRAY);
+
+  tmp = (char *)\"[Tab] to toggle multicolor mode\";
+  width = MeasureText(tmp, 10);
+  DrawText(tmp, screenWidth - 20 - width, 70, 10, DARKGRAY);
+}
+
+static void jank_td_cleanup(void) {
+  UnloadShader(jank_td_alpha_discard);
+  UnloadFont(jank_td_font);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  ;; SetConfigFlags ORs internally, so separate calls stack (MSAA + VSYNC
+  ;; from the C original, plus HiDPI scaling like every other example).
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_VSYNC_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI)
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - 3d drawing (jank)")
+
+  (cpp/jank_td_init)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (cpp/jank_td_update)
+
+      (cpp/BeginDrawing)
+      (cpp/ClearBackground cpp/RAYWHITE)
+      (cpp/jank_td_draw_3d)
+
+      ;; 2D instruction text + stats (jank owns the frame HUD)
+      (cpp/DrawText "Drag & drop a font file to change the font!\nType something, see what happens!\n\nPress [F3] to toggle the camera"
+                    10 35 10 cpp/BLACK)
+      (cpp/jank_td_draw_stats WIDTH)
+      (cpp/DrawFPS 10 10)
+      (cpp/EndDrawing)
+      (recur)))
+
+  (cpp/jank_td_cleanup)
+  (cpp/CloseWindow))

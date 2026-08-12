@@ -1,0 +1,320 @@
+(ns raylib-examples.game-of-life
+  "raylib [shaders] example - game of life, ported to jank.
+
+  Conway's Game of Life on a 2048x2048 world, stepped by a FRAGMENT
+  shader ping-ponging two render textures (the compute-free cousin of
+  rlgl-compute). Explore with pan (drag) + zoom (wheel or Z/X), load
+  preset patterns with keys 1-9 and 0 (random soup), R runs, P
+  pauses, D enters draw mode (paint cells with the mouse), F/S change
+  the simulation speed. ESC quits.
+  Based on raylib/examples/shaders/shaders_game_of_life.c
+
+  jank-native notes:
+  - The raygui side panel becomes keyboard controls + a drawn key
+    legend (the raygui-to-keyboard repo pattern).
+  - The two ping-ponged worlds are RenderTexture let-locals selected
+    per frame by a jank flip? bool - (if flip? world1 world2) binds
+    the native by branch, nothing native crosses recur.
+  - Draw mode's malloc'd Image snapshot (LoadImageFromTexture,
+    GetImageColor stroke color-lock, ImageDrawPixel, UpdateTextureRec
+    upload) and the preset/random-soup loaders stay verbatim-ish C
+    shims around C-static state; jank drives them with scalars.
+  - Pan state (previous mouse position) and the stroke color reset
+    thread as jank loop vars / shim calls instead of C statics."
+  (:include "raylib.h" "math.h"))
+
+;; Draw-mode Image machinery + preset loaders (pointer-heavy, C-static).
+(cpp/raw "static Image jank_draw_image = { 0 };
+static int jank_draw_active = 0;
+static int jank_first_color = -1;
+
+static void jank_draw_free(void) {
+  if (jank_draw_active) { UnloadImage(jank_draw_image); jank_draw_active = 0; }
+}
+/* snapshot the visible world region into the paint image (once per entry) */
+static void jank_draw_ensure(RenderTexture2D world, double offX, double offY,
+                             int sizeX, int sizeY) {
+  if (!jank_draw_active) {
+    RenderTexture2D worldOnScreen = LoadRenderTexture(sizeX, sizeY);
+    BeginTextureMode(worldOnScreen);
+    DrawTexturePro(world.texture,
+                   (Rectangle){ floorf((float)offX), floorf((float)offY), (float)sizeX, -(float)sizeY },
+                   (Rectangle){ 0, 0, (float)sizeX, (float)sizeY },
+                   (Vector2){ 0, 0 }, 0.0f, WHITE);
+    EndTextureMode();
+    jank_draw_image = LoadImageFromTexture(worldOnScreen.texture);
+    UnloadRenderTexture(worldOnScreen);
+    jank_draw_active = 1;
+  }
+}
+static void jank_draw_reset_color(void) { jank_first_color = -1; }
+/* paint one pixel; the stroke's first pixel locks the paint color */
+static void jank_draw_paint(RenderTexture2D world, double offX, double offY,
+                            int sizeX, int sizeY, int mouseX, int mouseY) {
+  if (!jank_draw_active) return;
+  if (mouseX >= sizeX) mouseX = sizeX - 1;
+  if (mouseY >= sizeY) mouseY = sizeY - 1;
+  if (mouseX < 0) mouseX = 0;
+  if (mouseY < 0) mouseY = 0;
+  if (jank_first_color == -1)
+    jank_first_color = (GetImageColor(jank_draw_image, mouseX, mouseY).r < 5) ? 0 : 1;
+  int prevColor = (GetImageColor(jank_draw_image, mouseX, mouseY).r < 5) ? 0 : 1;
+  ImageDrawPixel(&jank_draw_image, mouseX, mouseY, jank_first_color ? BLACK : RAYWHITE);
+  if (prevColor != jank_first_color)
+    UpdateTextureRec(world.texture,
+                     (Rectangle){ floorf((float)offX), floorf((float)offY), (float)sizeX, (float)sizeY },
+                     jank_draw_image.data);
+}
+/* clear the world white and stamp a pattern image centered at (fx, fy) */
+static void jank_load_pattern(RenderTexture2D world, const char* path,
+                              double fx, double fy, int worldW, int worldH) {
+  Image pattern = LoadImage(path);
+  BeginTextureMode(world);
+  ClearBackground(RAYWHITE);
+  EndTextureMode();
+  UpdateTextureRec(world.texture,
+                   (Rectangle){ worldW*(float)fx - pattern.width/2.0f,
+                                worldH*(float)fy - pattern.height/2.0f,
+                                (float)pattern.width, (float)pattern.height },
+                   pattern.data);
+  UnloadImage(pattern);
+}
+/* fill the world with ~15% random live cells, tile by tile */
+static void jank_load_random(RenderTexture2D world, int worldW, int worldH, int tiles) {
+  Image pattern = GenImageColor(worldW/tiles, worldH/tiles, RAYWHITE);
+  for (int i = 0; i < tiles; i++)
+    for (int j = 0; j < tiles; j++) {
+      ImageClearBackground(&pattern, RAYWHITE);
+      for (int x = 0; x < pattern.width; x++)
+        for (int y = 0; y < pattern.height; y++)
+          if (GetRandomValue(0, 100) < 15) ImageDrawPixel(&pattern, x, y, BLACK);
+      UpdateTextureRec(world.texture,
+                       (Rectangle){ (float)(pattern.width*i), (float)(pattern.height*j),
+                                    (float)pattern.width, (float)pattern.height },
+                       pattern.data);
+    }
+  UnloadImage(pattern);
+}
+static void jank_set_resolution(Shader s, int loc, double w, double h) {
+  float v[2] = { (float)w, (float)h };
+  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MENU-W 100)
+(def WIN-W 700) ;; WIDTH - MENU-W
+(def WORLD 2048)
+(def RANDOM-TILES 8)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+;; Preset patterns: file (nil = random soup) + world-fraction position.
+(def PRESETS [{:key "1" :name "Glider" :file "glider.png" :fx 0.5 :fy 0.5}
+              {:key "2" :name "R-pentomino" :file "r_pentomino.png" :fx 0.5 :fy 0.5}
+              {:key "3" :name "Acorn" :file "acorn.png" :fx 0.5 :fy 0.5}
+              {:key "4" :name "Spaceships" :file "spaceships.png" :fx 0.1 :fy 0.5}
+              {:key "5" :name "Still lifes" :file "still_lifes.png" :fx 0.5 :fy 0.5}
+              {:key "6" :name "Oscillators" :file "oscillators.png" :fx 0.5 :fy 0.5}
+              {:key "7" :name "Puffer train" :file "puffer_train.png" :fx 0.1 :fy 0.5}
+              {:key "8" :name "Glider Gun" :file "glider_gun.png" :fx 0.2 :fy 0.2}
+              {:key "9" :name "Breeder" :file "breeder.png" :fx 0.1 :fy 0.5}
+              {:key "0" :name "Random" :file nil :fx 0.5 :fy 0.5}])
+
+(def MODE-NAMES ["RUN" "PAUSE" "DRAW"])
+
+(defn- pressed-preset
+  "The preset index for a pressed 0-9 key this frame, or -1."
+  []
+  (cond (cpp/IsKeyPressed cpp/KEY_ONE) 0
+        (cpp/IsKeyPressed cpp/KEY_TWO) 1
+        (cpp/IsKeyPressed cpp/KEY_THREE) 2
+        (cpp/IsKeyPressed cpp/KEY_FOUR) 3
+        (cpp/IsKeyPressed cpp/KEY_FIVE) 4
+        (cpp/IsKeyPressed cpp/KEY_SIX) 5
+        (cpp/IsKeyPressed cpp/KEY_SEVEN) 6
+        (cpp/IsKeyPressed cpp/KEY_EIGHT) 7
+        (cpp/IsKeyPressed cpp/KEY_NINE) 8
+        (cpp/IsKeyPressed cpp/KEY_ZERO) 9
+        :else -1))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - game of life (jank)")
+
+  (let [shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/game_of_life.fs"))
+        res-loc (int (cpp/GetShaderLocation shader "resolution"))
+        world1 (cpp/LoadRenderTexture WORLD WORLD)
+        world2 (cpp/LoadRenderTexture WORLD WORLD)]
+
+    (cpp/jank_set_resolution shader res-loc (+ 0.0 WORLD) (+ 0.0 WORLD))
+
+    ;; start with the R-pentomino centered in world2 (the initial current)
+    (cpp/jank_load_pattern world2 (str RES "game_of_life/r_pentomino.png")
+                           0.5 0.5 WORLD WORLD)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [frame mode zoom offset-x offset-y frames-per-step flip?
+    ;;         prev-mouse-x prev-mouse-y]; current world = world2 when
+    ;;         flip? is false (matching the C's initial pointers).
+    (loop [frame 0
+           mode 0
+           zoom 1
+           offx (/ (- WORLD WIN-W) 2.0)
+           offy (/ (- WORLD HEIGHT) 2.0)
+           fps 1
+           flip? false
+           prev-mx 0.0
+           prev-my 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [frame (inc frame)
+              mp (cpp/GetMousePosition)
+              mx (+ 0.0 (.-x mp))
+              my (+ 0.0 (.-y mp))
+              wheel (+ 0.0 (cpp/GetMouseWheelMove))
+              zoom-in? (if (cpp/IsKeyPressed cpp/KEY_Z) true (> wheel 0.0))
+              zoom-out? (if (cpp/IsKeyPressed cpp/KEY_X) true (< wheel 0.0))
+
+              ;; zoom around the window centre, freeing the paint image
+              zoomed? (or zoom-in? zoom-out?)
+              _ (when zoomed? (cpp/jank_draw_free))
+              cx (+ offx (/ (/ WIN-W 2.0) zoom))
+              cy (+ offy (/ (/ HEIGHT 2.0) zoom))
+              zoom (cond zoom-in? (* zoom 2)
+                         (and zoom-out? (> zoom 1)) (int (quot zoom 2))
+                         :else zoom)
+              offx (if zoomed? (- cx (/ (/ WIN-W 2.0) zoom)) offx)
+              offy (if zoomed? (- cy (/ (/ HEIGHT 2.0) zoom)) offy)
+
+              ;; speed + mode keys
+              fps (cond (and (cpp/IsKeyPressed cpp/KEY_F) (> fps 1)) (dec fps)
+                        (cpp/IsKeyPressed cpp/KEY_S) (inc fps)
+                        :else fps)
+              mode (cond (cpp/IsKeyPressed cpp/KEY_R) 0
+                         (cpp/IsKeyPressed cpp/KEY_P) 1
+                         (cpp/IsKeyPressed cpp/KEY_D) 2
+                         :else mode)
+
+              cur0 (if flip? world1 world2)
+
+              ;; RUN/PAUSE: drag to pan; DRAW: paint cells
+              down? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT) true false)
+              in-window? (< mx (+ 0.0 WIN-W))
+              offx (if (and (not= mode 2) down? in-window?)
+                     (- offx (/ (- mx prev-mx) zoom))
+                     offx)
+              offy (if (and (not= mode 2) down? in-window?)
+                     (- offy (/ (- my prev-my) zoom))
+                     offy)
+              _ (if (= mode 2)
+                  ;; draw mode: snapshot the visible region, paint strokes
+                  (let [odx (- offx (int offx))
+                        ody (- offy (int offy))
+                        size-x0 (int (cpp/ceil (/ (+ WIN-W (* odx zoom)) (+ 0.0 zoom))))
+                        size-y0 (int (cpp/ceil (/ (+ HEIGHT (* ody zoom)) (+ 0.0 zoom))))
+                        size-x (if (>= (+ offx size-x0) WORLD) (- WORLD (int offx)) size-x0)
+                        size-y (if (>= (+ offy size-y0) WORLD) (- WORLD (int offy)) size-y0)]
+                    (cpp/jank_draw_ensure cur0 offx offy size-x size-y)
+                    (if (and down? in-window?)
+                      (cpp/jank_draw_paint cur0 offx offy size-x size-y
+                                           (int (/ (+ mx (* odx zoom)) zoom))
+                                           (int (/ (+ my (* ody zoom)) zoom)))
+                      (cpp/jank_draw_reset_color)))
+                  (do (cpp/jank_draw_free)
+                      (cpp/jank_draw_reset_color)))
+
+              ;; preset keys load a pattern and pause, recentered on it
+              preset (pressed-preset)
+              loaded? (>= preset 0)
+              _ (when loaded?
+                  (let [{:keys [file fx fy]} (nth PRESETS preset)]
+                    (if file
+                      (cpp/jank_load_pattern cur0 (str RES "game_of_life/" file)
+                                             fx fy WORLD WORLD)
+                      (cpp/jank_load_random cur0 WORLD WORLD RANDOM-TILES))))
+              mode (if loaded? 1 mode)
+              offx (if loaded?
+                     (- (* WORLD (:fx (nth PRESETS preset))) (/ (/ (+ 0.0 WIN-W) zoom) 2.0))
+                     offx)
+              offy (if loaded?
+                     (- (* WORLD (:fy (nth PRESETS preset))) (/ (/ (+ 0.0 HEIGHT) zoom) 2.0))
+                     offy)
+
+              ;; keep the window inside the world
+              offx (if (< offx 0.0) 0.0 offx)
+              offy (if (< offy 0.0) 0.0 offy)
+              offx (if (> offx (- WORLD (/ (+ 0.0 WIN-W) zoom))) (- WORLD (/ (+ 0.0 WIN-W) zoom)) offx)
+              offy (if (> offy (- WORLD (/ (+ 0.0 HEIGHT) zoom))) (- WORLD (/ (+ 0.0 HEIGHT) zoom)) offy)
+
+              ;; step the world through the shader (ping-pong on flip?)
+              step? (and (= mode 0) (= 0 (int (mod frame fps))))
+              flip? (if step? (not flip?) flip?)
+              cur (if flip? world1 world2)
+              prev (if flip? world2 world1)]
+
+          (when step?
+            (cpp/BeginTextureMode cur)
+            (cpp/BeginShaderMode shader)
+            (cpp/DrawTexturePro (.-texture prev)
+                                (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                               (cpp/float 2048.0) (cpp/float -2048.0))
+                                (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                               (cpp/float 2048.0) (cpp/float 2048.0))
+                                (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                (cpp/float 0.0) cpp/RAYWHITE)
+            (cpp/EndShaderMode)
+            (cpp/EndTextureMode))
+
+          (cpp/BeginDrawing)
+
+          ;; the visible window into the world
+          (cpp/DrawTexturePro (.-texture cur)
+                              (cpp/Rectangle (cpp/float offx) (cpp/float offy)
+                                             (cpp/float (/ (+ 0.0 WIN-W) zoom))
+                                             (cpp/float (/ (+ 0.0 HEIGHT) zoom)))
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float 700.0) (cpp/float 450.0))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              (cpp/float 0.0) cpp/WHITE)
+
+          ;; the side panel (raygui buttons -> a key legend)
+          (cpp/DrawLine WIN-W 0 WIN-W HEIGHT (cpp/GetColor (+ (* 218 16777216) (* 218 65536) (* 218 256) 255)))
+          (cpp/DrawRectangle WIN-W 0 MENU-W HEIGHT (cpp/GetColor (+ (* 232 16777216) (* 232 65536) (* 232 256) 255)))
+
+          (cpp/DrawText "Conway's" 704 4 20 cpp/DARKBLUE)
+          (cpp/DrawText " game of" 704 19 20 cpp/DARKBLUE)
+          (cpp/DrawText "  life" 708 34 20 cpp/DARKBLUE)
+          (cpp/DrawText "in jank" 757 42 6 cpp/BLACK)
+
+          (cpp/DrawText "Presets (key)" 706 58 8 cpp/GRAY)
+          (loop [i 0]
+            (when (< i 10)
+              (let [{:keys [key name]} (nth PRESETS i)]
+                (cpp/DrawText (str key " " name) 706 (+ 70 (* i 13)) 8 cpp/DARKGRAY))
+              (recur (inc i))))
+
+          (cpp/DrawText (str "Mode: " (nth MODE-NAMES mode)) 706 208 8 cpp/BLACK)
+          (cpp/DrawText "R run  P pause" 706 220 8 cpp/DARKGRAY)
+          (cpp/DrawText "D draw (paint)" 706 232 8 cpp/DARKGRAY)
+
+          (cpp/DrawText (str "Zoom: " zoom "x") 706 252 8 cpp/BLACK)
+          (cpp/DrawText "Z/wheel in" 706 264 8 cpp/DARKGRAY)
+          (cpp/DrawText "X/wheel out" 706 276 8 cpp/DARKGRAY)
+
+          (cpp/DrawText (str "Speed: " fps " frame" (if (> fps 1) "s" "")) 706 296 8 cpp/BLACK)
+          (cpp/DrawText "F faster  S slower" 706 308 8 cpp/DARKGRAY)
+
+          (cpp/DrawText "Drag to pan" 706 328 8 cpp/DARKGRAY)
+
+          (cpp/DrawFPS 712 426)
+
+          (cpp/EndDrawing)
+
+          (recur frame mode zoom offx offy fps flip? mx my))))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadRenderTexture world1)
+    (cpp/UnloadRenderTexture world2)
+    (cpp/jank_draw_free))
+
+  (cpp/CloseWindow))

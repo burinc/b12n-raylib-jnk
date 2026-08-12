@@ -1,0 +1,188 @@
+(ns raylib-examples.undo-redo
+  "raylib [core] example - undo redo, ported to jank.
+
+  Move a player cell around a grid with the ARROWS and recolor it with
+  SPACE. Every state change is snapshotted into a 26-slot ring buffer;
+  CTRL+Z walks back through history and CTRL+Y walks forward. The buffer
+  is visualised along the bottom (gold = current, blue = recorded span,
+  green = redo-able span). ESC quits.
+  Based on raylib/examples/core/core_undo_redo.c
+
+  jank-native notes:
+  - The C snapshots a PlayerState struct into an RL_CALLOC'd ring buffer
+    with memcpy and compares slots with memcmp. In jank the whole thing is
+    ordinary data: player state is a `{:x :y :r :g :b}` map, the ring buffer
+    is a vector of those maps, memcpy -> `assoc idx player`, memcmp -> `=`.
+    No native structs, no allocation, no interop beyond the raylib draw
+    calls - the ring-buffer index arithmetic is the point and it stays in
+    pure jank.
+  - `draw-slot` can neither take nor return a native Color (rule 2), so it
+    receives a keyword id and picks the concrete cpp/Color inline at each
+    draw call."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-UNDO 26)
+(def CELL 24)
+(def GX 30)                 ; max grid cells across
+(def GY 13)                 ; max grid cells down
+(def GRID-X 40.0)
+(def GRID-Y 60.0)
+(def UNDO-X 110.0)
+(def UNDO-Y 400.0)
+(def INIT {:x 10 :y 10 :r 230 :g 41 :b 55})   ; centre cell, RED
+
+(defn- pack
+  "RGBA int (opaque) for a state map, for (cpp/GetColor ...)."
+  [{:keys [r g b]}]
+  (+ (* r 16777216) (* g 65536) (* b 256) 255))
+
+(defn- draw-visited
+  "Draw the recorded cells states[a..b) as light-gray grid squares."
+  [states a b]
+  (loop [i a]
+    (when (< i b)
+      (let [s (nth states i)]
+        (cpp/DrawRectangle (int (+ GRID-X (* (:x s) CELL)))
+                           (int (+ GRID-Y (* (:y s) CELL)))
+                           CELL CELL cpp/LIGHTGRAY))
+      (recur (inc i)))))
+
+(defn- draw-slot
+  "One ring-buffer slot square filled + outlined. `cid` is :blue (recorded)
+  or :green (redo-able); the Color is chosen inline (a jank fn can't carry a
+  native Color)."
+  [i cid]
+  (let [x (int (+ UNDO-X (* CELL i)))
+        y (int UNDO-Y)]
+    (cpp/DrawRectangle x y CELL CELL (if (= cid :blue) cpp/SKYBLUE cpp/GREEN))
+    (cpp/DrawRectangleLines x y CELL CELL (if (= cid :blue) cpp/BLUE cpp/LIME))))
+
+(defn- draw-undo-buffer
+  "Visualise the ring buffer: index marks, gray background slots, the
+  recorded span (blue), the redo span (green) and the current slot (gold)."
+  [first-idx last-idx cur-idx]
+  ;; index marks: current (red, above), first (outline) and last (below)
+  (cpp/DrawRectangle (int (+ UNDO-X 8 (* CELL cur-idx))) (int (- UNDO-Y 10)) 8 8 cpp/RED)
+  (cpp/DrawRectangleLines (int (+ UNDO-X 2 (* CELL first-idx))) (int (+ UNDO-Y 27)) 8 8 cpp/BLACK)
+  (cpp/DrawRectangle (int (+ UNDO-X 14 (* CELL last-idx))) (int (+ UNDO-Y 27)) 8 8 cpp/BLACK)
+
+  ;; gray background for every slot
+  (loop [i 0]
+    (when (< i MAX-UNDO)
+      (cpp/DrawRectangle (int (+ UNDO-X (* CELL i))) (int UNDO-Y) CELL CELL cpp/LIGHTGRAY)
+      (cpp/DrawRectangleLines (int (+ UNDO-X (* CELL i))) (int UNDO-Y) CELL CELL cpp/GRAY)
+      (recur (inc i))))
+
+  ;; recorded span first-idx -> last-idx (blue), ring-buffer aware
+  (if (<= first-idx last-idx)
+    (loop [i first-idx] (when (< i (inc last-idx)) (draw-slot i :blue) (recur (inc i))))
+    (do (loop [i first-idx] (when (< i MAX-UNDO) (draw-slot i :blue) (recur (inc i))))
+        (loop [i 0] (when (< i (inc last-idx)) (draw-slot i :blue) (recur (inc i))))))
+
+  ;; redo-able span first-idx -> cur-idx (green)
+  (if (< first-idx cur-idx)
+    (loop [i first-idx] (when (< i cur-idx) (draw-slot i :green) (recur (inc i))))
+    (when (< cur-idx first-idx)
+      (do (loop [i first-idx] (when (< i MAX-UNDO) (draw-slot i :green) (recur (inc i))))
+          (loop [i 0] (when (< i cur-idx) (draw-slot i :green) (recur (inc i)))))))
+
+  ;; current selected slot (gold)
+  (cpp/DrawRectangle (int (+ UNDO-X (* CELL cur-idx))) (int UNDO-Y) CELL CELL cpp/GOLD)
+  (cpp/DrawRectangleLines (int (+ UNDO-X (* CELL cur-idx))) (int UNDO-Y) CELL CELL cpp/ORANGE))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - undo redo (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [player states cur-idx first-idx last-idx fc].
+  (loop [player INIT
+         states (vec (repeat MAX-UNDO INIT))
+         cur-idx 0 first-idx 0 last-idx 0 fc 0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [;; movement: strict priority (mirrors the C else-if chain)
+            [nx ny] (cond (cpp/IsKeyPressed cpp/KEY_RIGHT) [(inc (:x player)) (:y player)]
+                          (cpp/IsKeyPressed cpp/KEY_LEFT)  [(dec (:x player)) (:y player)]
+                          (cpp/IsKeyPressed cpp/KEY_UP)    [(:x player) (dec (:y player))]
+                          (cpp/IsKeyPressed cpp/KEY_DOWN)  [(:x player) (inc (:y player))]
+                          :else [(:x player) (:y player)])
+            nx (cond (< nx 0) 0 (>= nx GX) (dec GX) :else nx)
+            ny (cond (< ny 0) 0 (>= ny GY) (dec GY) :else ny)
+            [r g b] (if (cpp/IsKeyPressed cpp/KEY_SPACE)
+                      [(int (cpp/GetRandomValue 20 255))
+                       (int (cpp/GetRandomValue 20 220))
+                       (int (cpp/GetRandomValue 20 240))]
+                      [(:r player) (:g player) (:b player)])
+            player (assoc player :x nx :y ny :r r :g g :b b)
+
+            ;; every 2 frames, snapshot the state if it changed
+            fc (inc fc)
+            [states cur-idx first-idx last-idx fc]
+            (if (>= fc 2)
+              (if (not= (nth states cur-idx) player)
+                (let [c (let [c (inc cur-idx)] (if (>= c MAX-UNDO) 0 c))
+                      f (if (= c first-idx) (let [f (inc first-idx)] (if (>= f MAX-UNDO) 0 f)) first-idx)]
+                  [(assoc states c player) c f c 0])
+                [states cur-idx first-idx last-idx 0])
+              [states cur-idx first-idx last-idx fc])
+
+            ctrl? (cpp/IsKeyDown cpp/KEY_LEFT_CONTROL)
+
+            ;; CTRL+Z: step back through history
+            [player cur-idx]
+            (if (and ctrl? (cpp/IsKeyPressed cpp/KEY_Z) (not= cur-idx first-idx))
+              (let [c (let [c (dec cur-idx)] (if (< c 0) (dec MAX-UNDO) c))]
+                (if (not= (nth states c) player) [(nth states c) c] [player c]))
+              [player cur-idx])
+
+            ;; CTRL+Y: step forward again
+            [player cur-idx]
+            (if (and ctrl? (cpp/IsKeyPressed cpp/KEY_Y) (not= cur-idx last-idx))
+              (let [n (let [n (inc cur-idx)] (if (>= n MAX-UNDO) 0 n))]
+                (if (not= n first-idx)
+                  (if (not= (nth states n) player) [(nth states n) n] [player n])
+                  [player cur-idx]))
+              [player cur-idx])]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "[ARROWS] MOVE PLAYER - [SPACE] CHANGE PLAYER COLOR" 40 20 20 cpp/DARKGRAY)
+
+        ;; recorded visited cells (ring-buffer aware, upper bound = cur-idx)
+        (cond
+          (> last-idx first-idx) (draw-visited states first-idx cur-idx)
+          (> first-idx last-idx) (if (and (< cur-idx MAX-UNDO) (> cur-idx last-idx))
+                                   (draw-visited states first-idx cur-idx)
+                                   (do (draw-visited states first-idx MAX-UNDO)
+                                       (draw-visited states 0 cur-idx)))
+          :else nil)
+
+        ;; grid lines
+        (loop [y 0]
+          (when (<= y GY)
+            (cpp/DrawLine (int GRID-X) (int (+ GRID-Y (* y CELL)))
+                          (int (+ GRID-X (* GX CELL))) (int (+ GRID-Y (* y CELL))) cpp/GRAY)
+            (recur (inc y))))
+        (loop [x 0]
+          (when (<= x GX)
+            (cpp/DrawLine (int (+ GRID-X (* x CELL))) (int GRID-Y)
+                          (int (+ GRID-X (* x CELL))) (int (+ GRID-Y (* GY CELL))) cpp/GRAY)
+            (recur (inc x))))
+
+        ;; player
+        (cpp/DrawRectangle (int (+ GRID-X (* (:x player) CELL)))
+                           (int (+ GRID-Y (* (:y player) CELL)))
+                           (+ CELL 1) (+ CELL 1) (cpp/GetColor (pack player)))
+
+        ;; undo buffer visualisation
+        (cpp/DrawText "UNDO STATES:" (int (- UNDO-X 85)) (int (+ UNDO-Y 9)) 10 cpp/DARKGRAY)
+        (draw-undo-buffer first-idx last-idx cur-idx)
+
+        (cpp/EndDrawing)
+
+        (recur player states cur-idx first-idx last-idx fc))))
+
+  (cpp/CloseWindow))

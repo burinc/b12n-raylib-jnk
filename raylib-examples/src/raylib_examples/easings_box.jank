@@ -1,0 +1,92 @@
+(ns raylib-examples.easings-box
+  "raylib [shapes] example - easings box, ported to jank.
+
+  A box animates through five easing stages: elastic drop, bounce to a
+  bar, quad rotate, circular grow, sine fade-out. SPACE resets, Q quits.
+  Based on raylib/examples/shapes/shapes_easings_box.c
+  (jank-native: easing fns from reasings.h via C sin; Rectangle + Vector2
+  built inline for DrawRectanglePro)."
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def PI 3.141592653589793)
+(def RX (/ WIDTH 2.0))     ; box x is fixed at screen center
+
+;; Easing functions transcribed from raylib's reasings.h.
+(defn ease-elastic-out [t b c d]
+  (if (= t 0.0) b
+    (let [tt (/ t d)]
+      (if (= tt 1.0) (+ b c)
+        (let [p (* d 0.3) s (/ p 4.0)]
+          (+ (* c (cpp/pow 2.0 (* -10.0 tt))
+                (cpp/sin (/ (* (- (* tt d) s) (* 2.0 PI)) p)))
+             c b))))))
+
+(defn ease-bounce-out [t b c d]
+  (let [tt (/ t d)]
+    (cond
+      (< tt (/ 1.0 2.75)) (+ (* c (* 7.5625 tt tt)) b)
+      (< tt (/ 2.0 2.75)) (let [t2 (- tt (/ 1.5 2.75))]  (+ (* c (+ (* 7.5625 t2 t2) 0.75)) b))
+      (< tt (/ 2.5 2.75)) (let [t2 (- tt (/ 2.25 2.75))] (+ (* c (+ (* 7.5625 t2 t2) 0.9375)) b))
+      :else               (let [t2 (- tt (/ 2.625 2.75))] (+ (* c (+ (* 7.5625 t2 t2) 0.984375)) b)))))
+
+(defn ease-quad-out [t b c d]
+  (let [tt (/ t d)]
+    (+ (* (- c) tt (- tt 2.0)) b)))
+
+(defn ease-circ-out [t b c d]
+  (let [tt (- (/ t d) 1.0)]
+    (+ (* c (cpp/sqrt (- 1.0 (* tt tt)))) b)))
+
+(defn ease-sine-out [t b c d]
+  (+ (* c (cpp/sin (* (/ t d) (/ PI 2.0)))) b))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - easings box (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [state frames-counter y width height rotation alpha].
+  (loop [state 0 fc 0 y -100.0 w 100.0 h 100.0 rot 0.0 alpha 1.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [[state fc y w h rot alpha]
+            (cond
+              (= state 0) (let [fc (inc fc)
+                                y  (ease-elastic-out (+ 0.0 fc) -100.0 (+ (/ HEIGHT 2.0) 100.0) 120.0)]
+                            (if (>= fc 120) [1 0 y w h rot alpha] [0 fc y w h rot alpha]))
+              (= state 1) (let [fc (inc fc)
+                                h  (ease-bounce-out (+ 0.0 fc) 100.0 -90.0 120.0)
+                                w  (ease-bounce-out (+ 0.0 fc) 100.0 (+ 0.0 WIDTH) 120.0)]
+                            (if (>= fc 120) [2 0 y w h rot alpha] [1 fc y w h rot alpha]))
+              (= state 2) (let [fc (inc fc)
+                                rot (ease-quad-out (+ 0.0 fc) 0.0 270.0 240.0)]
+                            (if (>= fc 240) [3 0 y w h rot alpha] [2 fc y w h rot alpha]))
+              (= state 3) (let [fc (inc fc)
+                                h  (ease-circ-out (+ 0.0 fc) 10.0 (+ 0.0 WIDTH) 120.0)]
+                            (if (>= fc 120) [4 0 y w h rot alpha] [3 fc y w h rot alpha]))
+              (= state 4) (let [fc (inc fc)
+                                alpha (ease-sine-out (+ 0.0 fc) 1.0 -1.0 160.0)]
+                            (if (>= fc 160) [5 0 y w h rot alpha] [4 fc y w h rot alpha]))
+              :else [state fc y w h rot alpha])
+            ;; SPACE resets the whole animation.
+            reset? (cpp/IsKeyPressed cpp/KEY_SPACE)
+            [state fc y w h rot alpha]
+            (if reset? [0 0 -100.0 100.0 100.0 0.0 1.0] [state fc y w h rot alpha])]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawRectanglePro (cpp/Rectangle (cpp/float RX) (cpp/float y) (cpp/float w) (cpp/float h))
+                              (cpp/Vector2 (cpp/float (/ w 2.0)) (cpp/float (/ h 2.0)))
+                              (cpp/float rot)
+                              (cpp/Fade cpp/BLACK (cpp/float alpha)))
+
+        (cpp/DrawText "PRESS [SPACE] TO RESET - Q QUITS" 10 (- HEIGHT 25) 20 cpp/LIGHTGRAY)
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur state fc y w h rot alpha)))))
+
+  (cpp/CloseWindow))

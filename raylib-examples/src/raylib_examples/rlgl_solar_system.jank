@@ -1,0 +1,99 @@
+(ns raylib-examples.rlgl-solar-system
+  "raylib [models] example - rlgl solar system, ported to jank.
+
+  A hierarchical solar system built on the rlgl matrix stack: the
+  Earth orbits the Sun while spinning, and the Moon orbits the Earth,
+  each transform nested with rlPushMatrix/rlPopMatrix. Q quits.
+  Based on raylib/examples/models/models_rlgl_solar_system.c
+  (jank-native: the C's custom DrawSphereBasic (a unit sphere at the
+  origin) is raylib's DrawSphere at (0,0,0) radius 1 - it renders
+  through the same rlgl batch, so the stack transforms apply to it
+  identically.)"
+  (:include "raylib.h" "rlgl.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def SUN-R 4.0)
+(def EARTH-R 0.6)
+(def EARTH-ORBIT-R 8.0)
+(def MOON-R 0.16)
+(def MOON-ORBIT-R 1.5)
+(def SPEED 0.2)
+
+(defn unit-sphere [color]
+  ;; A unit sphere at the origin; the current rlgl matrix stack
+  ;; scales/rotates/translates it into place.
+  (cpp/DrawSphere (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                  (cpp/float 1.0)
+                  (if (= color 0) cpp/GOLD (if (= color 1) cpp/BLUE cpp/LIGHTGRAY))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - rlgl solar system (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 16.0) (cpp/float 16.0) (cpp/float 16.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)]
+
+    ;; Thread [earth-spin earth-orbit moon-spin moon-orbit] in degrees.
+    (loop [er 0.0 eo 0.0 mr 0.0 mo 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [er (+ er (* 5.0 SPEED))
+              eo (+ eo (* (/ 365.0 360.0) (* 5.0 SPEED) SPEED))
+              mr (+ mr (* 2.0 SPEED))
+              mo (+ mo (* 8.0 SPEED))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+
+          ;; The Sun.
+          (cpp/rlPushMatrix)
+          (cpp/rlScalef (cpp/float SUN-R) (cpp/float SUN-R) (cpp/float SUN-R))
+          (unit-sphere 0)
+          (cpp/rlPopMatrix)
+
+          ;; The Earth (orbit + self-rotation), then the Moon inside
+          ;; the Earth's orbital frame.
+          (cpp/rlPushMatrix)
+          (cpp/rlRotatef (cpp/float eo) (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+          (cpp/rlTranslatef (cpp/float EARTH-ORBIT-R) (cpp/float 0.0) (cpp/float 0.0))
+
+          (cpp/rlPushMatrix)
+          (cpp/rlRotatef (cpp/float er) (cpp/float 0.25) (cpp/float 1.0) (cpp/float 0.0))
+          (cpp/rlScalef (cpp/float EARTH-R) (cpp/float EARTH-R) (cpp/float EARTH-R))
+          (unit-sphere 1)
+          (cpp/rlPopMatrix)
+
+          (cpp/rlRotatef (cpp/float mo) (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+          (cpp/rlTranslatef (cpp/float MOON-ORBIT-R) (cpp/float 0.0) (cpp/float 0.0))
+          (cpp/rlRotatef (cpp/float mr) (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+          (cpp/rlScalef (cpp/float MOON-R) (cpp/float MOON-R) (cpp/float MOON-R))
+          (unit-sphere 2)
+          (cpp/rlPopMatrix)
+
+          ;; Orbit reference ring + grid (outside the matrix stack).
+          (cpp/DrawCircle3D (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                            (cpp/float EARTH-ORBIT-R)
+                            (cpp/Vector3 (cpp/float 1.0) (cpp/float 0.0) (cpp/float 0.0))
+                            (cpp/float 90.0)
+                            (cpp/Fade cpp/RED (cpp/float 0.5)))
+          (cpp/DrawGrid 20 (cpp/float 1.0))
+
+          (cpp/EndMode3D)
+
+          (cpp/DrawText "EARTH ORBITING AROUND THE SUN! (Q quits)" 360 10 20 cpp/MAROON)
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur er eo mr mo)))))
+
+    nil)
+
+  (cpp/CloseWindow))

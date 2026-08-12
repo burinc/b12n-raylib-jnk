@@ -1,0 +1,133 @@
+(ns raylib-examples.julia-set
+  "raylib [shaders] example - julia set, ported to jank.
+
+  A Julia set fractal computed entirely in a fragment shader: keys 1-6
+  jump to interesting c constants, LEFT/RIGHT change the animation speed
+  of c (SPACE pauses), mouse left/right buttons zoom in/out while
+  drifting toward the cursor, R recenters, F1 hides the help. ESC quits.
+  Based on raylib/examples/shaders/shaders_julia_set.c
+
+  jank-native notes:
+  - All fractal state (c, zoom, offset, speed) threads as jank reals;
+    the three uniforms are re-sent every frame through the cpp/raw
+    static float buffer + jank_set_uniform wrapper (the texture-outline
+    pattern, calls confined to -main). The C only re-sends zoom/offset
+    on change - re-sending every frame is visually identical and
+    simpler.
+  - The C's pointsOfInterest float[6][2] is a jank vector of pairs."
+  (:include "raylib.h"))
+
+;; Uniform staging (see texture-outline); only -main touches these.
+(cpp/raw "static float jank_uf_buf[4] = { 0 };
+static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
+static void jank_set_uniform(Shader s, int loc, int type) {
+  SetShaderValue(s, loc, jank_uf_buf, type);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+(def ZOOM-SPEED 1.01)
+(def OFFSET-SPEED-MUL 2.0)
+(def START-ZOOM 0.75)
+
+;; A few good Julia sets (the C's pointsOfInterest).
+(def POIS [[-0.348827 0.607167] [-0.786268 0.169728] [-0.8 0.156]
+           [0.285 0.0] [-0.835 -0.2321] [-0.70176 -0.3842]])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - julia set (jank)")
+
+  (let [shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/julia_set.fs"))
+        target (cpp/LoadRenderTexture WIDTH HEIGHT)
+        c-loc (int (cpp/GetShaderLocation shader "c"))
+        zoom-loc (int (cpp/GetShaderLocation shader "zoom"))
+        offset-loc (int (cpp/GetShaderLocation shader "offset"))]
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [cx cy zoom offset-x offset-y increment-speed show-controls?].
+    (loop [cx -0.348827 cy 0.607167 zoom START-ZOOM ox 0.0 oy 0.0
+           speed 0 show? true]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [poi (cond (cpp/IsKeyPressed cpp/KEY_ONE) (nth POIS 0)
+                        (cpp/IsKeyPressed cpp/KEY_TWO) (nth POIS 1)
+                        (cpp/IsKeyPressed cpp/KEY_THREE) (nth POIS 2)
+                        (cpp/IsKeyPressed cpp/KEY_FOUR) (nth POIS 3)
+                        (cpp/IsKeyPressed cpp/KEY_FIVE) (nth POIS 4)
+                        (cpp/IsKeyPressed cpp/KEY_SIX) (nth POIS 5)
+                        :else nil)
+              cx (if poi (nth poi 0) cx)
+              cy (if poi (nth poi 1) cy)
+
+              reset? (if (cpp/IsKeyPressed cpp/KEY_R) true false)
+              zoom (if reset? START-ZOOM zoom)
+              ox (if reset? 0.0 ox)
+              oy (if reset? 0.0 oy)
+
+              speed (cond (cpp/IsKeyPressed cpp/KEY_SPACE) 0
+                          (cpp/IsKeyPressed cpp/KEY_RIGHT) (inc speed)
+                          (cpp/IsKeyPressed cpp/KEY_LEFT) (dec speed)
+                          :else speed)
+              show? (if (cpp/IsKeyPressed cpp/KEY_F1) (not show?) show?)
+
+              ;; mouse zoom + drift toward the cursor
+              zin? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT) true false)
+              zout? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_RIGHT) true false)
+              ft (+ 0.0 (cpp/GetFrameTime))
+              zoom (cond zin? (* zoom ZOOM-SPEED)
+                         zout? (/ zoom ZOOM-SPEED)
+                         :else zoom)
+              ox (if (or zin? zout?)
+                   (+ ox (* ft (/ (* (- (/ (+ 0.0 (cpp/GetMouseX)) WIDTH) 0.5) OFFSET-SPEED-MUL) zoom)))
+                   ox)
+              oy (if (or zin? zout?)
+                   (+ oy (* ft (/ (* (- (/ (+ 0.0 (cpp/GetMouseY)) HEIGHT) 0.5) OFFSET-SPEED-MUL) zoom)))
+                   oy)
+
+              ;; animate c
+              dc (* ft speed 0.0005)
+              cx (+ cx dc)
+              cy (+ cy dc)]
+
+          ;; re-send all three uniforms
+          (cpp/jank_uf_set 0 cx)
+          (cpp/jank_uf_set 1 cy)
+          (cpp/jank_set_uniform shader c-loc cpp/SHADER_UNIFORM_VEC2)
+          (cpp/jank_uf_set 0 zoom)
+          (cpp/jank_set_uniform shader zoom-loc cpp/SHADER_UNIFORM_FLOAT)
+          (cpp/jank_uf_set 0 ox)
+          (cpp/jank_uf_set 1 oy)
+          (cpp/jank_set_uniform shader offset-loc cpp/SHADER_UNIFORM_VEC2)
+
+          ;; black canvas in the render texture; the fractal comes from the
+          ;; shader when the texture is drawn
+          (cpp/BeginTextureMode target)
+          (cpp/ClearBackground cpp/BLACK)
+          (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/BLACK)
+          (cpp/EndTextureMode)
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/BLACK)
+          (cpp/BeginShaderMode shader)
+          (cpp/DrawTextureEx (.-texture target)
+                             (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/float 0.0) (cpp/float 1.0) cpp/WHITE)
+          (cpp/EndShaderMode)
+
+          (when show?
+            (cpp/DrawText "Press Mouse buttons right/left to zoom in/out and move" 10 15 10 cpp/RAYWHITE)
+            (cpp/DrawText "Press KEY_F1 to toggle these controls" 10 30 10 cpp/RAYWHITE)
+            (cpp/DrawText "Press KEYS [1 - 6] to change point of interest" 10 45 10 cpp/RAYWHITE)
+            (cpp/DrawText "Press KEY_LEFT | KEY_RIGHT to change speed" 10 60 10 cpp/RAYWHITE)
+            (cpp/DrawText "Press KEY_SPACE to stop movement animation" 10 75 10 cpp/RAYWHITE)
+            (cpp/DrawText "Press KEY_R to recenter the camera" 10 90 10 cpp/RAYWHITE))
+
+          (cpp/EndDrawing)
+
+          (recur cx cy zoom ox oy speed show?))))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadRenderTexture target))
+
+  (cpp/CloseWindow))

@@ -1,0 +1,92 @@
+(ns raylib-examples.yaw-pitch-roll
+  "raylib [models] example - yaw pitch roll, ported to jank.
+
+  Fly a WWI plane model through its three rotation axes: UP/DOWN
+  pitch, LEFT/RIGHT roll, A/S yaw - each angle eases back toward
+  level when its keys are released. ESC quits.
+  Based on raylib/examples/models/models_yaw_pitch_roll.c
+
+  jank-native notes:
+  - Pitch/yaw/roll thread as jank reals with the C's ease-back-to-
+    level decay branches as conds; the transform is simple-mask's
+    MatrixRotateXYZ absolute-set shim fed DEG2RAD-scaled angles.
+  - OBJ model + material texture write are proven ground."
+  (:include "raylib.h" "raymath.h"))
+
+(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}
+static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz) {
+  m->transform = MatrixRotateXYZ((Vector3){ (float)rx, (float)ry, (float)rz });
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def DEG2RAD 0.017453292519943295)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - yaw pitch roll (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 0.0) (cpp/float 50.0) (cpp/float -120.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 30.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModel (str RES "models/obj/plane.obj"))
+        texture (cpp/LoadTexture (str RES "models/obj/plane_diffuse.png"))]
+
+    (cpp/SetTextureWrap texture cpp/TEXTURE_WRAP_REPEAT)
+    (cpp/jank_model_set_texture (cpp/& model) texture)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [pitch yaw roll] (degrees).
+    (loop [pitch 0.0
+           yaw 0.0
+           roll 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [pitch (cond (cpp/IsKeyDown cpp/KEY_DOWN) (+ pitch 0.6)
+                          (cpp/IsKeyDown cpp/KEY_UP) (- pitch 0.6)
+                          (> pitch 0.3) (- pitch 0.3)
+                          (< pitch -0.3) (+ pitch 0.3)
+                          :else pitch)
+              yaw (cond (cpp/IsKeyDown cpp/KEY_S) (- yaw 1.0)
+                        (cpp/IsKeyDown cpp/KEY_A) (+ yaw 1.0)
+                        (> yaw 0.0) (- yaw 0.5)
+                        (< yaw 0.0) (+ yaw 0.5)
+                        :else yaw)
+              roll (cond (cpp/IsKeyDown cpp/KEY_LEFT) (- roll 1.0)
+                         (cpp/IsKeyDown cpp/KEY_RIGHT) (+ roll 1.0)
+                         (> roll 0.0) (- roll 0.5)
+                         (< roll 0.0) (+ roll 0.5)
+                         :else roll)]
+
+          (cpp/jank_model_set_rotate_xyz (cpp/& model)
+                                         (* DEG2RAD pitch) (* DEG2RAD yaw) (* DEG2RAD roll))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawModel model
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float -8.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/DrawGrid 10 (cpp/float 10.0))
+          (cpp/EndMode3D)
+
+          (cpp/DrawRectangle 30 370 260 70 (cpp/Fade cpp/GREEN (cpp/float 0.5)))
+          (cpp/DrawRectangleLines 30 370 260 70 (cpp/Fade cpp/DARKGREEN (cpp/float 0.5)))
+          (cpp/DrawText "Pitch controlled with: KEY_UP / KEY_DOWN" 40 380 10 cpp/DARKGRAY)
+          (cpp/DrawText "Roll controlled with: KEY_LEFT / KEY_RIGHT" 40 400 10 cpp/DARKGRAY)
+          (cpp/DrawText "Yaw controlled with: KEY_A / KEY_S" 40 420 10 cpp/DARKGRAY)
+          (cpp/DrawText "(c) WWI Plane Model created by GiaHanLam" (- WIDTH 240) (- HEIGHT 20) 10 cpp/DARKGRAY)
+
+          (cpp/EndDrawing)
+          (recur pitch yaw roll))))
+
+    (cpp/UnloadModel model)
+    (cpp/UnloadTexture texture))
+
+  (cpp/CloseWindow))

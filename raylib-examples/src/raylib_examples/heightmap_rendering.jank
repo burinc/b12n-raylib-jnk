@@ -1,0 +1,72 @@
+(ns raylib-examples.heightmap-rendering
+  "raylib [models] example - heightmap rendering, ported to jank.
+
+  A terrain mesh generated from a grayscale heightmap image (pixel
+  brightness = elevation), textured with the same image and orbited
+  by an auto camera; the source heightmap shows top-right. ESC quits.
+  Based on raylib/examples/models/models_heightmap_rendering.c
+
+  jank-native notes:
+  - GenMeshHeightmap(image, size) is the third GenMesh* proven after
+    the model unblock: the Image goes in by value, the Vector3 size
+    inline, and the resulting Mesh feeds LoadModelFromMesh as a call
+    argument. Material texture write via the (cpp/& model) shim."
+  (:include "raylib.h"))
+
+(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - heightmap rendering (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 18.0) (cpp/float 21.0) (cpp/float 18.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        image (cpp/LoadImage (str RES "heightmap.png"))
+        texture (cpp/LoadTextureFromImage image)
+        model (cpp/LoadModelFromMesh
+               (cpp/GenMeshHeightmap image
+                                     (cpp/Vector3 (cpp/float 16.0) (cpp/float 8.0) (cpp/float 16.0))))
+        tw (int (+ 0.0 (.-width texture)))
+        th (int (+ 0.0 (.-height texture)))]
+
+    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (cpp/UnloadImage image)
+
+    (cpp/SetTargetFPS 60)
+
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/BeginMode3D camera)
+        (cpp/DrawModel model
+                       (cpp/Vector3 (cpp/float -8.0) (cpp/float 0.0) (cpp/float -8.0))
+                       (cpp/float 1.0) cpp/RED)
+        (cpp/DrawGrid 20 (cpp/float 1.0))
+        (cpp/EndMode3D)
+
+        ;; the source heightmap, framed top-right
+        (cpp/DrawTexture texture (- WIDTH tw 20) 20 cpp/WHITE)
+        (cpp/DrawRectangleLines (- WIDTH tw 20) 20 tw th cpp/GREEN)
+
+        (cpp/DrawFPS 10 10)
+
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadTexture texture)
+    (cpp/UnloadModel model))
+
+  (cpp/CloseWindow))

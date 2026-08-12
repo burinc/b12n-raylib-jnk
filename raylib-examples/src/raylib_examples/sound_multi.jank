@@ -1,0 +1,75 @@
+(ns raylib-examples.sound-multi
+  "raylib [audio] example - sound multi, ported to jank.
+
+  Overlapping playback: one source Sound plus nine LoadSoundAlias
+  copies that share its sample data; each SPACE press plays the next
+  slot so rapid presses overlap. Q quits.
+  Based on raylib/examples/audio/audio_sound_multi.c
+  (jank-native: the C's Sound array becomes ten outer-let bindings
+  with a nested-if dispatch on the current slot id - the same idiom
+  image_generation uses for its nine textures.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def WAV "../jank-raylib-sys/raylib/examples/audio/resources/sound.wav")
+(def MAX-SOUNDS 10)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - sound multi (jank)")
+  (cpp/InitAudioDevice)
+  (cpp/SetTargetFPS 60)
+
+  ;; Slot 0 owns the sample data; 1-9 are aliases sharing it.
+  (let [s0 (cpp/LoadSound WAV)
+        s1 (cpp/LoadSoundAlias s0)
+        s2 (cpp/LoadSoundAlias s0)
+        s3 (cpp/LoadSoundAlias s0)
+        s4 (cpp/LoadSoundAlias s0)
+        s5 (cpp/LoadSoundAlias s0)
+        s6 (cpp/LoadSoundAlias s0)
+        s7 (cpp/LoadSoundAlias s0)
+        s8 (cpp/LoadSoundAlias s0)
+        s9 (cpp/LoadSoundAlias s0)]
+
+    (loop [current 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [current (if (cpp/IsKeyPressed cpp/KEY_SPACE)
+                        (do
+                          (cpp/PlaySound
+                           (if (= current 0) s0
+                               (if (= current 1) s1
+                                   (if (= current 2) s2
+                                       (if (= current 3) s3
+                                           (if (= current 4) s4
+                                               (if (= current 5) s5
+                                                   (if (= current 6) s6
+                                                       (if (= current 7) s7
+                                                           (if (= current 8) s8 s9))))))))))
+                          (let [n (+ current 1)]
+                            (if (>= n MAX-SOUNDS) 0 n)))
+                        current)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+          (cpp/DrawText "Press SPACE to PLAY a WAV sound!" 200 180 20 cpp/LIGHTGRAY)
+          (cpp/DrawText "Rapid presses overlap via sound aliases (Q quits)" 200 220 10 cpp/GRAY)
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur current)))))
+
+    (cpp/UnloadSoundAlias s1)
+    (cpp/UnloadSoundAlias s2)
+    (cpp/UnloadSoundAlias s3)
+    (cpp/UnloadSoundAlias s4)
+    (cpp/UnloadSoundAlias s5)
+    (cpp/UnloadSoundAlias s6)
+    (cpp/UnloadSoundAlias s7)
+    (cpp/UnloadSoundAlias s8)
+    (cpp/UnloadSoundAlias s9)
+    (cpp/UnloadSound s0))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow))

@@ -1,0 +1,71 @@
+(ns raylib-examples.lines-bezier
+  "raylib [shapes] example - lines bezier, ported to jank.
+
+  Drag the two endpoints to reshape a cubic Bezier curve. Q quits.
+  Based on raylib/examples/shapes/shapes_lines_bezier.c
+  (jank-native: Vector2 built inline for CheckCollisionPointCircle +
+  DrawLineBezier)."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def GRAB 10.0)            ; grab radius around an endpoint
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - lines bezier (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread the two endpoints + which one is being dragged.
+  (loop [sx 30.0
+         sy 30.0
+         ex (- WIDTH 30.0)
+         ey (- HEIGHT 30.0)
+         move-start false
+         move-end   false]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+            down (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT)
+            rel  (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT)
+            over-start (cpp/CheckCollisionPointCircle
+                        (cpp/Vector2 (cpp/float mx) (cpp/float my))
+                        (cpp/Vector2 (cpp/float sx) (cpp/float sy)) (cpp/float GRAB))
+            over-end   (cpp/CheckCollisionPointCircle
+                        (cpp/Vector2 (cpp/float mx) (cpp/float my))
+                        (cpp/Vector2 (cpp/float ex) (cpp/float ey)) (cpp/float GRAB))
+            ;; Start dragging (else-if: end only if start didn't trigger).
+            grab-start (and over-start down)
+            grab-end   (and (not grab-start) over-end down)
+            move-start (if grab-start true move-start)
+            move-end   (if grab-end true move-end)
+            ;; While dragging, the point tracks the mouse.
+            sx (if move-start mx sx)
+            sy (if move-start my sy)
+            ex (if move-end mx ex)
+            ey (if move-end my ey)
+            ;; Release stops dragging.
+            move-start (if (and move-start rel) false move-start)
+            move-end   (if (and move-end rel) false move-end)
+            start-r (if over-start 14.0 8.0)
+            end-r   (if over-end 14.0 8.0)]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (cpp/DrawText "MOVE START-END POINTS WITH MOUSE - Q QUITS" 15 20 20 cpp/GRAY)
+
+        (cpp/DrawLineBezier (cpp/Vector2 (cpp/float sx) (cpp/float sy))
+                            (cpp/Vector2 (cpp/float ex) (cpp/float ey))
+                            (cpp/float 4.0) cpp/BLUE)
+
+        (cpp/DrawCircle (int sx) (int sy) (cpp/float start-r) (if move-start cpp/RED cpp/BLUE))
+        (cpp/DrawCircle (int ex) (int ey) (cpp/float end-r)   (if move-end cpp/RED cpp/BLUE))
+
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur sx sy ex ey move-start move-end)))))
+
+  (cpp/CloseWindow))

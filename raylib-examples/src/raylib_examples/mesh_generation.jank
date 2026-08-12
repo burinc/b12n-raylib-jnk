@@ -1,0 +1,142 @@
+(ns raylib-examples.mesh-generation
+  "raylib [models] example - mesh generation, ported to jank.
+
+  All of raylib's procedural mesh generators in one gallery: plane,
+  cube, sphere, hemisphere, cylinder, torus, knot, polygon, plus a
+  hand-built one-triangle custom mesh - each checked-textured and
+  orbited by an auto camera. LEFT CLICK or LEFT/RIGHT cycle the
+  model. ESC quits.
+  Based on raylib/examples/models/models_mesh_generation.c
+
+  jank-native notes:
+  - The C's Model models[9] array cannot live in a jank vector
+    (rule 2); nine outer-let locals + a per-index cond dispatching
+    DrawModel (the postprocessing per-index pattern, scaled to
+    models). Only the index threads through recur.
+  - GenMeshCustom (MemAlloc'd vertex/normal/texcoord arrays filled
+    by hand) stays a verbatim C shim returning the Mesh.
+  - GenImageChecked takes the two Colors inline; the atlas texture is
+    assigned to all nine materials by nine explicit shim calls (a
+    jank loop cannot carry the native models)."
+  (:include "raylib.h"))
+
+;; The C's GenMeshCustom, verbatim: a single triangle with MemAlloc'd
+;; attribute arrays. Plus the usual material-texture write shim.
+(cpp/raw "static Mesh jank_gen_mesh_custom(void) {
+  Mesh mesh = { 0 };
+  mesh.triangleCount = 1;
+  mesh.vertexCount = mesh.triangleCount*3;
+  mesh.vertices = (float *)MemAlloc(mesh.vertexCount*3*sizeof(float));
+  mesh.texcoords = (float *)MemAlloc(mesh.vertexCount*2*sizeof(float));
+  mesh.normals = (float *)MemAlloc(mesh.vertexCount*3*sizeof(float));
+  mesh.vertices[0] = 0; mesh.vertices[1] = 0; mesh.vertices[2] = 0;
+  mesh.normals[0] = 0; mesh.normals[1] = 1; mesh.normals[2] = 0;
+  mesh.texcoords[0] = 0; mesh.texcoords[1] = 0;
+  mesh.vertices[3] = 1; mesh.vertices[4] = 0; mesh.vertices[5] = 2;
+  mesh.normals[3] = 0; mesh.normals[4] = 1; mesh.normals[5] = 0;
+  mesh.texcoords[2] = 0.5f; mesh.texcoords[3] = 1.0f;
+  mesh.vertices[6] = 2; mesh.vertices[7] = 0; mesh.vertices[8] = 0;
+  mesh.normals[6] = 0; mesh.normals[7] = 1; mesh.normals[8] = 0;
+  mesh.texcoords[4] = 1; mesh.texcoords[5] = 0;
+  UploadMesh(&mesh, false);
+  return mesh;
+}
+static void jank_model_set_texture(Model* m, Texture2D tex) {
+  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def NUM-MODELS 9)
+
+;; [label label-x] per model, indexed to match the load order in -main.
+(def NAMES [["PLANE" 680] ["CUBE" 680] ["SPHERE" 680] ["HEMISPHERE" 640]
+            ["CYLINDER" 680] ["TORUS" 680] ["KNOT" 680] ["POLY" 680]
+            ["Custom (triangle)" 580]])
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - mesh generation (jank)")
+
+  (let [checked (cpp/GenImageChecked 2 2 1 1 cpp/RED cpp/GREEN)
+        texture (cpp/LoadTextureFromImage checked)
+        _ (cpp/UnloadImage checked)
+        camera (cpp/Camera3D (cpp/Vector3 (cpp/float 5.0) (cpp/float 5.0) (cpp/float 5.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        m0 (cpp/LoadModelFromMesh (cpp/GenMeshPlane (cpp/float 2.0) (cpp/float 2.0) 4 3))
+        m1 (cpp/LoadModelFromMesh (cpp/GenMeshCube (cpp/float 2.0) (cpp/float 1.0) (cpp/float 2.0)))
+        m2 (cpp/LoadModelFromMesh (cpp/GenMeshSphere (cpp/float 2.0) 32 32))
+        m3 (cpp/LoadModelFromMesh (cpp/GenMeshHemiSphere (cpp/float 2.0) 16 16))
+        m4 (cpp/LoadModelFromMesh (cpp/GenMeshCylinder (cpp/float 1.0) (cpp/float 2.0) 16))
+        m5 (cpp/LoadModelFromMesh (cpp/GenMeshTorus (cpp/float 0.25) (cpp/float 4.0) 16 32))
+        m6 (cpp/LoadModelFromMesh (cpp/GenMeshKnot (cpp/float 1.0) (cpp/float 2.0) 16 128))
+        m7 (cpp/LoadModelFromMesh (cpp/GenMeshPoly 5 (cpp/float 2.0)))
+        m8 (cpp/LoadModelFromMesh (cpp/jank_gen_mesh_custom))]
+
+    (cpp/jank_model_set_texture (cpp/& m0) texture)
+    (cpp/jank_model_set_texture (cpp/& m1) texture)
+    (cpp/jank_model_set_texture (cpp/& m2) texture)
+    (cpp/jank_model_set_texture (cpp/& m3) texture)
+    (cpp/jank_model_set_texture (cpp/& m4) texture)
+    (cpp/jank_model_set_texture (cpp/& m5) texture)
+    (cpp/jank_model_set_texture (cpp/& m6) texture)
+    (cpp/jank_model_set_texture (cpp/& m7) texture)
+    (cpp/jank_model_set_texture (cpp/& m8) texture)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [current-model-index].
+    (loop [current 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (let [current (cond (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+                            (int (mod (inc current) NUM-MODELS))
+                            (cpp/IsKeyPressed cpp/KEY_RIGHT)
+                            (int (mod (inc current) NUM-MODELS))
+                            (cpp/IsKeyPressed cpp/KEY_LEFT)
+                            (int (mod (dec current) NUM-MODELS))
+                            :else current)
+              pos (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          ;; nine native Models can't sit in a vector: per-index cond
+          (cond (= current 0) (cpp/DrawModel m0 pos (cpp/float 1.0) cpp/WHITE)
+                (= current 1) (cpp/DrawModel m1 pos (cpp/float 1.0) cpp/WHITE)
+                (= current 2) (cpp/DrawModel m2 pos (cpp/float 1.0) cpp/WHITE)
+                (= current 3) (cpp/DrawModel m3 pos (cpp/float 1.0) cpp/WHITE)
+                (= current 4) (cpp/DrawModel m4 pos (cpp/float 1.0) cpp/WHITE)
+                (= current 5) (cpp/DrawModel m5 pos (cpp/float 1.0) cpp/WHITE)
+                (= current 6) (cpp/DrawModel m6 pos (cpp/float 1.0) cpp/WHITE)
+                (= current 7) (cpp/DrawModel m7 pos (cpp/float 1.0) cpp/WHITE)
+                :else (cpp/DrawModel m8 pos (cpp/float 1.0) cpp/WHITE))
+          (cpp/DrawGrid 10 (cpp/float 1.0))
+          (cpp/EndMode3D)
+
+          (cpp/DrawRectangle 30 400 310 30 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+          (cpp/DrawRectangleLines 30 400 310 30 (cpp/Fade cpp/DARKBLUE (cpp/float 0.5)))
+          (cpp/DrawText "MOUSE LEFT BUTTON to CYCLE PROCEDURAL MODELS" 40 410 10 cpp/BLUE)
+          (cpp/DrawText (nth (nth NAMES current) 0)
+                        (nth (nth NAMES current) 1) 10 20 cpp/DARKBLUE)
+
+          (cpp/EndDrawing)
+          (recur current))))
+
+    (cpp/UnloadTexture texture)
+    (cpp/UnloadModel m0)
+    (cpp/UnloadModel m1)
+    (cpp/UnloadModel m2)
+    (cpp/UnloadModel m3)
+    (cpp/UnloadModel m4)
+    (cpp/UnloadModel m5)
+    (cpp/UnloadModel m6)
+    (cpp/UnloadModel m7)
+    (cpp/UnloadModel m8))
+
+  (cpp/CloseWindow))

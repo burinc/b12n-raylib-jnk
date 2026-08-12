@@ -1,0 +1,181 @@
+(ns raylib-examples.bullet-hell
+  "raylib [shapes] example - bullet hell, ported to jank.
+
+  A spinning magic circle sprays rings of bullets. RIGHT/LEFT (or D/A)
+  change the row count, UP/DOWN (or W/S) the bullet speed, Z/X the
+  spawn cooldown, holding SPACE grows the spiral angle increment,
+  ENTER switches between the pre-rendered-texture and DrawCircle draw
+  methods, C clears, Q quits.
+  Based on raylib/examples/shapes/shapes_bullet_hell.c
+  (jank-native: bullets are a vector of maps rebuilt per frame instead
+  of a mutable C array, and MAX-BULLETS is 5000 rather than the C's
+  500000 calloc headroom - the reset-at-cap behavior is the same. The
+  C's (Color){0,0,0,200} UI panels become Fade BLACK 0.784.)"
+  (:include "raylib.h" "math.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-BULLETS 5000)
+(def RADIUS 10.0)
+(def DEG2RAD 0.017453292519943295)
+
+(defn spawn-bullets
+  "Adds one ring of bullets (color alternating by row) around base-dir."
+  [bs base-dir rows speed]
+  (let [deg (/ 360.0 rows)]
+    (loop [row 0 acc bs]
+      (if (and (< row rows) (< (count acc) MAX-BULLETS))
+        (let [dir (* (+ base-dir (* deg row)) DEG2RAD)]
+          (recur (inc row)
+                 (conj acc {:x 400.0 :y 225.0
+                            :ax (+ 0.0 (* speed (cpp/cos dir)))
+                            :ay (+ 0.0 (* speed (cpp/sin dir)))
+                            :on? true
+                            :c (int (mod row 2))})))
+        acc))))
+
+(defn update-bullets
+  "Moves live bullets, disabling any that leave the screen.
+  Returns {:bs updated-vector :dis newly-disabled-count}."
+  [bs]
+  (loop [i 0 acc [] dis 0]
+    (if (< i (count bs))
+      (let [b (nth bs i)]
+        (if (:on? b)
+          (let [x (+ (:x b) (:ax b))
+                y (+ (:y b) (:ay b))
+                off? (or (< x -20.0) (> x 820.0) (< y -20.0) (> y 470.0))]
+            (recur (inc i)
+                   (conj acc {:x x :y y :ax (:ax b) :ay (:ay b)
+                              :on? (not off?) :c (:c b)})
+                   (if off? (+ dis 1) dis)))
+          (recur (inc i) (conj acc b) dis)))
+      {:bs acc :dis dis})))
+
+(defn fmt2
+  "A non-negative real formatted with exactly two decimals."
+  [x]
+  (let [c     (int (+ (* x 100.0) 0.5))
+        whole (int (quot c 100))
+        frac  (int (mod c 100))
+        frac  (str (if (< frac 10) "0" "") frac)]
+    (str whole "." frac)))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [shapes] example - bullet hell (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [btex (cpp/LoadRenderTexture 24 24)]
+    ;; Pre-render one bullet: DrawCircle per bullet is slow, tinted
+    ;; DrawTexture of this circle is the "performance mode".
+    (cpp/BeginTextureMode btex)
+    (cpp/DrawCircle 12 12 (cpp/float RADIUS) cpp/WHITE)
+    (cpp/DrawCircleLines 12 12 (cpp/float RADIUS) cpp/BLACK)
+    (cpp/EndTextureMode)
+
+    ;; Thread [bullets disabled-total rows speed cooldown timer
+    ;;         base-direction angle-increment perf-mode? magic-rotation].
+    (loop [bs [] dis 0 rows 6 speed 3.0 cool 2.0 timer 2.0
+           base 0.0 ainc 5 perf? true mrot 0.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [;; At the cap, restart the pool (same as the C).
+              [bs dis] (if (>= (count bs) MAX-BULLETS) [[] 0] [bs dis])
+
+              timer (- timer 1.0)
+              spawn? (< timer 0.0)
+              timer (if spawn? cool timer)
+              bs    (if spawn? (spawn-bullets bs base rows speed) bs)
+              base  (if spawn? (+ base ainc) base)
+
+              r   (update-bullets bs)
+              bs  (:bs r)
+              dis (+ dis (:dis r))
+
+              rows (if (and (or (cpp/IsKeyPressed cpp/KEY_RIGHT) (cpp/IsKeyPressed cpp/KEY_D))
+                            (< rows 359))
+                     (+ rows 1) rows)
+              rows (if (and (or (cpp/IsKeyPressed cpp/KEY_LEFT) (cpp/IsKeyPressed cpp/KEY_A))
+                            (> rows 1))
+                     (- rows 1) rows)
+              speed (if (or (cpp/IsKeyPressed cpp/KEY_UP) (cpp/IsKeyPressed cpp/KEY_W))
+                      (+ speed 0.25) speed)
+              speed (if (and (or (cpp/IsKeyPressed cpp/KEY_DOWN) (cpp/IsKeyPressed cpp/KEY_S))
+                             (> speed 0.5))
+                      (- speed 0.25) speed)
+              cool (if (and (cpp/IsKeyPressed cpp/KEY_Z) (> cool 1.0)) (- cool 1.0) cool)
+              cool (if (cpp/IsKeyPressed cpp/KEY_X) (+ cool 1.0) cool)
+              perf? (if (cpp/IsKeyPressed cpp/KEY_ENTER) (not perf?) perf?)
+              ainc (if (cpp/IsKeyDown cpp/KEY_SPACE) (int (mod (+ ainc 1) 360)) ainc)
+              [bs dis] (if (cpp/IsKeyPressed cpp/KEY_C) [[] 0] [bs dis])
+
+              mrot (+ mrot 1.0)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          ;; The magic circle.
+          (cpp/DrawRectanglePro (cpp/Rectangle (cpp/float 400.0) (cpp/float 225.0)
+                                               (cpp/float 120.0) (cpp/float 120.0))
+                                (cpp/Vector2 (cpp/float 60.0) (cpp/float 60.0))
+                                (cpp/float mrot) cpp/PURPLE)
+          (cpp/DrawRectanglePro (cpp/Rectangle (cpp/float 400.0) (cpp/float 225.0)
+                                               (cpp/float 120.0) (cpp/float 120.0))
+                                (cpp/Vector2 (cpp/float 60.0) (cpp/float 60.0))
+                                (cpp/float (+ mrot 45.0)) cpp/PURPLE)
+          (cpp/DrawCircleLines 400 225 (cpp/float 70.0) cpp/BLACK)
+          (cpp/DrawCircleLines 400 225 (cpp/float 50.0) cpp/BLACK)
+          (cpp/DrawCircleLines 400 225 (cpp/float 30.0) cpp/BLACK)
+
+          ;; The bullets.
+          (loop [i 0]
+            (when (< i (count bs))
+              (let [b (nth bs i)]
+                (when (:on? b)
+                  (if perf?
+                    (cpp/DrawTexture (.-texture btex)
+                                     (int (- (:x b) 12.0)) (int (- (:y b) 12.0))
+                                     (if (= (:c b) 0) cpp/RED cpp/BLUE))
+                    (do
+                      (cpp/DrawCircleV (cpp/Vector2 (cpp/float (:x b)) (cpp/float (:y b)))
+                                       (cpp/float RADIUS)
+                                       (if (= (:c b) 0) cpp/RED cpp/BLUE))
+                      (cpp/DrawCircleLinesV (cpp/Vector2 (cpp/float (:x b)) (cpp/float (:y b)))
+                                            (cpp/float RADIUS) cpp/BLACK)))))
+              (recur (inc i))))
+
+          ;; UI panels.
+          (cpp/DrawRectangle 10 10 280 150 (cpp/Fade cpp/BLACK (cpp/float 0.784)))
+          (cpp/DrawText "Controls:" 20 20 10 cpp/LIGHTGRAY)
+          (cpp/DrawText "- Right/Left or A/D: Change rows number" 40 40 10 cpp/LIGHTGRAY)
+          (cpp/DrawText "- Up/Down or W/S: Change bullet speed" 40 60 10 cpp/LIGHTGRAY)
+          (cpp/DrawText "- Z or X: Change spawn cooldown" 40 80 10 cpp/LIGHTGRAY)
+          (cpp/DrawText "- Space (Hold): Change the angle increment" 40 100 10 cpp/LIGHTGRAY)
+          (cpp/DrawText "- Enter: Switch draw method (Performance)" 40 120 10 cpp/LIGHTGRAY)
+          (cpp/DrawText "- C: Clear bullets, Q: quit" 40 140 10 cpp/LIGHTGRAY)
+
+          (cpp/DrawRectangle 610 10 170 30 (cpp/Fade cpp/BLACK (cpp/float 0.784)))
+          (if perf?
+            (cpp/DrawText "Draw method: DrawTexture(*)" 620 20 10 cpp/GREEN)
+            (cpp/DrawText "Draw method: DrawCircle(*)" 620 20 10 cpp/RED))
+
+          (cpp/DrawRectangle 135 410 530 30 (cpp/Fade cpp/BLACK (cpp/float 0.784)))
+          ;; str with >10 args packs the rest into a list, which chokes on a
+          ;; raw (int ...) i64 at codegen - keep each str under 10 args.
+          (let [status (str "[ FPS: " (int (cpp/GetFPS))
+                            ", Bullets: " (- (count bs) dis)
+                            ", Rows: " rows)]
+            (cpp/DrawText (str status
+                               ", Bullet speed: " (fmt2 speed)
+                               ", Angle increment per frame: " ainc
+                               ", Cooldown: " (int cool) " ]")
+                          155 420 10 cpp/GREEN))
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur bs dis rows speed cool timer base ainc perf? mrot)))))
+
+    (cpp/UnloadRenderTexture btex))
+
+  (cpp/CloseWindow))

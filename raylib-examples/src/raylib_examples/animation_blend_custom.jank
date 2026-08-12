@@ -1,0 +1,220 @@
+(ns raylib-examples.animation-blend-custom
+  "raylib [models] example - animation blend custom, ported to jank.
+
+  PER-BONE animation blending: the greenman walks with his legs while
+  his upper body attacks - each bone picks its own blend factor by
+  name (spine/arms/head follow the attack, the rest the walk). SPACE
+  toggles between that split and a uniform 50/50 blend of the two
+  animations. Orbital camera. ESC quits.
+  Based on raylib/examples/models/models_animation_blend_custom.c
+
+  jank-native notes:
+  - The C's custom UpdateModelAnimationBones (per-bone
+    Vector3Lerp/QuaternionSlerp against the bind pose, then a full
+    CPU-skinning pass re-uploading vertex buffers) and its
+    IsUpperBodyBone name classifier stay verbatim C shims - jank
+    drives them with the two animation indices, wrapped frames and
+    the blend mode.
+  - The skinning shader loads and lands on materials[1] (CPU
+    skinning still runs; the shader covers the GPU-skinning build
+    variant, matching the C)."
+  (:include "raylib.h" "raymath.h" "rlgl.h" "string.h"))
+
+;; The C's per-bone blending + CPU skinning, verbatim (pointer-heavy).
+(cpp/raw "static ModelAnimation *jank_anims = NULL;
+static int jank_anims_count = 0;
+static int jank_load_anims(const char* path) {
+  jank_anims = LoadModelAnimations(path, &jank_anims_count);
+  return jank_anims_count;
+}
+static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
+static const char* jank_anim_name(int i) { return jank_anims[i].name; }
+static void jank_model_set_shader1(Model* m, Shader s) { m->materials[1].shader = s; }
+
+static bool jank_is_upper_body_bone(const char *boneName) {
+  if (TextIsEqual(boneName, \"spine\") || TextIsEqual(boneName, \"spine1\") || TextIsEqual(boneName, \"spine2\") ||
+      TextIsEqual(boneName, \"chest\") || TextIsEqual(boneName, \"upperChest\") ||
+      TextIsEqual(boneName, \"neck\") || TextIsEqual(boneName, \"head\") ||
+      TextIsEqual(boneName, \"shoulder\") || TextIsEqual(boneName, \"shoulder_L\") || TextIsEqual(boneName, \"shoulder_R\") ||
+      TextIsEqual(boneName, \"upperArm\") || TextIsEqual(boneName, \"upperArm_L\") || TextIsEqual(boneName, \"upperArm_R\") ||
+      TextIsEqual(boneName, \"lowerArm\") || TextIsEqual(boneName, \"lowerArm_L\") || TextIsEqual(boneName, \"lowerArm_R\") ||
+      TextIsEqual(boneName, \"hand\") || TextIsEqual(boneName, \"hand_L\") || TextIsEqual(boneName, \"hand_R\") ||
+      TextIsEqual(boneName, \"clavicle\") || TextIsEqual(boneName, \"clavicle_L\") || TextIsEqual(boneName, \"clavicle_R\"))
+    return true;
+  if (strstr(boneName, \"spine\") != NULL || strstr(boneName, \"chest\") != NULL ||
+      strstr(boneName, \"neck\") != NULL || strstr(boneName, \"head\") != NULL ||
+      strstr(boneName, \"shoulder\") != NULL || strstr(boneName, \"arm\") != NULL ||
+      strstr(boneName, \"hand\") != NULL || strstr(boneName, \"clavicle\") != NULL)
+    return true;
+  return false;
+}
+
+static void jank_update_anim_bones(Model *model, int i0, int frame0,
+                                   int i1, int frame1, double blendIn, int upperBodyBlend) {
+  ModelAnimation *anim0 = &jank_anims[i0];
+  ModelAnimation *anim1 = &jank_anims[i1];
+  float blend = (float)blendIn;
+  if ((anim0->boneCount != 0) && (anim0->keyframePoses != NULL) &&
+      (anim1->boneCount != 0) && (anim1->keyframePoses != NULL) &&
+      (model->skeleton.boneCount != 0) && (model->skeleton.bindPose != NULL)) {
+    blend = fminf(1.0f, fmaxf(0.0f, blend));
+    if (frame0 >= anim0->keyframeCount) frame0 = anim0->keyframeCount - 1;
+    if (frame1 >= anim1->keyframeCount) frame1 = anim1->keyframeCount - 1;
+    if (frame0 < 0) frame0 = 0;
+    if (frame1 < 0) frame1 = 0;
+
+    int boneCount = model->skeleton.boneCount;
+    if (anim0->boneCount < boneCount) boneCount = anim0->boneCount;
+    if (anim1->boneCount < boneCount) boneCount = anim1->boneCount;
+
+    for (int boneIndex = 0; boneIndex < boneCount; boneIndex++) {
+      float boneBlendFactor = blend;
+      if (upperBodyBlend) {
+        /* upper body follows anim1 (attack), lower body anim0 (walk) */
+        if (jank_is_upper_body_bone(model->skeleton.bones[boneIndex].name))
+          boneBlendFactor = blend;
+        else boneBlendFactor = 1.0f - blend;
+      }
+
+      Transform *bindTransform = &model->skeleton.bindPose[boneIndex];
+      Transform *animTransform0 = &anim0->keyframePoses[frame0][boneIndex];
+      Transform *animTransform1 = &anim1->keyframePoses[frame1][boneIndex];
+
+      Transform blended = { 0 };
+      blended.translation = Vector3Lerp(animTransform0->translation, animTransform1->translation, boneBlendFactor);
+      blended.rotation = QuaternionSlerp(animTransform0->rotation, animTransform1->rotation, boneBlendFactor);
+      blended.scale = Vector3Lerp(animTransform0->scale, animTransform1->scale, boneBlendFactor);
+
+      Matrix bindMatrix = MatrixMultiply(MatrixMultiply(
+          MatrixScale(bindTransform->scale.x, bindTransform->scale.y, bindTransform->scale.z),
+          QuaternionToMatrix(bindTransform->rotation)),
+          MatrixTranslate(bindTransform->translation.x, bindTransform->translation.y, bindTransform->translation.z));
+
+      Matrix blendedMatrix = MatrixMultiply(MatrixMultiply(
+          MatrixScale(blended.scale.x, blended.scale.y, blended.scale.z),
+          QuaternionToMatrix(blended.rotation)),
+          MatrixTranslate(blended.translation.x, blended.translation.y, blended.translation.z));
+
+      model->boneMatrices[boneIndex] = MatrixMultiply(MatrixInvert(bindMatrix), blendedMatrix);
+    }
+
+    /* CPU skinning: rebuild anim vertex/normal buffers + upload */
+    for (int m = 0; m < model->meshCount; m++) {
+      Mesh mesh = model->meshes[m];
+      Vector3 animVertex = { 0 };
+      Vector3 animNormal = { 0 };
+      const int vertexValuesCount = mesh.vertexCount*3;
+      int boneIndex = 0;
+      int boneCounter = 0;
+      float boneWeight = 0.0f;
+      bool bufferUpdateRequired = false;
+
+      if ((mesh.boneWeights == NULL) || (mesh.boneIndices == NULL) ||
+          (mesh.animVertices == NULL) || (mesh.animNormals == NULL)) continue;
+
+      for (int vCounter = 0; vCounter < vertexValuesCount; vCounter += 3) {
+        mesh.animVertices[vCounter] = 0;
+        mesh.animVertices[vCounter + 1] = 0;
+        mesh.animVertices[vCounter + 2] = 0;
+        if (mesh.animNormals != NULL) {
+          mesh.animNormals[vCounter] = 0;
+          mesh.animNormals[vCounter + 1] = 0;
+          mesh.animNormals[vCounter + 2] = 0;
+        }
+
+        for (int j = 0; j < 4; j++, boneCounter++) {
+          boneWeight = mesh.boneWeights[boneCounter];
+          boneIndex = mesh.boneIndices[boneCounter];
+          if (boneWeight == 0.0f) continue;
+          animVertex = (Vector3){ mesh.vertices[vCounter], mesh.vertices[vCounter + 1], mesh.vertices[vCounter + 2] };
+          animVertex = Vector3Transform(animVertex, model->boneMatrices[boneIndex]);
+          mesh.animVertices[vCounter] += animVertex.x*boneWeight;
+          mesh.animVertices[vCounter + 1] += animVertex.y*boneWeight;
+          mesh.animVertices[vCounter + 2] += animVertex.z*boneWeight;
+          bufferUpdateRequired = true;
+
+          if ((mesh.normals != NULL) && (mesh.animNormals != NULL)) {
+            animNormal = (Vector3){ mesh.normals[vCounter], mesh.normals[vCounter + 1], mesh.normals[vCounter + 2] };
+            animNormal = Vector3Transform(animNormal, MatrixTranspose(MatrixInvert(model->boneMatrices[boneIndex])));
+            mesh.animNormals[vCounter] += animNormal.x*boneWeight;
+            mesh.animNormals[vCounter + 1] += animNormal.y*boneWeight;
+            mesh.animNormals[vCounter + 2] += animNormal.z*boneWeight;
+          }
+        }
+      }
+
+      if (bufferUpdateRequired) {
+        rlUpdateVertexBuffer(mesh.vboId[SHADER_LOC_VERTEX_POSITION], mesh.animVertices, mesh.vertexCount*3*sizeof(float), 0);
+        if (mesh.normals != NULL) rlUpdateVertexBuffer(mesh.vboId[SHADER_LOC_VERTEX_NORMAL], mesh.animNormals, mesh.vertexCount*3*sizeof(float), 0);
+      }
+    }
+  }
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - animation blend custom (jank)")
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 4.0) (cpp/float 4.0) (cpp/float 4.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)
+        model (cpp/LoadModel (str RES "models/gltf/greenman.glb"))
+        skinning-shader (cpp/LoadShader (str RES "shaders/glsl330/skinning.vs")
+                                        (str RES "shaders/glsl330/skinning.fs"))
+        anim-count (int (cpp/jank_load_anims (str RES "models/gltf/greenman.glb")))
+        ;; 2 = walk/move, 3 = attack (the C's picks, validated)
+        idx0 (if (>= 2 anim-count) 0 2)
+        idx1 (if (>= 3 anim-count) (if (> anim-count 1) 1 0) 3)
+        keyframes0 (int (cpp/jank_anim_keyframes (int idx0)))
+        keyframes1 (int (cpp/jank_anim_keyframes (int idx1)))]
+
+    (cpp/jank_model_set_shader1 (cpp/& model) skinning-shader)
+
+    (cpp/SetTargetFPS 60)
+
+    ;; Thread [frame0 frame1 upper-body-blend?].
+    (loop [frame0 0
+           frame1 0
+           upper? true]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
+
+        (let [upper? (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not upper?) upper?)
+              frame0 (int (mod (inc frame0) keyframes0))
+              frame1 (int (mod (inc frame1) keyframes1))
+              ;; split mode: attack fully on the upper body; uniform: 50/50
+              blend (if upper? 1.0 0.5)]
+
+          (cpp/jank_update_anim_bones (cpp/& model) (int idx0) (int frame0)
+                                      (int idx1) (int frame1) blend
+                                      (if upper? 1 0))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+          (cpp/DrawModel model
+                         (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                         (cpp/float 1.0) cpp/WHITE)
+          (cpp/DrawGrid 10 (cpp/float 1.0))
+          (cpp/EndMode3D)
+
+          (cpp/DrawText (str "ANIM 0: " (cpp/jank_anim_name (int idx0))) 10 10 20 cpp/GRAY)
+          (cpp/DrawText (str "ANIM 1: " (cpp/jank_anim_name (int idx1))) 10 40 20 cpp/GRAY)
+          (cpp/DrawText (str "[SPACE] Toggle blending mode: "
+                             (if upper? "Upper/Lower Body Blending" "Uniform Blending"))
+                        10 (- HEIGHT 30) 20 cpp/DARKGRAY)
+
+          (cpp/EndDrawing)
+          (recur frame0 frame1 upper?))))
+
+    (cpp/UnloadModel model)
+    (cpp/UnloadShader skinning-shader))
+
+  (cpp/CloseWindow))

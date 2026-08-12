@@ -1,0 +1,91 @@
+(ns raylib-examples.box-collisions
+  "raylib [models] example - box collisions, ported to jank.
+
+  A player cube (ARROW keys) colliding with an enemy box and an
+  enemy sphere in 3D; the player turns red while overlapping.
+  Q quits.
+  Based on raylib/examples/models/models_box_collisions.c
+  (jank-native: the player position threads the loop as three plain
+  reals; BoundingBoxes are constructed inline from nested Vector3
+  args at each CheckCollision* call.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+;; Player half-extents (size 1x2x1), enemy box at (-4,1,0) size 2^3,
+;; enemy sphere at (4,0,0) radius 1.5.
+(def PHX 0.5)
+(def PHY 1.0)
+(def PHZ 0.5)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [models] example - box collisions (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 0.0) (cpp/float 10.0) (cpp/float 10.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)]
+
+    ;; Thread the player position.
+    (loop [px 0.0 py 1.0 pz 2.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [px (if (cpp/IsKeyDown cpp/KEY_RIGHT) (+ px 0.2)
+                     (if (cpp/IsKeyDown cpp/KEY_LEFT) (- px 0.2) px))
+              pz (if (cpp/IsKeyDown cpp/KEY_DOWN) (+ pz 0.2)
+                     (if (cpp/IsKeyDown cpp/KEY_UP) (- pz 0.2) pz))
+
+              hit-box? (cpp/CheckCollisionBoxes
+                        (cpp/BoundingBox
+                         (cpp/Vector3 (cpp/float (- px PHX)) (cpp/float (- py PHY)) (cpp/float (- pz PHZ)))
+                         (cpp/Vector3 (cpp/float (+ px PHX)) (cpp/float (+ py PHY)) (cpp/float (+ pz PHZ))))
+                        (cpp/BoundingBox
+                         (cpp/Vector3 (cpp/float -5.0) (cpp/float 0.0) (cpp/float -1.0))
+                         (cpp/Vector3 (cpp/float -3.0) (cpp/float 2.0) (cpp/float 1.0))))
+              hit-sphere? (cpp/CheckCollisionBoxSphere
+                           (cpp/BoundingBox
+                            (cpp/Vector3 (cpp/float (- px PHX)) (cpp/float (- py PHY)) (cpp/float (- pz PHZ)))
+                            (cpp/Vector3 (cpp/float (+ px PHX)) (cpp/float (+ py PHY)) (cpp/float (+ pz PHZ))))
+                           (cpp/Vector3 (cpp/float 4.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 1.5))
+              collision (or hit-box? hit-sphere?)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+
+          ;; Enemy box.
+          (cpp/DrawCube (cpp/Vector3 (cpp/float -4.0) (cpp/float 1.0) (cpp/float 0.0))
+                        (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/GRAY)
+          (cpp/DrawCubeWires (cpp/Vector3 (cpp/float -4.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/DARKGRAY)
+
+          ;; Enemy sphere.
+          (cpp/DrawSphere (cpp/Vector3 (cpp/float 4.0) (cpp/float 0.0) (cpp/float 0.0))
+                          (cpp/float 1.5) cpp/GRAY)
+          (cpp/DrawSphereWires (cpp/Vector3 (cpp/float 4.0) (cpp/float 0.0) (cpp/float 0.0))
+                               (cpp/float 1.5) 16 16 cpp/DARKGRAY)
+
+          ;; Player, red while colliding.
+          (cpp/DrawCube (cpp/Vector3 (cpp/float px) (cpp/float py) (cpp/float pz))
+                        (cpp/float 1.0) (cpp/float 2.0) (cpp/float 1.0)
+                        (if collision cpp/RED cpp/GREEN))
+
+          (cpp/DrawGrid 10 (cpp/float 1.0))
+
+          (cpp/EndMode3D)
+
+          (cpp/DrawText "Move player with arrow keys to collide (Q quits)" 200 40 20 cpp/GRAY)
+          (cpp/DrawFPS 10 10)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur px py pz)))))
+
+    nil)
+
+  (cpp/CloseWindow))

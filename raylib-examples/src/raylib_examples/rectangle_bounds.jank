@@ -1,0 +1,190 @@
+(ns raylib-examples.rectangle-bounds
+  "raylib [text] example - rectangle bounds, ported to jank.
+
+  Text laid out inside a container rectangle you can resize by dragging the
+  little handle at its bottom-right corner. SPACE toggles word-wrap (on =
+  break between words, off = break mid-word at the edge); text that spills
+  past the box height is clipped. ESC quits.
+  Based on raylib/examples/text/text_rectangle_bounds.c
+
+  jank-native notes:
+  - The C's DrawTextBoxed walks codepoints and indexes font.glyphs[i] /
+    font.recs[i] for per-glyph advances - native Font-array indexing, the
+    same blocker class as core_random_sequence's int*. That's sidestepped
+    entirely: layout measures ordinary jank substrings with MeasureTextEx
+    (its Vector2 .-x re-boxed once, rule 4) and re-wraps every frame to the
+    container's current inner width. Same visual result, no glyph-array
+    indexing.
+  - Uses jank's clojure.string (str/split-lines, str/split regex) and the
+    seq API (into, peek, pop) - available beside the C++ :include (see
+    docs/guide/jank-interop-lessons.md). (str/replace is NOT ported in jank
+    yet - a runtime TODO - so tabs are baked into the text as spaces.)
+    Word/char wrap are two small greedy passes; like the C, a word wider
+    than the container falls back to a mid-word character break, so text
+    never escapes the box horizontally either.
+  - Border/resizer Colors are chosen inline at the draw call (rule 2: a jank
+    fn can't carry a native Color); the resize state is plain jank scalars
+    threaded through loop/recur, no native value carried.
+  - The C draws a 12x12 MAROON swatch inline in the bottom caption ('drag
+    the [] to resize'); the port spells it out as 'corner box' instead."
+  (:require [clojure.string :as str])
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def CX 25.0)
+(def CY 25.0)
+(def MIN-W 60.0)
+(def MIN-H 60.0)
+(def MAX-W (- WIDTH 50.0))
+(def MAX-H (- HEIGHT 160.0))
+(def FONT-SIZE 20.0)
+(def SPACING 2.0)
+(def LINE-H (int (+ FONT-SIZE (/ FONT-SIZE 2))))
+
+;; The C uses tabs as visual separators; jank's clojure.string/replace is
+;; still a TODO in the runtime, so spaces are baked in directly instead.
+(def TEXT
+  (str "Text cannot escape  this container  ...word wrap also works when "
+       "active so here's a long text for testing.\n\n"
+       "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do "
+       "eiusmod tempor incididunt ut labore et dolore magna aliqua. Nec "
+       "ullamcorper sit amet risus nullam eget felis eget."))
+
+(defn- measure
+  "Rendered width of string `s` at the display font/size/spacing."
+  [s]
+  (nth [(+ 0.0 (.-x (cpp/MeasureTextEx (cpp/GetFontDefault) s
+                                       (cpp/float FONT-SIZE) (cpp/float SPACING))))] 0))
+
+(defn- clampf [v lo hi]
+  (cond (< v lo) lo (> v hi) hi :else v))
+
+(defn- wrap-chars
+  "Character-wrap of `line` to `width` (used when word-wrap is off, and by
+  wrap-words to break a single word wider than the container)."
+  [line width]
+  (let [n (count line)]
+    (if (= n 0)
+      [""]
+      (loop [i 0 cur "" acc []]
+        (if (< i n)
+          (let [c (subs line i (inc i))
+                trial (str cur c)]
+            (if (> (measure trial) width)
+              ;; break here; a space never starts the next line (the C skips
+              ;; leading-space advances at line starts)
+              (recur (inc i) (if (= c " ") "" c) (conj acc cur))
+              (recur (inc i) trial acc)))
+          (if (= cur "") acc (conj acc cur)))))))
+
+(defn- wrap-words
+  "Greedy word-wrap of `line` to `width`; vector of sub-lines. Splits on
+  single spaces and keeps the empty tokens so runs of spaces (the C's tab
+  stand-ins) survive re-joining; a word wider than `width` falls back to a
+  mid-word character break (as the C's DrawTextBoxed does), so text cannot
+  escape the container horizontally either."
+  [line width]
+  (if (= line "")
+    [""]
+    (let [words (str/split line #" ")
+          nw (count words)]
+      (loop [wi 0 cur "" acc []]
+        (if (< wi nw)
+          (let [w (nth words wi)
+                trial (if (= cur "") w (str cur " " w))]
+            (if (> (measure trial) width)
+              (if (= cur "")
+                ;; a single word wider than the container: char-break it
+                (let [pieces (wrap-chars w width)]
+                  (recur (inc wi) (peek pieces) (into acc (pop pieces))))
+                ;; close the line and retry this word on a fresh one
+                (recur wi "" (conj acc cur)))
+              (recur (inc wi) trial acc)))
+          (if (= cur "")
+            (if (= acc []) [""] acc)
+            (conj acc cur)))))))
+
+(defn- build-display
+  "Word/char-wrap the whole (tab-normalized) text to `width`, flattened."
+  [wrap? width]
+  (let [lines (str/split-lines TEXT)]
+    (loop [li 0 acc []]
+      (if (< li (count lines))
+        (recur (inc li)
+               (into acc (if wrap?
+                           (wrap-words (nth lines li) width)
+                           (wrap-chars (nth lines li) width))))
+        acc))))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - rectangle bounds (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Thread [cw ch resizing? wrap? last-mx last-my].
+  (loop [cw MAX-W ch 200.0 resizing? false wrap? true last-mx 0.0 last-my 0.0]
+    (when (cpp/! (cpp/WindowShouldClose))
+      (let [mx (+ 0.0 (cpp/GetMouseX))
+            my (+ 0.0 (cpp/GetMouseY))
+            mouse (cpp/Vector2 (cpp/float mx) (cpp/float my))
+            ;; collision rects from the CURRENT size
+            container (cpp/Rectangle (cpp/float CX) (cpp/float CY) (cpp/float cw) (cpp/float ch))
+            resizer (cpp/Rectangle (cpp/float (- (+ CX cw) 17.0)) (cpp/float (- (+ CY ch) 17.0))
+                                   (cpp/float 14.0) (cpp/float 14.0))
+            hover? (cpp/CheckCollisionPointRec mouse container)
+            over-resizer? (cpp/CheckCollisionPointRec mouse resizer)
+            wrap? (if (cpp/IsKeyPressed cpp/KEY_SPACE) (not wrap?) wrap?)
+
+            ;; resize: grow while dragging, from the mouse delta since last frame
+            dw (if resizing? (- mx last-mx) 0.0)
+            dh (if resizing? (- my last-my) 0.0)
+            cw (clampf (+ cw dw) MIN-W MAX-W)
+            ch (clampf (+ ch dh) MIN-H MAX-H)
+            resizing? (cond
+                        (and resizing? (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT)) false
+                        resizing? true
+                        (and (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT) over-resizer?) true
+                        :else false)
+
+            faded? (or hover? resizing?)
+            display (build-display wrap? (- cw 8.0))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        ;; container border (rebuilt from the possibly-updated size)
+        (let [box (cpp/Rectangle (cpp/float CX) (cpp/float CY) (cpp/float cw) (cpp/float ch))
+              rsz (cpp/Rectangle (cpp/float (- (+ CX cw) 17.0)) (cpp/float (- (+ CY ch) 17.0))
+                                 (cpp/float 14.0) (cpp/float 14.0))
+              col (if faded? (cpp/Fade cpp/MAROON (cpp/float 0.4)) cpp/MAROON)]
+          (cpp/DrawRectangleLinesEx box (cpp/float 3.0) col)
+
+          ;; text, clipped to the container height: line i fits while its
+          ;; glyphs do (4px inset + 30i offset + 20px font, like the C's
+          ;; textOffsetY + fontSize <= rec.height check)
+          (loop [i 0]
+            (when (and (< i (count display))
+                       (<= (+ 24.0 (* i LINE-H)) ch))
+              (cpp/DrawTextEx (cpp/GetFontDefault) (nth display i)
+                              (cpp/Vector2 (cpp/float (+ CX 4.0)) (cpp/float (+ CY 4.0 (* i LINE-H))))
+                              (cpp/float FONT-SIZE) (cpp/float SPACING) cpp/GRAY)
+              (recur (inc i))))
+
+          (cpp/DrawRectangleRec rsz col))
+
+        ;; bottom info bar
+        (cpp/DrawRectangle 0 (- HEIGHT 54) WIDTH 54 cpp/GRAY)
+        (cpp/DrawText "Word Wrap: " 313 (- HEIGHT 115) 20 cpp/BLACK)
+        (if wrap?
+          (cpp/DrawText "ON" 447 (- HEIGHT 115) 20 cpp/RED)
+          (cpp/DrawText "OFF" 447 (- HEIGHT 115) 20 cpp/BLACK))
+        (cpp/DrawText "Press [SPACE] to toggle word wrap" 218 (- HEIGHT 86) 20 cpp/GRAY)
+        (cpp/DrawText "Click, hold & drag the corner box to resize the container"
+                      130 (- HEIGHT 38) 20 cpp/RAYWHITE)
+
+        (cpp/EndDrawing)
+
+        (recur cw ch resizing? wrap? mx my))))
+
+  (cpp/CloseWindow))

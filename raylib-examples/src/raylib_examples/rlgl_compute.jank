@@ -1,0 +1,148 @@
+(ns raylib-examples.rlgl-compute
+  "raylib [shaders] example - rlgl compute, ported to jank.
+
+  Conway's Game of Life run ENTIRELY on the GPU: a compute shader
+  steps the world in two ping-ponged shader storage buffers, a second
+  compute shader stamps mouse strokes into the grid, and a fragment
+  shader renders the live cells. LEFT draws, RIGHT erases, WHEEL
+  changes the brush. ESC quits.
+  Based on raylib/examples/shaders/shaders_rlgl_compute.c
+
+  jank-native notes:
+  - FIRST COMPUTE SHADERS: requires jank-raylib-sys built with
+    OPENGL_VERSION 4.3 (same GL 3.3 feature set + compute; flipped in
+    the wrapper's jank-build.bb for this port).
+  - Compute programs load through a C shim (LoadFileText ->
+    rlLoadShader RL_COMPUTE_SHADER -> rlLoadShaderProgramCompute);
+    the intermediate shader ids are not kept for unload - the GL
+    context teardown reclaims them (simplification vs the C).
+  - The mouse-command SSBO struct (count + 48 GolUpdateCmd) lives in
+    a cpp/raw static behind buffer/count/flush wrappers; the grid
+    SSBOs are plain unsigned-int ids held as JANK ints, so the
+    classic ssboA<->ssboB ping-pong swap is just recur with the loop
+    vars exchanged.
+  - rlEnableShader / rlBindShaderBuffer / rlComputeShaderDispatch are
+    direct rlgl calls with jank-int ids."
+  (:include "raylib.h" "rlgl.h" "jank_rlights.h"))
+
+;; The C's GolUpdateSSBO (count + buffered draw commands) parked C-side;
+;; jank talks to it through these wrappers. The flush uploads the staged
+;; commands and dispatches one GPU unit per command.
+(cpp/raw "#define JANK_GOL_MAX_CMDS 48
+typedef struct { unsigned int x, y, w, enabled; } GolUpdateCmd;
+typedef struct { unsigned int count; GolUpdateCmd commands[JANK_GOL_MAX_CMDS]; } GolUpdateSSBO;
+static GolUpdateSSBO jank_gol_transfert = { 0 };
+
+static int jank_gol_load_compute(const char* path) {
+  char *code = LoadFileText(path);
+  unsigned int sh = rlLoadShader(code, RL_COMPUTE_SHADER);
+  unsigned int prog = rlLoadShaderProgramCompute(sh);
+  UnloadFileText(code);
+  return (int)prog;
+}
+static int jank_gol_load_transfert_ssbo(void) {
+  return (int)rlLoadShaderBuffer(sizeof(GolUpdateSSBO), NULL, RL_DYNAMIC_COPY);
+}
+static int jank_gol_count(void) { return (int)jank_gol_transfert.count; }
+static void jank_gol_buffer_cmd(int x, int y, int w, int enabled) {
+  if (jank_gol_transfert.count < JANK_GOL_MAX_CMDS) {
+    GolUpdateCmd *cmd = &jank_gol_transfert.commands[jank_gol_transfert.count];
+    cmd->x = (unsigned int)x; cmd->y = (unsigned int)y;
+    cmd->w = (unsigned int)w; cmd->enabled = (unsigned int)enabled;
+    jank_gol_transfert.count++;
+  }
+}
+static void jank_gol_flush(int ssboTransfert, int program, int ssboA) {
+  rlUpdateShaderBuffer((unsigned int)ssboTransfert, &jank_gol_transfert,
+                       sizeof(GolUpdateSSBO), 0);
+  rlEnableShader((unsigned int)program);
+  rlBindShaderBuffer((unsigned int)ssboA, 1);
+  rlBindShaderBuffer((unsigned int)ssboTransfert, 3);
+  rlComputeShaderDispatch(jank_gol_transfert.count, 1, 1);
+  rlDisableShader();
+  jank_gol_transfert.count = 0;
+}")
+
+;; IMPORTANT: must match the gol*.glsl GOL_WIDTH constant (multiple of 16).
+(def GOL-WIDTH 768)
+(def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow GOL-WIDTH GOL-WIDTH "raylib [shaders] example - rlgl compute (jank)")
+
+  (let [gol-logic-prog (int (cpp/jank_gol_load_compute (str RES "shaders/glsl430/gol.glsl")))
+        gol-render-shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl430/gol_render.glsl"))
+        res-loc (int (cpp/GetShaderLocation gol-render-shader "resolution"))
+        gol-transfert-prog (int (cpp/jank_gol_load_compute (str RES "shaders/glsl430/gol_transfert.glsl")))
+        ;; two ping-ponged world buffers (768*768 u32 cells) + the command buffer
+        ssbo-bytes (* GOL-WIDTH GOL-WIDTH 4)
+        ssbo-a0 (int (cpp/rlLoadShaderBuffer ssbo-bytes cpp/nullptr cpp/RL_DYNAMIC_COPY))
+        ssbo-b0 (int (cpp/rlLoadShaderBuffer ssbo-bytes cpp/nullptr cpp/RL_DYNAMIC_COPY))
+        ssbo-transfert (int (cpp/jank_gol_load_transfert_ssbo))
+        white-image (cpp/GenImageColor GOL-WIDTH GOL-WIDTH cpp/WHITE)
+        white-tex (cpp/LoadTextureFromImage white-image)
+        _ (cpp/UnloadImage white-image)]
+
+    ;; Thread [brush-size ssbo-a ssbo-b] - the ping-pong swap is a recur.
+    (loop [brush 8
+           ssbo-a ssbo-a0
+           ssbo-b ssbo-b0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [brush (int (+ brush (int (+ 0.0 (cpp/GetMouseWheelMove)))))
+              mx (int (cpp/GetMouseX))
+              my (int (cpp/GetMouseY))
+              half (int (quot brush 2))
+              drawing? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT) true false)
+              erasing? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_RIGHT) true false)
+              count-before (int (cpp/jank_gol_count))
+              buffering? (and (or drawing? erasing?) (< count-before 48))
+              stepping? (and (not buffering?) (<= count-before 0))]
+
+          (cond buffering?
+                ;; stamp a brush square into the command buffer
+                (cpp/jank_gol_buffer_cmd (- mx half) (- my half) brush
+                                         (if drawing? 1 0))
+
+                (> count-before 0)
+                ;; upload + apply the buffered strokes on the GPU
+                (cpp/jank_gol_flush ssbo-transfert gol-transfert-prog ssbo-a)
+
+                :else
+                ;; step the world: one compute thread per 16x16 tile
+                (do (cpp/rlEnableShader gol-logic-prog)
+                    (cpp/rlBindShaderBuffer ssbo-a 1)
+                    (cpp/rlBindShaderBuffer ssbo-b 2)
+                    (cpp/rlComputeShaderDispatch (int (quot GOL-WIDTH 16))
+                                                 (int (quot GOL-WIDTH 16)) 1)
+                    (cpp/rlDisableShader)))
+
+          ;; after a step the fresh world is in B: ping-pong the ids
+          (let [ssbo-a' (if stepping? ssbo-b ssbo-a)
+                ssbo-b' (if stepping? ssbo-a ssbo-b)]
+
+            (cpp/rlBindShaderBuffer ssbo-a' 1)
+            (cpp/jank_rl_set_vec2 gol-render-shader res-loc
+                                  (+ 0.0 GOL-WIDTH) (+ 0.0 GOL-WIDTH))
+
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/BLANK)
+
+            (cpp/BeginShaderMode gol-render-shader)
+            (cpp/DrawTexture white-tex 0 0 cpp/WHITE)
+            (cpp/EndShaderMode)
+
+            (cpp/DrawRectangleLines (- mx half) (- my half) brush brush cpp/RED)
+            (cpp/DrawText "Use Mouse wheel to increase/decrease brush size" 10 10 20 cpp/WHITE)
+            (cpp/DrawFPS (- GOL-WIDTH 100) 10)
+
+            (cpp/EndDrawing)
+            (recur brush ssbo-a' ssbo-b')))))
+
+    (cpp/rlUnloadShaderBuffer ssbo-a0)
+    (cpp/rlUnloadShaderBuffer ssbo-b0)
+    (cpp/rlUnloadShaderBuffer ssbo-transfert)
+    (cpp/UnloadTexture white-tex)
+    (cpp/UnloadShader gol-render-shader))
+
+  (cpp/CloseWindow))

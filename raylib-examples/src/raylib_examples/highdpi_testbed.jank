@@ -1,0 +1,106 @@
+(ns raylib-examples.highdpi-testbed
+  "raylib [core] example - highdpi testbed, ported to jank.
+
+  A diagnostic overlay for HighDPI / multi-monitor setups: a labelled
+  pixel grid, the current monitor + window position + screen/render size
+  + DPI scale factor, corner reference rectangles, and a mouse crosshair
+  with live coordinates. SPACE toggles borderless-windowed, F toggles
+  fullscreen. ESC quits.
+  Based on raylib/examples/core/core_highdpi_testbed.c
+
+  jank-native notes: the per-frame native Vector2 reads (mouse, window
+  position, DPI scale) are boxed in -main via `(nth [...] 0)` (rule 4).
+  `%02i` / `%.2f` become the small `zero-pad` / `fmt2` jank helpers
+  (there is no `format` in jank; mirrors format_text.jank). Native ints
+  headed into `str` are boxed with `(int (cpp/...))`."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def GRID 40)
+
+(defn- zero-pad
+  "The decimal digits of n, left-padded with zeros to width."
+  [n width]
+  (loop [s (str n)]
+    (if (< (count s) width) (recur (str "0" s)) s)))
+
+(defn- fmt2
+  "A non-negative real formatted with exactly two decimals."
+  [x]
+  (let [c     (int (+ (* x 100.0) 0.5))
+        whole (int (quot c 100))
+        frac  (int (mod c 100))]
+    (str whole "." (zero-pad frac 2))))
+
+(defn -main [& args]
+  ;; SetConfigFlags ORs each call into its state, so call once per flag
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_RESIZABLE)
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI)
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - highdpi testbed (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (when (cpp/IsKeyPressed cpp/KEY_SPACE) (cpp/ToggleBorderlessWindowed))
+      (when (cpp/IsKeyPressed cpp/KEY_F) (cpp/ToggleFullscreen))
+
+      (let [cur (int (cpp/GetCurrentMonitor))
+            dpi (cpp/GetWindowScaleDPI)
+            dpx (nth [(+ 0.0 (.-x dpi))] 0)
+            dpy (nth [(+ 0.0 (.-y dpi))] 0)
+            wp  (cpp/GetWindowPosition)
+            wpx (nth [(+ 0.0 (.-x wp))] 0)
+            wpy (nth [(+ 0.0 (.-y wp))] 0)
+            mp  (cpp/GetMousePosition)
+            mx  (nth [(+ 0.0 (.-x mp))] 0)
+            my  (nth [(+ 0.0 (.-y mp))] 0)
+            sw  (int (cpp/GetScreenWidth))
+            sh  (int (cpp/GetScreenHeight))]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        ;; horizontal grid lines + row labels
+        (loop [h 0]
+          (when (< h (+ (int (/ sh GRID)) 1))
+            (cpp/DrawText (zero-pad (* h GRID) 2) 4 (- (* h GRID) 4) 10 cpp/GRAY)
+            (cpp/DrawLine 24 (* h GRID) sw (* h GRID) cpp/LIGHTGRAY)
+            (recur (+ h 1))))
+        ;; vertical grid lines + column labels
+        (loop [v 0]
+          (when (< v (+ (int (/ sw GRID)) 1))
+            (cpp/DrawText (zero-pad (* v GRID) 2) (- (* v GRID) 10) 4 10 cpp/GRAY)
+            (cpp/DrawLine (* v GRID) 20 (* v GRID) sh cpp/LIGHTGRAY)
+            (recur (+ v 1))))
+
+        ;; UI info block
+        (cpp/DrawText (str "CURRENT MONITOR: " (+ cur 1) "/" (int (cpp/GetMonitorCount))
+                           " (" (int (cpp/GetMonitorWidth (cpp/int cur)))
+                           "x" (int (cpp/GetMonitorHeight (cpp/int cur))) ")")
+                      50 50 20 cpp/DARKGRAY)
+        (cpp/DrawText (str "WINDOW POSITION: " (int wpx) "x" (int wpy)) 50 90 20 cpp/DARKGRAY)
+        (cpp/DrawText (str "SCREEN SIZE: " sw "x" sh) 50 130 20 cpp/DARKGRAY)
+        (cpp/DrawText (str "RENDER SIZE: " (int (cpp/GetRenderWidth)) "x" (int (cpp/GetRenderHeight)))
+                      50 170 20 cpp/DARKGRAY)
+        (cpp/DrawText (str "SCALE FACTOR: " (fmt2 dpx) "x" (fmt2 dpy)) 50 210 20 cpp/GRAY)
+
+        ;; corner reference rectangles
+        (cpp/DrawRectangle 0 0 30 60 cpp/RED)
+        (cpp/DrawRectangle (- sw 30) (- sh 60) 30 60 cpp/BLUE)
+
+        ;; mouse crosshair + coordinates
+        (cpp/DrawCircleV mp (cpp/float 20.0) cpp/MAROON)
+        (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float (- mx 25.0)) (cpp/float my)
+                                             (cpp/float 50.0) (cpp/float 2.0)) cpp/BLACK)
+        (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float mx) (cpp/float (- my 25.0))
+                                             (cpp/float 2.0) (cpp/float 50.0)) cpp/BLACK)
+        (let [mxi (int (cpp/GetMouseX))
+              myi (int (cpp/GetMouseY))
+              ty  (if (> my (- sh 60)) (- (int my) 46) (+ (int my) 30))]
+          (cpp/DrawText (str "[" mxi "," myi "]") (int (- mx 44.0)) ty 20 cpp/BLACK))
+
+        (cpp/EndDrawing)
+        (recur))))
+
+  (cpp/CloseWindow))

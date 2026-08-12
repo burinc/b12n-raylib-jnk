@@ -1,0 +1,146 @@
+(ns raylib-examples.vr-simulator
+  "raylib [core] example - vr simulator, ported to jank.
+
+  Renders a simple 3D scene (a red cube on a grid) in stereo through a
+  simulated Oculus Rift CV1: the scene is drawn twice into an HMD-sized
+  RenderTexture inside BeginVrStereoMode, then a lens-distortion +
+  chromatic-aberration fragment shader warps that texture onto the
+  window. No headset required - it is a *simulator*. Move with the mouse
+  (first-person camera). ESC quits.
+  Based on raylib/examples/core/core_vr_simulator.c (3/4 complexity).
+
+  jank-native notes:
+  - The whole VR pipeline is native values jank can't build or carry: a
+    VrDeviceInfo filled with designated-initializer scalar + float[]
+    fields, the VrStereoConfig from LoadVrStereoConfig, the distortion
+    Shader (fed config.leftLensCenter / device.lensDistortionValues
+    float-array pointers straight into SetShaderValue's void*), the
+    HMD-sized RenderTexture and the first-person Camera. So init, the
+    stereo scene render, the distortion blit and cleanup live in one
+    cpp/raw shim over static state; jank owns the window lifecycle, the
+    frame loop, the frame boundaries and DrawFPS."
+  (:include "raylib.h"))
+
+;; The VR device + stereo config + distortion shader + stereo render.
+(cpp/raw "
+static VrDeviceInfo jank_vr_device = { 0 };
+static VrStereoConfig jank_vr_config = { 0 };
+static Shader jank_vr_distortion = { 0 };
+static RenderTexture2D jank_vr_target = { 0 };
+static Camera jank_vr_camera = { 0 };
+static Rectangle jank_vr_sourceRec = { 0 };
+static Rectangle jank_vr_destRec = { 0 };
+static Vector3 jank_vr_cubePosition = { 0.0f, 0.0f, 0.0f };
+
+static void jank_vr_init(void) {
+  /* Oculus Rift CV1 parameters for the simulator */
+  jank_vr_device.hResolution = 2160;
+  jank_vr_device.vResolution = 1200;
+  jank_vr_device.hScreenSize = 0.133793f;
+  jank_vr_device.vScreenSize = 0.0669f;
+  jank_vr_device.eyeToScreenDistance = 0.041f;
+  jank_vr_device.lensSeparationDistance = 0.07f;
+  jank_vr_device.interpupillaryDistance = 0.07f;
+  /* CV1 lens distortion / chroma approximation */
+  jank_vr_device.lensDistortionValues[0] = 1.0f;
+  jank_vr_device.lensDistortionValues[1] = 0.22f;
+  jank_vr_device.lensDistortionValues[2] = 0.24f;
+  jank_vr_device.lensDistortionValues[3] = 0.0f;
+  jank_vr_device.chromaAbCorrection[0] = 0.996f;
+  jank_vr_device.chromaAbCorrection[1] = -0.004f;
+  jank_vr_device.chromaAbCorrection[2] = 1.014f;
+  jank_vr_device.chromaAbCorrection[3] = 0.0f;
+
+  jank_vr_config = LoadVrStereoConfig(jank_vr_device);
+
+  jank_vr_distortion = LoadShader(0, \"../jank-raylib-sys/raylib/examples/core/resources/shaders/glsl330/distortion.fs\");
+
+  /* Feed lens + distortion-scale params (float-array pointers -> void*) */
+  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"leftLensCenter\"),
+                 jank_vr_config.leftLensCenter, SHADER_UNIFORM_VEC2);
+  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"rightLensCenter\"),
+                 jank_vr_config.rightLensCenter, SHADER_UNIFORM_VEC2);
+  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"leftScreenCenter\"),
+                 jank_vr_config.leftScreenCenter, SHADER_UNIFORM_VEC2);
+  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"rightScreenCenter\"),
+                 jank_vr_config.rightScreenCenter, SHADER_UNIFORM_VEC2);
+  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"scale\"),
+                 jank_vr_config.scale, SHADER_UNIFORM_VEC2);
+  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"scaleIn\"),
+                 jank_vr_config.scaleIn, SHADER_UNIFORM_VEC2);
+  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"deviceWarpParam\"),
+                 jank_vr_device.lensDistortionValues, SHADER_UNIFORM_VEC4);
+  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"chromaAbParam\"),
+                 jank_vr_device.chromaAbCorrection, SHADER_UNIFORM_VEC4);
+
+  /* HMD-sized framebuffer for the stereo render */
+  jank_vr_target = LoadRenderTexture(jank_vr_device.hResolution, jank_vr_device.vResolution);
+
+  /* Source height is flipped (OpenGL); dest fills the window */
+  jank_vr_sourceRec = (Rectangle){ 0.0f, 0.0f, (float)jank_vr_target.texture.width, -(float)jank_vr_target.texture.height };
+  jank_vr_destRec = (Rectangle){ 0.0f, 0.0f, (float)GetScreenWidth(), (float)GetScreenHeight() };
+
+  jank_vr_camera.position = (Vector3){ 5.0f, 2.0f, 5.0f };
+  jank_vr_camera.target = (Vector3){ 0.0f, 2.0f, 0.0f };
+  jank_vr_camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+  jank_vr_camera.fovy = 60.0f;
+  jank_vr_camera.projection = CAMERA_PERSPECTIVE;
+
+  DisableCursor();
+  SetTargetFPS(60);
+}
+
+static void jank_vr_update(void) {
+  UpdateCamera(&jank_vr_camera, CAMERA_FIRST_PERSON);
+}
+
+/* Render the 3D scene twice (one eye each) into the HMD framebuffer. */
+static void jank_vr_draw_target(void) {
+  BeginTextureMode(jank_vr_target);
+    ClearBackground(RAYWHITE);
+    BeginVrStereoMode(jank_vr_config);
+      BeginMode3D(jank_vr_camera);
+        DrawCube(jank_vr_cubePosition, 2.0f, 2.0f, 2.0f, RED);
+        DrawCubeWires(jank_vr_cubePosition, 2.0f, 2.0f, 2.0f, MAROON);
+        DrawGrid(40, 1.0f);
+      EndMode3D();
+    EndVrStereoMode();
+  EndTextureMode();
+}
+
+/* Warp the stereo framebuffer onto the window via the distortion shader. */
+static void jank_vr_draw_screen(void) {
+  BeginShaderMode(jank_vr_distortion);
+    DrawTexturePro(jank_vr_target.texture, jank_vr_sourceRec, jank_vr_destRec, (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE);
+  EndShaderMode();
+}
+
+static void jank_vr_cleanup(void) {
+  UnloadVrStereoConfig(jank_vr_config);
+  UnloadRenderTexture(jank_vr_target);
+  UnloadShader(jank_vr_distortion);
+}")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - vr simulator (jank)")
+
+  (cpp/jank_vr_init)
+
+  (loop []
+    (when (cpp/! (cpp/WindowShouldClose))
+      (cpp/jank_vr_update)
+      (cpp/jank_vr_draw_target)
+
+      (cpp/BeginDrawing)
+      (cpp/ClearBackground cpp/RAYWHITE)
+      (cpp/jank_vr_draw_screen)
+      (cpp/DrawFPS 10 10)
+      (cpp/EndDrawing)
+      (recur)))
+
+  (cpp/jank_vr_cleanup)
+  (cpp/CloseWindow))

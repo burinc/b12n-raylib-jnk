@@ -1,0 +1,103 @@
+(ns raylib-examples.picking-3d
+  "raylib [core] example - 3d picking, ported to jank.
+
+  Click the box: a ray is cast from the mouse into the 3D world with
+  GetScreenToWorldRay, then GetRayCollisionBox tests it against the
+  cube's BoundingBox. A hit turns the cube red and draws a green
+  selection outline; clicking again clears it. Q quits.
+  Based on raylib/examples/core/core_3d_picking.c
+
+  jank-native notes:
+  - The Camera3D is fixed (the C original's right-click first-person
+    mode needs UpdateCamera(&camera, ...), which takes a pointer jank
+    cannot form). The picking itself is fully faithful.
+  - No native value is carried in loop/recur state: the hit flag is a
+    jank bool and the pick ray is rebuilt inline each frame from the
+    stored screen-space click coords (the camera is static, so the
+    ray is identical). The RayCollision is read for .hit inside the
+    click branch and discarded."
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - 3d picking (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 10.0) (cpp/float 10.0) (cpp/float 10.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 45.0)
+                             cpp/CAMERA_PERSPECTIVE)]
+
+    ;; state: hit? = box currently selected, has-ray? = a pick ray exists,
+    ;; mx/my = screen coords of the last pick (to rebuild the ray for drawing).
+    (loop [hit? false has-ray? false mx 0 my 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [clicked? (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+              ;; compute next state from the click
+              [nhit? nhas? nmx nmy]
+              (if clicked?
+                (if hit?
+                  ;; already selected -> clear (keep the ray on screen)
+                  [false has-ray? mx my]
+                  ;; not selected -> cast a ray and test the box
+                  (let [cx (cpp/GetMouseX)
+                        cy (cpp/GetMouseY)
+                        ray (cpp/GetScreenToWorldRay (cpp/GetMousePosition) camera)
+                        box (cpp/BoundingBox (cpp/Vector3 (cpp/float -1.0) (cpp/float 0.0) (cpp/float -1.0))
+                                             (cpp/Vector3 (cpp/float 1.0) (cpp/float 2.0) (cpp/float 1.0)))
+                        coll (cpp/GetRayCollisionBox ray box)]
+                    [(.-hit coll) true cx cy]))
+                [hit? has-ray? mx my])]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D camera)
+
+          (if nhit?
+            (do
+              (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                            (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/RED)
+              (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                 (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/MAROON)
+              (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                 (cpp/float 2.2) (cpp/float 2.2) (cpp/float 2.2) cpp/GREEN))
+            (do
+              (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                            (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/GRAY)
+              (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                                 (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/DARKGRAY)))
+
+          ;; redraw the pick ray from the stored click coords (static camera
+          ;; -> identical ray). nmx/nmy are jank ints, so (+ 0.0 n) boxes
+          ;; before cpp/float, avoiding the all-native codegen failure.
+          (when nhas?
+            (cpp/DrawRay (cpp/GetScreenToWorldRay
+                          (cpp/Vector2 (cpp/float (+ 0.0 nmx)) (cpp/float (+ 0.0 nmy)))
+                          camera)
+                         cpp/MAROON))
+
+          (cpp/DrawGrid 10 (cpp/float 1.0))
+
+          (cpp/EndMode3D)
+
+          (cpp/DrawText "Try clicking on the box with your mouse!" 240 10 20 cpp/DARKGRAY)
+          (when nhit?
+            (cpp/DrawText "BOX SELECTED"
+                          (int (/ (- WIDTH (cpp/MeasureText "BOX SELECTED" 30)) 2))
+                          (int (* HEIGHT 0.1)) 30 cpp/GREEN))
+          (cpp/DrawText "Q to quit" 10 430 10 cpp/GRAY)
+          (cpp/DrawFPS 10 40)
+
+          (cpp/EndDrawing)
+
+          (when-not (cpp/IsKeyDown cpp/KEY_Q)
+            (recur nhit? nhas? nmx nmy)))))
+
+    nil)
+
+  (cpp/CloseWindow))
