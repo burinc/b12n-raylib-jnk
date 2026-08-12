@@ -247,6 +247,33 @@
                "\n")))
   (println "\nWrote" path))
 
+;; ---------------------------------------------------------------- keep display awake
+
+(defn- start-caffeinate!
+  "Hold display/idle/disk/system-sleep assertions for the duration of the
+   recording run. An hour-plus unattended batch (Task 4: 208 examples) risks
+   the display's own auto-sleep timer firing mid-run — every recording after
+   that point fails identically to a locked/asleep screen at startup: GLFW
+   can't determine a monitor, raylib's InitWindow segfaults, and
+   wait-for-window times out with \"window never appeared\" for every
+   remaining example (confirmed live during the 3-example smoke test — the
+   screen had auto-locked/slept before the run started, and every one of the
+   3 examples failed identically until the display was woken).
+   NOTE: this does NOT wake an already-asleep/locked display at startup —
+   only holds it awake going forward for as long as this process runs. The
+   operator must ensure the screen is unlocked/awake before starting a run."
+  []
+  (p/process {:out nil :err nil} "caffeinate" "-d" "-i" "-m" "-s"))
+
+(defmacro with-display-awake
+  "Prevent the display/system from sleeping for the duration of `body`,
+   releasing the assertion no matter how `body` exits."
+  [& body]
+  `(let [caffeinate-proc# (start-caffeinate!)]
+     (try
+       ~@body
+       (finally (p/destroy-tree caffeinate-proc#)))))
+
 ;; ---------------------------------------------------------------- brew unlink/relink
 
 (defn homebrew-raylib-linked? []
@@ -283,37 +310,38 @@
     (when dry-run
       (doseq [e todo] (println "  -" (:id e) (if (:manual e) "[manual]" "[scripted]")))
       (System/exit 0))
-    (with-raylib-unlinked
-      (let [ex-pool (Executors/newFixedThreadPool pool)
-            pending (atom [])]
-        (doseq [ex todo]
-          (let [r (try (record-one! ex)
-                       (catch Exception e
-                         (println "  ✗ error:" (ex-message e))
-                         {:id (:id ex)
-                          :status :error}))]
-            (swap! pending conj
-                   (.submit ex-pool
-                            (reify java.util.concurrent.Callable
-                              (call [_] (if (= :captured (:status r)) (encode! r) r)))))))
-        (.shutdown ex-pool)
-        (.awaitTermination ex-pool 30 TimeUnit/MINUTES)
-        (let [results (mapv #(.get %) @pending)
-              updated (reduce (fn [m {:keys [id status sha duration fps width] :as r}]
-                                (if (= :done status)
-                                  (assoc m id {:sha sha
-                                               :settings [duration fps width]
-                                               :bytes (:bytes r)
-                                               :at (str (java.time.Instant/now))})
-                                  m))
-                              ledger-data results)]
-          (fs/create-dirs (fs/parent ledger))
-          (spit ledger (pr-str updated))
-          (write-readme! readme updated out-dir)
-          (let [failed (remove #(= :done (:status %)) results)]
-            (when (seq failed)
-              (println "\nFailed:")
-              (doseq [f failed] (println "  " (:id f) (:status f))))))))))
+    (with-display-awake
+      (with-raylib-unlinked
+        (let [ex-pool (Executors/newFixedThreadPool pool)
+              pending (atom [])]
+          (doseq [ex todo]
+            (let [r (try (record-one! ex)
+                         (catch Exception e
+                           (println "  ✗ error:" (ex-message e))
+                           {:id (:id ex)
+                            :status :error}))]
+              (swap! pending conj
+                     (.submit ex-pool
+                              (reify java.util.concurrent.Callable
+                                (call [_] (if (= :captured (:status r)) (encode! r) r)))))))
+          (.shutdown ex-pool)
+          (.awaitTermination ex-pool 30 TimeUnit/MINUTES)
+          (let [results (mapv #(.get %) @pending)
+                updated (reduce (fn [m {:keys [id status sha duration fps width] :as r}]
+                                  (if (= :done status)
+                                    (assoc m id {:sha sha
+                                                 :settings [duration fps width]
+                                                 :bytes (:bytes r)
+                                                 :at (str (java.time.Instant/now))})
+                                    m))
+                                ledger-data results)]
+            (fs/create-dirs (fs/parent ledger))
+            (spit ledger (pr-str updated))
+            (write-readme! readme updated out-dir)
+            (let [failed (remove #(= :done (:status %)) results)]
+              (when (seq failed)
+                (println "\nFailed:")
+                (doseq [f failed] (println "  " (:id f) (:status f)))))))))))
 
 (when (= *file* (System/getProperty "babashka.file"))
   (apply -main *command-line-args*))
