@@ -129,7 +129,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | `unicode-ranges` | Grow a multilingual font atlas by unicode range |
 | `inline-styling` | Text with inline color style tags |
 | `unicode-emojis` | Click emojis for multilingual speech bubbles |
-| `text-3d-drawing` | A bitmap font drawn as textured quads in 3D, waving ~~World~~ |
+| `text-3d-drawing` | A bitmap font drawn as textured quads in 3D, waving the `~~World~~`-marked span |
 | `strings-management` | Drag/slice/shatter/glue text particles; 1-6 run raylib's TextTo* fns |
 | `font-sdf` | Bitmap vs SDF font scaling, the SDF drawn through a shader |
 

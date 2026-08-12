@@ -240,7 +240,7 @@
    {:profile "unicode-ranges" :cat :text :desc "Grow a multilingual font atlas by unicode range" :controls "0-4 select range set, ESC"}
    {:profile "inline-styling" :cat :text :desc "Text with inline color style tags" :controls "watch the colors re-roll, ESC"}
    {:profile "unicode-emojis" :cat :text :desc "Click emojis for multilingual speech bubbles" :controls "hover + click emojis, SPACE re-roll, ESC"}
-   {:profile "text-3d-drawing" :cat :text :desc "A bitmap font drawn as textured quads in 3D, waving ~~World~~" :controls "F1/F2 boundaries, F3 camera, arrows size/spacing, Home/End layers, Tab multicolor, click cube, ESC"}
+   {:profile "text-3d-drawing" :cat :text :desc "A bitmap font drawn as textured quads in 3D, waving the `~~World~~`-marked span" :controls "F1/F2 boundaries, F3 camera, arrows size/spacing, Home/End layers, Tab multicolor, click cube, ESC"}
    {:profile "strings-management" :cat :text :desc "Drag/slice/shatter/glue text particles; 1-6 run raylib's TextTo* fns" :controls "L-mouse grab/throw, R-mouse slice (+Shift shatter), M-mouse shake, L-Ctrl glue, 1-6 reset, ESC"}
    {:profile "shapes-textures-shader" :cat :shaders :desc "A grayscale fragment shader over shapes + a sprite" :controls "ESC"}
    {:profile "texture-outline" :cat :shaders :desc "A shader-drawn outline around a sprite" :controls "mouse wheel outline size, ESC"}
