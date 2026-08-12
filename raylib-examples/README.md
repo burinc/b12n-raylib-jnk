@@ -360,7 +360,7 @@ These categories need capabilities the repo's `-sys` wrappers don't expose yet:
   the pointer-taking `ImageColor*` / `ImageDraw*` / `ImageFormat` /
   `UpdateTexture` APIs all work through jank's `(cpp/& img)` address-of on
   a mutable let-local — no wrapper change (`image-processing`, see the
-  pointer-interop section of `docs/guide/jank-interop-lessons.md`). `int*`
+  pointer-interop section of `docs/guide/cpp-interop-toolbox.md`). `int*`
   out-params are ALSO unblocked now (2026-07-03): `LoadImageAnim`'s
   `&frames` works via `(cpp/int 0)` + `(cpp/& frames)`, and streaming a
   frame from `image.data + offset` works through a tiny `cpp/raw` pointer

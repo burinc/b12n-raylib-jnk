@@ -50,7 +50,7 @@ lexer).
 
 Before writing a new construct, grep the existing examples for a sibling that
 already uses it — every proven idiom has at least one committed example, and
-[jank-interop-lessons.md](jank-interop-lessons.md) indexes them.
+the [guide pages](index.md) index them by theme.
 
 Every example sets `(cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI)` before
 `InitWindow` so windows scale with the monitor DPI (drawing stays at the
@@ -142,12 +142,13 @@ actually executed.
 - Body: the interesting jank-native decisions, and any NEW interop lesson the
   port surfaced.
 - Stage files by explicit path; never `git add -A`/`.`/`-u`.
-- If the port surfaced a new lesson, add it to
-  [jank-interop-lessons.md](jank-interop-lessons.md) in the same commit.
+- If the port surfaced a new lesson, add it to the relevant
+  [guide page](index.md) in the same commit.
 
 ## Debugging a port that won't compile
 
 Bisect: cut the example down to a minimal draw loop, then add one construct
 back at a time — each `lein run` recompiles the one changed module in
 ~30–60 s. The compiler error vocabulary and what each message actually means
-is in [jank-interop-lessons.md](jank-interop-lessons.md).
+is in [type-checking-and-coercion.md](type-checking-and-coercion.md) and
+[cpp-interop-toolbox.md](cpp-interop-toolbox.md).

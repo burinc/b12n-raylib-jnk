@@ -83,15 +83,13 @@ models, audio). `bb info` gives you the same breakdown from the terminal.
   `bb clean` (or delete `raylib-examples/target`) and rebuild. This will not
   work on macOS regardless.
 
-## Porting guides
+## Documentation
 
-`docs/guide/` holds the guides written while porting these examples:
-[porting-workflow.md](docs/guide/porting-workflow.md) (the end-to-end process
-for porting one example), [jank-interop-lessons.md](docs/guide/jank-interop-lessons.md)
-(every jank/C++ interop sharp edge hit so far), and
-[raygui-to-keyboard.md](docs/guide/raygui-to-keyboard.md) (the pattern for
-converting raygui-based examples to keyboard controls). `AGENTS.md` carries
-the terse, in-context version of the same rules for AI coding agents.
+Full guide at [`docs/guide/index.md`](docs/guide/index.md): the
+native-value-lifetime rule that shapes every jank/C++ interop pattern here,
+a C-interop toolbox, raylib API coverage notes, the porting workflow, and
+the full example catalog. `AGENTS.md` carries the terse, in-context version
+of the same rules for AI coding agents.
 
 ## Credits
 

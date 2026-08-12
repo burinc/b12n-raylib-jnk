@@ -53,7 +53,7 @@ current reading, and its keys:
 ```
 
 `fmt1`/`fmt2` are the small decimal formatters (there's no `format` in
-jank — see [jank-interop-lessons.md](jank-interop-lessons.md)). Keep derived
+jank — see [jvm-surface-gaps.md](jvm-surface-gaps.md)). Keep derived
 readouts from the C, like the MANUAL/AUTO segments mode, including its color
 switch: `(if (>= segs min-segs) cpp/MAROON cpp/DARKGRAY)`.
 
