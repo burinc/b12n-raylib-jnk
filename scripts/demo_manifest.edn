@@ -1,0 +1,9 @@
+{:defaults
+ {:duration 6
+  :fps 10
+  :width 480
+  :warmup 10
+  :capture "cgevent screenshot {{file}} --app jank"}
+
+ :overrides
+ {}}

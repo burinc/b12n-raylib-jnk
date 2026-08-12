@@ -14,7 +14,7 @@
 ;; EDN note: task bodies are parsed by babashka's EDN reader — no #"regex",
 ;; @deref, or #(...) reader macros here. Logic lives in bb/helpers.clj.
 {:min-bb-version "1.3.0"
- :paths ["bb"]
+ :paths ["bb" "scripts"]
  :tasks
  {:requires ([helpers :as h])
 
@@ -244,6 +244,10 @@
 
   run-all {:doc "Run every example for N seconds each (default 15): bb run-all [secs]"
            :task (h/run-all! (first *command-line-args*))}
+
+  record  {:doc "Batch-record a demo GIF for every example: bb record [--only a,b] [--force] [--dry-run]"
+           :task (let [{:keys [exit]} (apply shell {:continue true} "bb" "scripts/record_all.clj" *command-line-args*)]
+                   (System/exit exit))}
 
   ;; --- build ---
   install {:doc "Install jank-raylib-sys into ~/.m2 (idempotent)"
