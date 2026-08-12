@@ -1,5 +1,8 @@
 # Getting started
 
+This mirrors the root README's Quick start section with a bit more context —
+if you only need the commands, the README's shorter version is enough.
+
 ## Requirements
 
 - Recent install of the [`jank`](https://jank-lang.org) compiler and the

@@ -43,8 +43,9 @@ nested `if` at draw time.
 
 When a native resource must BOTH persist across frames AND be recreated at
 runtime with computed sizes, neither of the two usual homes works: `loop`/
-`recur` state can't carry a native value (rule 2), and a create-once
-outer-`let` local can't be rebound. Park the value in a `cpp/raw` static
+`recur` state can't carry a native value (the same rule as above — a native
+value can't cross a fn boundary — applied to loop/recur state), and a
+create-once outer-`let` local can't be rebound. Park the value in a `cpp/raw` static
 with tiny accessor fns instead:
 
 ```clojure
@@ -84,7 +85,6 @@ because all its shim calls already sat in `-main`; `compute_hash.jank` /
 statics are written and read within one fn call's dynamic extent, not
 across fns.)
 
-
 ## Create-once native resources
 
 `LoadRenderTexture` / `GetFontDefault` style resources bind in a `let`
@@ -101,4 +101,3 @@ native. Unload after the loop.
 Two RenderTextures at once work (`camera_2d_split_screen.jank`). Blit a
 RenderTexture with a **negative source height** — RTs are stored upside
 down (`lines_drawing.jank`, `window_letterbox.jank`).
-

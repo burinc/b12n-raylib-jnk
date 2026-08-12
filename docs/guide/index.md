@@ -72,7 +72,8 @@ against one real, struct-heavy graphics API across 209 examples.
 - [`cpp-interop-toolbox.md`](cpp-interop-toolbox.md) — pointer interop
   (`cpp/&`, `cpp/aget`, `cpp/new`, `cpp/raw`), `int *` out-params,
   callback-taking APIs, shared C headers shipped by a wrapper
-  (`jank_rlights.h`), and shader-uniform shims.
+  (`jank_rlights.h`), shader-uniform shims, and current limitations
+  (known-blocked constructs).
 
 ### What's proven to work
 

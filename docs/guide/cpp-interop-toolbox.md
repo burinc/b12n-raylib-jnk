@@ -4,7 +4,8 @@ The [native-value-lifetime rule](native-value-lifetimes.md) seems to block
 a lot — a native value can't be returned, passed as a parameter, or carried
 through `loop`/`recur`. This page is the toolbox that reaches around those
 constraints: pointer interop, out-params, callbacks, shared C headers, and
-shader-uniform shims. Each lesson names the committed example that proves it.
+shader-uniform shims — and, in the last section, what's still blocked.
+Each lesson names the committed example that proves it.
 
 ## Shader uniforms: prefer per-type scalar C setters (from the shader arc, 2026-07-05)
 
@@ -53,7 +54,6 @@ preferred one:
   shader; pass a real `base.vs` path as the first arg when the example ships one
   (`rounded_rectangle_shader.jank`).
 
-
 ## Callback-taking APIs: define the callback in cpp/raw (2026-07-11)
 
 jank cannot form a C function pointer, but a callback DEFINED inside a
@@ -88,7 +88,6 @@ it isn't. Add `fflush(stdout);` at the end of any shim callback that
 prints. Trace: `custom_logging.jank` first smoke returned zero log
 lines; adding `fflush` surfaced all 42 reformatted lines.
 
-
 ## Shared C helpers ship as wrapper headers (from the rlights arc, 2026-07-11)
 
 When several examples need the same C helper (rlights.h's Light array,
@@ -120,7 +119,6 @@ Design constraints for such headers:
   raylib rebuild, ~2-4 min). Symptom of staleness:
   `fatal error: 'jank_rlights.h' file not found` even though the new
   jar extracted.
-
 
 ## Pointer-taking APIs work via `(cpp/& x)` (from the image arc, 2026-07-03)
 
@@ -175,7 +173,8 @@ mutable native int, passes its address, then boxes the result for jank code:
 
 Note `(+ 0.0 frames)` re-boxes the native `int` into a jank object before
 `(int …)` — a bare `(int frames)` on the raw native value can trip codegen the
-same way an all-native `f64` chain does (rule 4).
+same way an all-native `f64` chain does (the all-native-chain codegen trap —
+see `type-checking-and-coercion.md`).
 
 **Runtime-arg pointer arithmetic via `cpp/raw`.** `gif_player` streams each GIF
 frame from `image.data + w*h*4*frame`. jank's `cpp/cast` uses `convert`, not
@@ -193,18 +192,19 @@ straight to `UpdateTexture`:
 ```
 
 Keep `offset` an `int` at the call site — `mod`/`quot` on the frame index
-return reals (rule 3), which the shim's `int offset` param rejects at runtime
+return reals (the mod/quot-returns-reals trap), which the shim's `int offset`
+param rejects at runtime
 (`expected integer found small_real`). Wrap the frame advance:
 `(int (mod (+ cur 1) nframes))`.
 
-Lifecycle caveat (rule-2 interaction): a mutated `Image` is still a **native
-value**, so it can't be carried in `loop`/`recur` state. Keep the whole
+Lifecycle caveat (interaction with the native-value-can't-cross-loop/recur
+rule): a mutated `Image` is still a **native value**, so it can't be carried
+in `loop`/`recur` state. Keep the whole
 build-mutate-read-unload cycle inside a `let` in the frame that needs it
 (`image_processing`'s reload block rebuilds `imCopy` from `imOrigin`, processes
 it via `(cpp/& imCopy)`, reads it back with `LoadImageColors` → `UpdateTexture`,
 and `UnloadImage`s it — all in one block; only the process **index** lives in
 loop state).
-
 
 ## Known-blocked constructs
 

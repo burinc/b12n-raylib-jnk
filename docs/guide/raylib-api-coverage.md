@@ -20,7 +20,6 @@ pangram in-source, and the lexer, `LoadCodepoints`, and `DrawTextEx` all
 handle it. The ASCII-only restriction is about COMMENTS (the em-dash
 `lex/invalid-unicode` trip).
 
-
 ## Models load like fonts (from the model arc, 2026-07-11)
 
 **Mesh/Model loading works with zero wrapper changes** — the long-assumed
@@ -37,7 +36,7 @@ handle it. The ASCII-only restriction is about COMMENTS (the em-dash
   `.shader = s`) has no jank spelling; a two-line C shim taking
   `(Model* m, Texture2D tex)` does the assignment, called with
   `(cpp/& model)` — the same address-of pattern as `Image*` /
-  `UpdateCamera`.
+  `UpdateCamera` ([cpp-interop-toolbox.md](cpp-interop-toolbox.md)).
 - `UnloadModel` after the loop, as usual for create-once resources.
 - **`LoadModel` from a FILE works too** (`model_loading.jank`, the castle
   OBJ + its .png diffuse): same shape, just returns a `Model`. Reading
@@ -63,7 +62,6 @@ handle it. The ASCII-only restriction is about COMMENTS (the em-dash
   (`loading_iqm`), M3D incl. skeleton access (`loading_m3d`), and VOX
   (`loading_vox`, which also proves `UpdateCameraPro` with inline
   movement/rotation Vector3s and `GetModelBoundingBox`).
-
 
 ## Compute shaders work (GL 4.3 wrapper build, 2026-07-11)
 
@@ -92,7 +90,6 @@ Prerequisites and patterns:
 - A CPU-side staging struct uploaded with `rlUpdateShaderBuffer`
   (`&struct` + sizeof) stays a `cpp/raw` static behind
   buffer/count/flush wrappers, like any frame-crossing native state.
-
 
 ## rlgl and textures (from the shapes-completing arc)
 
@@ -133,7 +130,6 @@ Prerequisites and patterns:
   geometry (shadow volumes), draw each triangle in BOTH windings or
   backface culling eats half of them (`top_down_lights.jank`'s draw-quad).
 
-
 ## Audio (from the textures arc, 2026-07-03)
 
 **raylib audio works with zero wrapper changes.** `InitAudioDevice`,
@@ -153,7 +149,6 @@ The remaining audio surface to probe is the callback-taking APIs
 (`SetAudioStreamCallback`, audio processors) — likely a real blocker,
 same class as C function pointers elsewhere.
 
-
 ## 3D mode (from the sound-positioning port, 2026-07-03)
 
 **Basic 3D works.** `cpp/Camera3D` constructs inline from three nested
@@ -164,7 +159,8 @@ outer-let local, and drives `BeginMode3D`/`EndMode3D`; `DrawGrid` and
 
 - **Free-look cameras WORK now** (2026-07-05): `UpdateCamera
   ((cpp/& camera) mode)` forms the pointer with the image-processing
-  address-of pattern on an OUTER-let Camera3D, and the mutation
+  address-of pattern ([cpp-interop-toolbox.md](cpp-interop-toolbox.md))
+  on an OUTER-let Camera3D, and the mutation
   persists across frames (probe: 100 orbital frames drifted position.x
   from 10.0 to 14.03) — `camera_3d_free.jank`. Struct FIELD writes
   still have no jank syntax; a one-line pointer shim does them
@@ -180,4 +176,3 @@ outer-let local, and drives `BeginMode3D`/`EndMode3D`; `DrawGrid` and
   jank helper fns — do the vector math as scalar jank arithmetic on
   plain reals instead (the attenuation/pan math in
   `sound_positioning.jank` replaces five raymath calls this way).
-

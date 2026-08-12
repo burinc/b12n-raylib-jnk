@@ -100,7 +100,6 @@ fine; the cast-inside-`str` was the sole trigger. When a file fails with
 suspect an `(int ...)`/cast folded into a `str` (or other builder) call — the
 error line is generated-code position, not source, so don't trust it.
 
-
 ## Misc that saves a recompile
 
 - C bools work directly in conditionals: `(cpp/! (cpp/WindowShouldClose))`,
@@ -129,7 +128,6 @@ error line is generated-code position, not source, so don't trust it.
 - `\n` inside a `DrawText` string works (`window_letterbox.jank`).
 - Multi-header include: `(:include "raylib.h" "math.h" "time.h")`.
 
-
 ## Compile-time cost of deeply nested loops
 
 A triple-nested `doseq` with a fat body (`waving_cubes.jank`'s
@@ -140,4 +138,3 @@ alarms accordingly (the standard 40s alarm kills such a build
 mid-compile and looks like a hang - re-run with a 260s+ alarm before
 diagnosing). If compile time matters more than faithfulness, hoist the
 inner body into a `defn` taking only jank values.
-
