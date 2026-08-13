@@ -66,6 +66,8 @@ cd raylib-examples  && lein with-profile +<example> run --disable-sandbox
 catalog** — every ported example with its official C source and what it
 shows, grouped by raylib category (shapes, core, text, textures, shaders,
 models, audio). `bb info` gives you the same breakdown from the terminal.
+See [`docs/demos/README.md`](docs/demos/README.md) for an animated preview
+of every recorded example.
 
 ## Known limitations
 

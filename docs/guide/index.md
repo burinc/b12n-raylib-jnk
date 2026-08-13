@@ -93,7 +93,9 @@ against one real, struct-heavy graphics API across 209 examples.
   porting one example: source of truth, file layout, the five-place
   registration, the headless smoke test.
 - [`example-catalog.md`](example-catalog.md) — a tour of all 209 examples
-  grouped by raylib category, and how to add one.
+  grouped by raylib category, and how to add one (now with a preview GIF
+  per recorded example — see [`docs/demos/README.md`](../demos/README.md)
+  for the full gallery).
 - [`raygui-to-keyboard.md`](raygui-to-keyboard.md) — the pattern for
   porting raygui-based examples (sliders/checkboxes) to keyboard controls.
 
