@@ -5,5 +5,26 @@
   :warmup 10
   :capture "cgevent screenshot {{file}} --app jank"}
 
+ ;; Per-id overrides. `:warmup 25` bumps these past the default 10s: they
+ ;; render correctly (confirmed via manual `lein run` + cgevent screenshot)
+ ;; but wait-for-window's poll loop intermittently loses the race against
+ ;; cgevent's window-capture readiness under batch-run conditions — a
+ ;; longer warmup gives the poll loop more attempts to land a good frame
+ ;; before giving up. See docs/demos/README.md's "Known gaps" note.
  :overrides
- {}}
+ {"collision-area"      {:warmup 25}
+  "math-sine-cosine"    {:warmup 40}
+  "pie-chart"           {:warmup 25}
+  "rlgl-color-wheel"    {:warmup 25}
+  "top-down-lights"     {:warmup 25}
+  "rectangle-advanced"  {:warmup 25}
+  "fog-of-war"          {:warmup 60}
+  "billboard-rendering" {:warmup 25}
+  "waving-cubes"        {:warmup 60}
+  "tiled-drawing"       {:warmup 25}
+  "cellular-automata"   {:warmup 60}
+  "textured-curve"      {:warmup 25}
+  "undo-redo"           {:warmup 25}
+  "text-file-loading"   {:warmup 25}
+  "spotlight-rendering" {:warmup 25}
+  "game-of-life"        {:warmup 25}}}
