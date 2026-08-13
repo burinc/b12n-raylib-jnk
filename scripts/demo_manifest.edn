@@ -5,12 +5,17 @@
   :warmup 10
   :capture "cgevent screenshot {{file}} --app jank"}
 
- ;; Per-id overrides. `:warmup 25` bumps these past the default 10s: they
- ;; render correctly (confirmed via manual `lein run` + cgevent screenshot)
- ;; but wait-for-window's poll loop intermittently loses the race against
- ;; cgevent's window-capture readiness under batch-run conditions — a
- ;; longer warmup gives the poll loop more attempts to land a good frame
- ;; before giving up. See docs/demos/README.md's "Known gaps" note.
+ ;; Per-id overrides. These bump :warmup past the default 10s: the
+ ;; examples listed here render correctly (confirmed via manual `lein
+ ;; run` + cgevent screenshot) but wait-for-window's poll loop
+ ;; intermittently loses the race against cgevent's window-capture
+ ;; readiness under batch-run conditions — a longer warmup gives the
+ ;; poll loop more attempts to land a good frame before giving up. One
+ ;; (waving-cubes) never recovered even at :warmup 60 across 3 isolated
+ ;; retries and remains a known recording gap — see the "record GIFs for
+ ;; 203/208 examples" and "add preview column" commit messages for the
+ ;; full triage (docs/demos/README.md itself is regenerated wholesale by
+ ;; write-readme! on every run, so it can't carry hand-written notes).
  :overrides
  {"collision-area"      {:warmup 25}
   "math-sine-cosine"    {:warmup 40}

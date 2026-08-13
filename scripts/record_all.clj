@@ -78,9 +78,12 @@
 (defn kill-stray-jank!
   "Kill any running `jank` process. `--app jank` targeting (used
    throughout this script) is ambiguous whenever more than one jank
-   process exists, so this must run before AND after every recording."
+   process exists, so this must run before AND after every recording.
+   Matches by exact process name (`pkill -x`), not by install path — a
+   jank installed somewhere other than `~/.local/bin` would otherwise
+   dodge this and reintroduce the ambiguity."
   []
-  (p/shell {:continue true :out nil :err nil} "pkill" "-9" "-f" "\\.local/bin/jank")
+  (p/shell {:continue true :out nil :err nil} "pkill" "-9" "-x" "jank")
   (Thread/sleep 300))
 
 ;; ---------------------------------------------------------------- window
@@ -172,6 +175,8 @@
                    :fps fps
                    :width width
                    :duration duration
+                   :frame-count (count captured)
+                   :frames-expected (long (* duration fps))
                    :sha (sha256 src)})))))
         (finally
           (p/destroy-tree proc)
@@ -263,7 +268,7 @@
    only holds it awake going forward for as long as this process runs. The
    operator must ensure the screen is unlocked/awake before starting a run."
   []
-  (p/process {:out nil :err nil} "caffeinate" "-d" "-i" "-m" "-s"))
+  (p/process {:out nil :err nil :shutdown p/destroy-tree} "caffeinate" "-d" "-i" "-m" "-s"))
 
 (defmacro with-display-awake
   "Prevent the display/system from sleeping for the duration of `body`,
@@ -276,24 +281,57 @@
 
 ;; ---------------------------------------------------------------- brew unlink/relink
 
-(defn homebrew-raylib-linked? []
-  (fs/exists? "/opt/homebrew/include/raylib.h"))
+(defn homebrew-raylib-linked?
+  "Checks both Apple Silicon (/opt/homebrew) and Intel (/usr/local)
+   Homebrew prefixes — bb/helpers.clj probes both the same way for
+   `lein`, and a prefix-specific check here would silently skip the
+   unlink (and let the 8 shadowing-affected examples fail to compile)
+   on an Intel Mac."
+  []
+  (or (fs/exists? "/opt/homebrew/include/raylib.h")
+      (fs/exists? "/usr/local/include/raylib.h")))
 
 (defmacro with-raylib-unlinked
   "Unlink a stray Homebrew raylib for the duration of `body`, relinking it
-   afterward no matter how `body` exits (success, exception, or the
-   process being killed externally still leaves this to a `finally`)."
+   afterward no matter how `body` exits — success, exception, OR the
+   process being killed externally (Ctrl-C, `kill`). A plain `finally`
+   only covers the first two: a terminating signal does not unwind the
+   stack, so a `finally` block silently never runs on `kill`/SIGINT,
+   leaving Homebrew raylib unlinked indefinitely (breaks the user's
+   normal, non-recording dev workflow with no warning). Registers a JVM
+   shutdown hook for the signal-termination path; `brew link` is
+   idempotent, so the hook and the `finally` both firing on a normal
+   exit is harmless."
   [& body]
-  `(let [was-linked?# (homebrew-raylib-linked?)]
+  `(let [was-linked?# (homebrew-raylib-linked?)
+         relink!# (fn []
+                    (when was-linked?#
+                      (println "ℹ️  Relinking Homebrew raylib…")
+                      ;; Plain ProcessBuilder, NOT babashka.process — p/shell's
+                      ;; process* unconditionally tries to register its own
+                      ;; JVM shutdown hook per spawned process, which throws
+                      ;; `IllegalStateException: Shutdown in progress` when
+                      ;; called from a shutdown hook that's already running
+                      ;; (confirmed live: relink still happened because the
+                      ;; subprocess launches before the failed hook
+                      ;; registration, but it prints an ugly stack trace and
+                      ;; relies on that ordering by accident, not by design).
+                      ;; ProcessBuilder registers no hook, so it works
+                      ;; cleanly from both the `finally` and the hook path.
+                      (-> (ProcessBuilder. ["brew" "link" "raylib"])
+                          (.inheritIO)
+                          .start
+                          .waitFor)))
+         hook# (Thread. ^Runnable relink!#)]
      (when was-linked?#
        (println "ℹ️  Unlinking Homebrew raylib for the duration of this recording run…")
        (p/shell {:continue true} "brew" "unlink" "raylib"))
+     (.addShutdownHook (Runtime/getRuntime) hook#)
      (try
        ~@body
        (finally
-         (when was-linked?#
-           (println "ℹ️  Relinking Homebrew raylib…")
-           (p/shell {:continue true} "brew" "link" "raylib"))))))
+         (.removeShutdownHook (Runtime/getRuntime) hook#)
+         (relink!#)))))
 
 ;; ---------------------------------------------------------------- main
 
@@ -327,11 +365,23 @@
           (.shutdown ex-pool)
           (.awaitTermination ex-pool 30 TimeUnit/MINUTES)
           (let [results (mapv #(.get %) @pending)
-                updated (reduce (fn [m {:keys [id status sha duration fps width] :as r}]
+                updated (reduce (fn [m {:keys [id status sha duration fps width
+                                               frame-count frames-expected] :as r}]
                                   (if (= :done status)
                                     (assoc m id {:sha sha
                                                  :settings [duration fps width]
                                                  :bytes (:bytes r)
+                                                 ;; [captured expected] — NOT a pass/fail
+                                                 ;; signal by itself: many examples are
+                                                 ;; idle/static without scripted input (out
+                                                 ;; of scope this pass, see demo_manifest.edn),
+                                                 ;; so gifski/gifsicle correctly collapse
+                                                 ;; genuinely-identical consecutive frames
+                                                 ;; into fewer stored frames. A low count
+                                                 ;; here is expected for those; it's only
+                                                 ;; worth investigating for examples known to
+                                                 ;; animate continuously without input.
+                                                 :frames [frame-count frames-expected]
                                                  :at (str (java.time.Instant/now))})
                                     m))
                                 ledger-data results)]
