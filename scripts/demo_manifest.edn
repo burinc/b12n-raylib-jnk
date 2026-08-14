@@ -1,35 +1,46 @@
-{:defaults
- {:duration 6
-  :fps 10
-  :width 480
-  :warmup 10
-  :capture "cgevent screenshot {{file}} --app jank"}
+{:driver  :spawn
+ :capture :cgevent-gif
 
- ;; Per-id overrides. These bump :warmup past the default 10s: the
- ;; examples listed here render correctly (confirmed via manual `lein
- ;; run` + cgevent screenshot) but wait-for-window's poll loop
- ;; intermittently loses the race against cgevent's window-capture
- ;; readiness under batch-run conditions — a longer warmup gives the
- ;; poll loop more attempts to land a good frame before giving up. One
- ;; (waving-cubes) never recovered even at :warmup 60 across 3 isolated
- ;; retries and remains a known recording gap — see the "record GIFs for
- ;; 203/208 examples" and "add preview column" commit messages for the
- ;; full triage (docs/demos/README.md itself is regenerated wholesale by
- ;; write-readme! on every run, so it can't carry hand-written notes).
- :overrides
- {"collision-area"      {:warmup 25}
-  "math-sine-cosine"    {:warmup 40}
-  "pie-chart"           {:warmup 25}
-  "rlgl-color-wheel"    {:warmup 25}
-  "top-down-lights"     {:warmup 25}
-  "rectangle-advanced"  {:warmup 25}
-  "fog-of-war"          {:warmup 60}
-  "billboard-rendering" {:warmup 25}
-  "waving-cubes"        {:warmup 60}
-  "tiled-drawing"       {:warmup 25}
-  "cellular-automata"   {:warmup 60}
-  "textured-curve"      {:warmup 25}
-  "undo-redo"           {:warmup 25}
-  "text-file-loading"   {:warmup 25}
-  "spotlight-rendering" {:warmup 25}
-  "game-of-life"        {:warmup 25}}}
+ :examples-cmd "bb demos:examples"
+
+ ;; lein must run from the examples project, not the repo root.
+ :cwd "raylib-examples"
+
+ :out-dir "docs/demos"
+ :ledger  "docs/demos/ledger.edn"
+ :readme  "docs/demos/README.md"
+ :title   "Examples"
+
+ ;; Eight examples will not compile with a Homebrew raylib linked, so the
+ ;; batch unlinks it and relinks afterward. :after-all also runs from a JVM
+ ;; shutdown hook, so a Ctrl-C cannot leave Homebrew raylib unlinked and
+ ;; silently break normal development. `brew link` is idempotent, which is
+ ;; what makes the hook plus the finally both firing harmless.
+ ;;
+ ;; --app jank targeting is ambiguous whenever more than one jank process
+ ;; exists, and destroy-tree only reaches the lein/java parent this script
+ ;; spawns, not the jank grandchild that owns the window. Hence the kill
+ ;; before AND after every item.
+ :hooks {:before-all  ["brew unlink raylib"]
+         :after-all   ["brew link raylib"]
+         :before-each ["pkill -9 -x jank || true"]
+         :after-each  ["pkill -9 -x jank || true"]}
+
+ ;; Read from bb/helpers.clj's cat-order on 2026-08-14, preserving its
+ ;; order. The old write-readme! used the pair's title verbatim as the
+ ;; heading, so these carry the full "name — blurb" form.
+ :groups [{:key "core"     :title "core — window, input, cameras, files"}
+          {:key "shapes"   :title "shapes — 2D drawing, easing, rlgl"}
+          {:key "text"     :title "text — fonts, unicode, layout"}
+          {:key "textures" :title "textures — images, sprites, render textures"}
+          {:key "models"   :title "models — meshes, 3D, OBJ/GLB"}
+          {:key "shaders"  :title "shaders — GLSL, uniforms, postprocess, lighting"}
+          {:key "audio"    :title "audio — sounds, music streams"}]
+
+ :defaults {:duration 6 :fps 10 :width 480 :warmup 10
+            ;; Every example runs as a process named `jank`: lein spawns
+            ;; java, which spawns the jank binary, so the pid we spawn owns
+            ;; no window.
+            :target {:app "jank"}}
+
+ :overrides {}}

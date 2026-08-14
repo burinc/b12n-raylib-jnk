@@ -245,9 +245,29 @@
   run-all {:doc "Run every example for N seconds each (default 15): bb run-all [secs]"
            :task (h/run-all! (first *command-line-args*))}
 
-  record  {:doc "Batch-record a demo GIF for every example: bb record [--only a,b] [--force] [--dry-run]"
-           :task (let [{:keys [exit]} (apply shell {:continue true} "bb" "scripts/record_all.clj" *command-line-args*)]
-                   (System/exit exit))}
+  record
+  {:doc "Batch-record a demo GIF for every example: bb record [--only a,b] [--force] [--dry-run]"
+   :task (let [{:keys [exit]} (apply shell {:continue true}
+                                     "screen-grab" "record"
+                                     "--manifest" "scripts/demo_manifest.edn"
+                                     *command-line-args*)]
+           (System/exit exit))}
+
+  demos:examples
+  {:doc "Print the demo item list as EDN for screen-grab"
+   :requires ([clojure.string :as str]
+              [helpers :as h])
+   :task
+   (prn (vec (for [{:keys [profile cat desc]} h/examples
+                   ;; rlgl-compute is out of scope, as in the old script.
+                   :when (not= profile "rlgl-compute")]
+               {:id profile
+                :group (name cat)
+                :desc desc
+                :src (str "raylib-examples/src/raylib_examples/"
+                          (str/replace profile "-" "_") ".jank")
+                :run (str "lein with-profile +" profile
+                          " run --disable-sandbox")})))}
 
   ;; --- build ---
   install {:doc "Install jank-raylib-sys into ~/.m2 (idempotent)"
