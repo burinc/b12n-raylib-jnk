@@ -1,5 +1,7 @@
 # Examples
 
+Animated GIF previews, recorded with [screen-grab](https://github.com/burinc/b12n-screen-grab) via cgevent. Regenerate with `bb record`.
+
 ## core — window, input, cameras, files
 
 ### input-keys

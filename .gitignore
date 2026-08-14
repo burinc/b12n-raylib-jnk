@@ -6,3 +6,6 @@ a.out
 .nrepl-port
 storage.data
 automation.rae
+
+# screen-grab teardown markers (out-dir scratch; recover-pending! executes these)
+docs/demos/.screen-grab-pending.edn*

@@ -10,6 +10,7 @@
  :ledger  "docs/demos/ledger.edn"
  :readme  "docs/demos/README.md"
  :title   "Examples"
+ :preamble "Animated GIF previews, recorded with [screen-grab](https://github.com/burinc/b12n-screen-grab) via cgevent. Regenerate with `bb record`."
 
  ;; Eight examples will not compile with a Homebrew raylib linked, so the
  ;; batch unlinks it and relinks afterward via :after-all, which runs on both
@@ -46,18 +47,32 @@
             ;; Every example runs as a process named `jank`: lein spawns
             ;; java, which spawns the jank binary, so the pid we spawn owns
             ;; no window.
-            :target {:app "jank"}}
+            :target {:app "jank"}
+            ;; Poll by taking a real screenshot rather than by counting
+            ;; windows. A jank process can own a window for seconds before it
+            ;; renders — first-ever compile of an example is much slower than a
+            ;; cached rebuild — and a count-based check returns true for a
+            ;; window that is still blank, yielding a valid GIF of nothing.
+            ;; This restores what the recorder replaced by screen-grab did.
+            :ready-probe true}
 
  ;; Per-id overrides. These bump :warmup past the default 10s: the
  ;; examples listed here render correctly (confirmed via manual `lein
  ;; run` + cgevent screenshot) but wait-for-window's poll loop
  ;; intermittently loses the race against cgevent's window-capture
  ;; readiness under batch-run conditions — a longer warmup gives the
- ;; poll loop more attempts to land a good frame before giving up. One
- ;; (waving-cubes) never recovered even at :warmup 60 across 3 isolated
- ;; retries and remains a known recording gap — see the "record GIFs for
- ;; 203/208 examples" and "add preview column" commit messages for the
- ;; full triage (docs/demos/README.md itself is regenerated wholesale by
+ ;; poll loop more attempts to land a good frame before giving up. This
+ ;; is accurate again now that :defaults sets :ready-probe true: the poll
+ ;; loop screenshots the window and checks for real pixel content, so
+ ;; extra warmup time genuinely buys more chances at a non-blank frame.
+ ;; Without :ready-probe, a longer :warmup buys nothing — a count-based
+ ;; check returns true for a window that is still blank on its very
+ ;; first poll — so :warmup and :ready-probe only do useful work
+ ;; together; neither is sufficient on its own. One (waving-cubes) never
+ ;; recovered even at :warmup 60 across 3 isolated retries and remains a
+ ;; known recording gap — see the "record GIFs for 203/208 examples" and
+ ;; "add preview column" commit messages for the full triage
+ ;; (docs/demos/README.md itself is regenerated wholesale by
  ;; write-readme! on every run, so it can't carry hand-written notes).
  ;;
  ;; RESTORED. The screen-grab migration briefly dropped these to `{}` because
