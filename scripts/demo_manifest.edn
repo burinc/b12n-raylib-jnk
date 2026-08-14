@@ -12,10 +12,15 @@
  :title   "Examples"
 
  ;; Eight examples will not compile with a Homebrew raylib linked, so the
- ;; batch unlinks it and relinks afterward. :after-all also runs from a JVM
- ;; shutdown hook, so a Ctrl-C cannot leave Homebrew raylib unlinked and
- ;; silently break normal development. `brew link` is idempotent, which is
- ;; what makes the hook plus the finally both firing harmless.
+ ;; batch unlinks it and relinks afterward via :after-all, which runs on both
+ ;; the normal and exception paths.
+ ;;
+ ;; Ctrl-C is NOT covered synchronously. Measured under babashka, neither a JVM
+ ;; shutdown hook nor a signal handler reliably runs a subprocess on SIGINT.
+ ;; screen-grab instead writes a pending-teardown marker before the batch and
+ ;; repairs it on the NEXT invocation — so if you interrupt a run, raylib stays
+ ;; unlinked until you either rerun screen-grab or run `brew link raylib`
+ ;; yourself. `brew link` is idempotent, so both firing is harmless.
  ;;
  ;; --app jank targeting is ambiguous whenever more than one jank process
  ;; exists, and destroy-tree only reaches the lein/java parent this script
@@ -43,4 +48,39 @@
             ;; no window.
             :target {:app "jank"}}
 
- :overrides {}}
+ ;; Per-id overrides. These bump :warmup past the default 10s: the
+ ;; examples listed here render correctly (confirmed via manual `lein
+ ;; run` + cgevent screenshot) but wait-for-window's poll loop
+ ;; intermittently loses the race against cgevent's window-capture
+ ;; readiness under batch-run conditions — a longer warmup gives the
+ ;; poll loop more attempts to land a good frame before giving up. One
+ ;; (waving-cubes) never recovered even at :warmup 60 across 3 isolated
+ ;; retries and remains a known recording gap — see the "record GIFs for
+ ;; 203/208 examples" and "add preview column" commit messages for the
+ ;; full triage (docs/demos/README.md itself is regenerated wholesale by
+ ;; write-readme! on every run, so it can't carry hand-written notes).
+ ;;
+ ;; RESTORED. The screen-grab migration briefly dropped these to `{}` because
+ ;; its brief wrongly claimed this manifest shipped an empty :overrides map —
+ ;; a stale comment inside the old record_all.clj said so, written when the
+ ;; script was first ported and never updated after these were added two
+ ;; commits later. They are real triage output, not defaults: each was raised
+ ;; from the 10s default after an example was observed failing to open its
+ ;; window in time under batch-run load.
+ :overrides
+ {"collision-area"      {:warmup 25}
+  "math-sine-cosine"    {:warmup 40}
+  "pie-chart"           {:warmup 25}
+  "rlgl-color-wheel"    {:warmup 25}
+  "top-down-lights"     {:warmup 25}
+  "rectangle-advanced"  {:warmup 25}
+  "fog-of-war"          {:warmup 60}
+  "billboard-rendering" {:warmup 25}
+  "waving-cubes"        {:warmup 60}
+  "tiled-drawing"       {:warmup 25}
+  "cellular-automata"   {:warmup 60}
+  "textured-curve"      {:warmup 25}
+  "undo-redo"           {:warmup 25}
+  "text-file-loading"   {:warmup 25}
+  "spotlight-rendering" {:warmup 25}
+  "game-of-life"        {:warmup 25}}}
