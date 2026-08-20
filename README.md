@@ -116,6 +116,13 @@ wrapper forward as a standalone, self-contained project. [raylib](https://www.ra
 itself is by Ramon Santamaria ([@raysan5](https://github.com/raysan5)) and
 contributors, vendored here as a git submodule under its own zlib license.
 
+## Contributing
+
+New examples are welcome — the suite is deliberately mechanical to grow, and
+`raylib-examples/README.md` keeps a queue of what is not ported yet. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, the headless smoke test that
+stands in for CI here, and the four places a new example has to be registered.
+
 ## License
 
 [MPL 2.0](LICENSE) — inherited from jank and from the `jank-raylib-sys`

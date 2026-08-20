@@ -1,0 +1,5 @@
+# Map the `burinc` commit handle to a full name, so `git shortlog -sne` and
+# GitHub's contributor list show one properly-named entry rather than a
+# username. Matches on the commit email, so it also covers any future commit
+# authored under a different spelling of the same handle.
+Burin Choomnuan <burin@duck.com> <burin@duck.com>

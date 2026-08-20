@@ -259,16 +259,16 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/amp-envelope.gif" width="80">](../demos/amp-envelope.gif) | `amp-envelope` | An ADSR amplitude envelope on a tone, with a live shape graph |
 | [<img src="../demos/spectrum-visualizer.gif" width="80">](../demos/spectrum-visualizer.gif) | `spectrum-visualizer` | A live FFT spectrum of the music through a shader |
 
-## Adding an example — the five touchpoints
+## Adding an example — the four touchpoints
 
 See [`porting-workflow.md`](porting-workflow.md) for the full end-to-end
 process (source of truth, docstring format, the headless smoke test). The
-short version: a new example touches five places in the same commit —
+short version: a new example touches four places in the same commit —
 `raylib-examples/project.clj` (a `:profiles` entry), `bb.edn` (a `bb <name>`
 task), `bb/helpers.clj` (a row in the `examples` registry vector, including
-its `:cat`), `README.md` (repo root — a `bb <name>` mention if notable),
-and `raylib-examples/README.md` (move it from the "not yet ported" queue
-into the ported table).
+its `:cat`), and `raylib-examples/README.md` (move it from the "not yet
+ported" queue into the ported table). The repo-root `README.md` carries no
+per-example catalog, so it needs no change.
 
 ## See also
 

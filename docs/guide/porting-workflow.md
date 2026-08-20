@@ -59,15 +59,17 @@ each call into its state, so it stacks with `FLAG_MSAA_4X_HINT` etc.
 Exceptions: `window-flags` (a flag-state demo) and the two `highdpi-*`
 examples (which manage DPI flags themselves).
 
-## 3. Register in all five places (same commit)
+## 3. Register in all four places (same commit)
 
 1. `raylib-examples/project.clj` — a `:profiles` entry
 2. `bb.edn` — a `bb <name>` task
 3. `bb/helpers.clj` — a row in the `examples` registry vector, including
    its `:cat` (the raylib category keyword — drives the `bb info` grouping)
-4. `README.md` (repo root) — a `lein with-profile` line + a table row
-5. `raylib-examples/README.md` — move the example from the queue into the
+4. `raylib-examples/README.md` — move the example from the queue into the
    ported table, bump the progress counts
+
+The repo-root `README.md` carries no per-example table; it delegates the
+catalog to `raylib-examples/README.md`, so nothing there needs touching.
 
 Do not defer any of these; the registration IS part of the port.
 

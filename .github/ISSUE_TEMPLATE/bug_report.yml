@@ -1,0 +1,95 @@
+name: Bug report
+description: An example crashes, renders wrong, or won't compile
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most failures here come down to three things: which `jank` you have,
+        which `lein-jank` you have, and whether a system-wide raylib is
+        shadowing the vendored one. Please fill those in — they turn a guess
+        into a diagnosis.
+
+        **Please check these first — all three are known and expected:**
+
+        - **A few examples fail to compile, citing a raylib header outside
+          this repo** (e.g. `/opt/homebrew/include/raylib.h`). A system-wide
+          raylib is shadowing the vendored 6.0 through a jank compiler
+          pathway that ignores the project's `-I` flags. `brew unlink raylib`
+          and rebuild. [Full explanation and the closed-loop
+          test](https://github.com/burinc/b12n-raylib-jnk/blob/main/docs/guide/getting-started.md#troubleshooting).
+        - **`rlgl-compute` does not run.** It needs OpenGL 4.3 compute
+          shaders; this repo builds at 3.3, and macOS caps at 4.1 regardless.
+          [Documented in the
+          README](https://github.com/burinc/b12n-raylib-jnk#known-limitations).
+        - **`git status` shows `jank-raylib-sys/raylib` as modified.** That is
+          intentional — `bb` applies a patch to the submodule working tree on
+          every invocation. See `jank-raylib-sys/patches/README.md`.
+
+  - type: input
+    id: example
+    attributes:
+      label: Which example?
+      description: The `bb` name or the lein profile, e.g. `bb starfield` or `lein with-profile +starfield`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      description: Paste the full error output if there is one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Please paste the output of these commands.
+      value: |
+        ```
+        $ uname -sm
+        (paste here — OS and CPU architecture)
+
+        $ jank --version
+        (paste here)
+
+        $ lein version
+        (paste here — and note if this lein is a mise/asdf shim rather than Homebrew's)
+
+        $ bb --version
+        (paste here)
+        ```
+    validations:
+      required: true
+
+  - type: dropdown
+    id: system-raylib
+    attributes:
+      label: Do you have a system-wide raylib installed?
+      description: |
+        `brew list --versions raylib` on macOS, or your distro's package query.
+        This is the single most common cause of a compile failure in a subset
+        of examples — see the note at the top.
+      options:
+        - "No — nothing outside this repo's submodule"
+        - "Yes, and I have unlinked/removed it and still see the problem"
+        - "Yes, and it is still linked"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: others
+    attributes:
+      label: Do other examples work?
+      description: |
+        `bb basic-window` is the smallest one. If it works and yours doesn't,
+        the problem is in your example or in a raylib call it uses. If nothing
+        works, the problem is in the build.
+      value: |
+        ```
+        $ bb basic-window
+        (paste here)
+        ```

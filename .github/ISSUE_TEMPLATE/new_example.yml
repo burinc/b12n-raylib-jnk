@@ -1,0 +1,60 @@
+name: New example proposal
+description: Suggest a raylib example to port, or offer to port one
+labels: [example]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `raylib-examples/README.md` keeps a queue of what is not ported yet —
+        the "Not yet ported" section, grouped by raylib category. Please check
+        there first; it also flags which ones are blocked on new wrapper
+        support.
+
+        Adding an example touches four places and is deliberately mechanical —
+        see [the four
+        touchpoints](https://github.com/burinc/b12n-raylib-jnk/blob/main/docs/guide/porting-workflow.md#3-register-in-all-four-places-same-commit).
+        You're welcome to open a PR directly instead of an issue.
+
+  - type: input
+    id: name
+    attributes:
+      label: Proposed name
+      description: The `bb` name, e.g. `shapes-easings` — lowercase, hyphenated.
+    validations:
+      required: true
+
+  - type: input
+    id: upstream
+    attributes:
+      label: Upstream raylib example, if it's a port
+      description: e.g. `shapes/shapes_bouncing_ball`. Leave blank for an original.
+
+  - type: textarea
+    id: demonstrates
+    attributes:
+      label: What would it demonstrate?
+      description: |
+        Ideally something the existing 209 don't already cover — a raylib call,
+        a jank/C++ interop shape, or a drawing technique.
+    validations:
+      required: true
+
+  - type: textarea
+    id: wrapper
+    attributes:
+      label: Does it need anything new from the wrapper?
+      description: |
+        Some raylib APIs aren't reachable from jank without a C-side helper,
+        because jank functions can neither take nor return native values —
+        that's why `jank_rlights.h` exists. If your example needs a raylib call
+        that takes or returns a struct **by value**, or needs an array of
+        native structs, say so. Those need design thought rather than a
+        mechanical port. See
+        [`docs/guide/raylib-api-coverage.md`](https://github.com/burinc/b12n-raylib-jnk/blob/main/docs/guide/raylib-api-coverage.md).
+
+  - type: checkboxes
+    id: offer
+    attributes:
+      label: Are you offering to write it?
+      options:
+        - label: Yes, I'd like to submit the PR
