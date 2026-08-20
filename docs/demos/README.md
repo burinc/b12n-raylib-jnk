@@ -1,6 +1,6 @@
 # Examples
 
-Animated GIF previews, recorded with [screen-grab](https://github.com/burinc/b12n-screen-grab) via cgevent. Regenerate with `bb record`.
+Animated GIF previews of every example. Recorded with a capture CLI that is not publicly released, so `bb record` is maintainer-only - every GIF here is committed.
 
 ## core — window, input, cameras, files
 

@@ -70,18 +70,18 @@ catalog** — every ported example with its official C source and what it
 shows, grouped by raylib category (shapes, core, text, textures, shaders,
 models, audio). `bb info` gives you the same breakdown from the terminal.
 See [`docs/demos/README.md`](docs/demos/README.md) for an animated preview
-of every recorded example, recorded via `bb record` (shelled out to the
-[`screen-grab`](https://github.com/burinc/b12n-screen-grab) CLI and
-configured by `scripts/demo_manifest.edn`). `bb record --only
+of every recorded example, recorded via `bb record` (configured by
+`scripts/demo_manifest.edn`). `bb record --only
 <example-name>` matches an exact id or an id prefix — e.g. `--only
 camera-2d` also selects `camera-2d-platformer`, `camera-2d-split-screen`,
 and `camera-2d-mouse-zoom` — so double-check the plan
 (`bb record --dry-run`) before combining a short `--only` prefix with
 `--force`.
 
-`bb record` requires the `screen-grab` CLI on your PATH. Install it from
-[b12n-screen-grab](https://github.com/burinc/b12n-screen-grab):
-`cd ~/dev/b12n-screen-grab && bb install:home`
+`bb record` drives a `screen-grab` capture CLI that is not publicly
+released, so recording is maintainer-only — the task will tell you so rather
+than failing obscurely. You never need to run it: every GIF under
+`docs/demos/` is committed.
 
 ## Known limitations
 

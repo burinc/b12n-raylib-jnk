@@ -3,15 +3,16 @@
 User-facing documentation for `b12n-raylib-jnk`: 209 [raylib](https://github.com/raysan5/raylib)
 examples ported to **[jank](https://jank-lang.org)** — a native Clojure dialect
 (C++/LLVM), not the JVM. Each page below covers one interop pattern or raylib
-API surface, citing the example file that proves it, and cross-references
-sibling projects in the [b12n umbrella wiki](https://github.com/burinc/b12n-wikis).
+API surface, citing the example file that proves it.
 
 ## Why this exists
 
-When `b12n-raylib-jnk` is mirrored into
-[`b12n-wikis`](https://github.com/burinc/b12n-wikis), each page below becomes an
-entry under `b12n-wikis/b12n-raylib-jnk/`, and the wiki's cross-project index
-can cite them for any jank/native-interop-distinctive pattern.
+jank is young, and almost nothing has been written about using it against a
+real C library at this scale. Porting 209 raylib examples surfaced a set of
+interop rules that are not obvious from jank's own documentation and that
+cost real debugging time to find. Each page here is one of those rules,
+written up with the committed example that proves it — so the next person
+does not have to rediscover it by bisecting a failing draw loop.
 
 ## What b12n-raylib-jnk is
 
@@ -20,9 +21,9 @@ models, and audio — each a small jank namespace under
 `raylib-examples/src/raylib_examples/`, sharing one C-binding wrapper,
 `jank-raylib-sys`, that exposes raylib's C API directly.
 
-It is the **native-Clojure sibling** of [`b12n-rljlt`](https://github.com/burinc/b12n-rljlt)
-(raylib in Jolt/Chez Scheme) and [`b12n-raylib-clj`](https://github.com/burinc/b12n-raylib-clj)
-(raylib in JVM Clojure over `coffi`/Panama). All three bind the same C library
+It is the **native-Clojure sibling** of [`b12n-raylib-jlt`](https://github.com/burinc/b12n-raylib-jlt)
+(raylib in Jolt/Chez Scheme) and of an unreleased JVM-Clojure port over
+`coffi`/Panama. All three bind the same C library
 directly; what differs is the boundary each language draws between its own
 values and C's:
 
@@ -101,10 +102,9 @@ against one real, struct-heavy graphics API across 209 examples.
 
 ## See also
 
-- [`b12n-rljlt`](https://github.com/burinc/b12n-rljlt) — the same idea in
-  Jolt (Chez Scheme) over `jolt.ffi`. Its FFI boundary is per-*call*, not
-  per-*value* — a `Camera3D` can live in an ordinary variable between FFI
+- [`b12n-raylib-jlt`](https://github.com/burinc/b12n-raylib-jlt) — the same
+  idea in Jolt (Chez Scheme) over `jolt.ffi`. Its FFI boundary is per-*call*,
+  not per-*value* — a `Camera3D` can live in an ordinary variable between FFI
   calls, unlike jank's native values.
-- [`b12n-raylib-clj`](https://github.com/burinc/b12n-raylib-clj) — the same
-  idea in JVM Clojure over `coffi`/Panama. Same per-call boundary as Jolt,
-  plus a JVM garbage collector jank doesn't have to work around.
+- An unreleased JVM-Clojure port over `coffi`/Panama takes the same per-call
+  boundary as Jolt, plus a garbage collector jank doesn't have to work around.

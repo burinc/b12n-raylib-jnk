@@ -63,7 +63,8 @@ loops), but reach for the seq API / `clojure.string` when it reads better.
 [clojure.string :as str])` beside `(:include "raylib.h")` and word-wraps
 with `str/split-lines`, `str/split line #"\s+"` (regex literals work) and
 `filterv` — compiled and ran clean.
-Source of truth: `~/dev/jank/compiler+runtime/src/jank/clojure/{core,string}.jank`.
+Source of truth: jank's own [`compiler+runtime/src/jank/clojure/`](https://github.com/jank-lang/jank/tree/main/compiler%2Bruntime/src/jank/clojure)
+(`core.jank`, `string.jank`) — what is implemented there is what you can call.
 
 **`const char *` returns fold into `str` directly** (from the core arc,
 2026-07-03). A raylib fn that returns a C string (`GetMonitorName`,

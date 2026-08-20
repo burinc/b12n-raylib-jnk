@@ -10,7 +10,7 @@
  :ledger  "docs/demos/ledger.edn"
  :readme  "docs/demos/README.md"
  :title   "Examples"
- :preamble "Animated GIF previews, recorded with [screen-grab](https://github.com/burinc/b12n-screen-grab) via cgevent. Regenerate with `bb record`."
+ :preamble "Animated GIF previews of every example. Recorded with a capture CLI that is not publicly released, so `bb record` is maintainer-only - every GIF here is committed."
 
  ;; Eight examples will not compile with a Homebrew raylib linked, so the
  ;; batch unlinks it and relinks afterward via :after-all, which runs on both

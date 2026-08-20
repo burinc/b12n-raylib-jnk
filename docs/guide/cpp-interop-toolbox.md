@@ -140,8 +140,9 @@ preceded it. No `-sys` wrapper change is needed — every raylib fn is already
 callable through `(:include "raylib.h")`; the only missing piece was knowing
 the address-of form.
 
-The wider jank cpp-interop toolbox (documented at
-`~/dev/opengl-with-jank/CPP_INTEROP_DOCUMENTATION.md`, proven in that engine):
+The wider jank cpp-interop toolbox — see the
+[jank book's cpp-interop chapter](https://github.com/jank-lang/jank/tree/main/book/src/cpp-interop)
+for the authoritative reference on each of these:
 
 - `(cpp/& x)` — address-of (unary). `(cpp/* p)` — dereference (unary).
 - `(cpp/aget arr (cpp/int i))` / `(aset arr (cpp/int i) v)` — array element

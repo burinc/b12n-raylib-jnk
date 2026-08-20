@@ -141,16 +141,13 @@ feature. This is a soft preference, not a gate, and it has two exceptions:
 You don't need to record anything. Every GIF under `docs/demos/` is committed
 and `docs/demos/README.md` is generated from `scripts/demo_manifest.edn`.
 
-If you want to, `bb record --only <name>` will do it, but it needs the
-[`screen-grab`](https://github.com/burinc/b12n-screen-grab) CLI on your `PATH`
-and is macOS-only. Note that `--only` matches an id *prefix* as well as an
-exact id — `--only camera-2d` also selects `camera-2d-platformer`,
-`camera-2d-split-screen`, and `camera-2d-mouse-zoom` — so check `bb record
---dry-run` before combining a short prefix with `--force`.
+`bb record` drives a `screen-grab` capture CLI that is not publicly
+released, so recording is maintainer-only — the task will tell you so rather
+than failing obscurely.
 
 If your example would benefit from a particular input sequence in its demo,
-add an entry for it in the manifest and mention it in your PR; a maintainer
-can record it.
+add an entry for it in `scripts/demo_manifest.edn` and mention it in your PR;
+a maintainer will record it and commit the GIF.
 
 ## Licensing
 

@@ -20,10 +20,16 @@ ported". Markers tell you the cost up front:
 
 ## 2. Port from the definitive C source
 
-The authoritative originals live at
-`~/dev/github--raysan5--raylib/examples/{core,shapes,text,...}/`. Port from
-the C, not from any intermediate binding — the Clojure MVP at
-`~/dev/raylib-clojure-playground-mvp` is itself a port and drifts.
+The authoritative originals are raylib's own example programs, under
+[`examples/{core,shapes,text,...}/`](https://github.com/raysan5/raylib/tree/master/examples)
+(easing functions in `examples/shapes/reasings.h`). You already have a
+checkout: the vendored submodule at `jank-raylib-sys/raylib/examples/` is
+pinned to the same raylib this repo builds against, so it is the copy whose
+API actually matches.
+
+Port from the C, never from an intermediate binding. Ports-of-ports drift —
+if you find an existing Clojure or Lisp translation of an example, treat it
+as a hint and check it against the C.
 
 Keep formulas and update ordering faithful to the C (a code review of the
 easings testbed verified all 28 easing formulas term-by-term against
