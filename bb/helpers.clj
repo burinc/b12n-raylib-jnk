@@ -419,6 +419,9 @@
   (info-section "Build"
                 [["install" "Install jank-raylib-sys into ~/.m2 (idempotent)"]
                  ["clean" "Remove */target build dirs"]])
+  (info-section "Docs (maintainer)"
+                [["record" "Batch-record a demo GIF per example (needs screen-grab)"]
+                 ["docs-sync" "Rebuild + republish the guide and site (bb docs-sync [--no-push])"]])
   (info-section "Meta"
                 [["examples" "Flat list of every example, with controls"]
                  ["run <name>" "Run one example by argument"]

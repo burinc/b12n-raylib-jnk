@@ -106,6 +106,10 @@ native-value-lifetime rule that shapes every jank/C++ interop pattern here,
 a C-interop toolbox, raylib API coverage notes, the porting workflow, and
 the full example catalog.
 
+Rebuilding and republishing that guide as a site is a maintainer task:
+`bb docs-sync` (`--no-push` to build and commit without publishing
+anything). It needs the sibling `b12n-docs` checkout and AWS credentials.
+
 ## Credits
 
 The `jank-raylib-sys` wrapper and the overall `lein-jank`-based project

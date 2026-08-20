@@ -149,6 +149,10 @@ If your example would benefit from a particular input sequence in its demo,
 add an entry for it in `scripts/demo_manifest.edn` and mention it in your PR;
 a maintainer will record it and commit the GIF.
 
+Publishing the guide as a site is likewise maintainer-only (`bb docs-sync`,
+which needs a sibling checkout and AWS credentials), so a docs change in your
+PR goes live when a maintainer next syncs — you don't need to do anything.
+
 ## Licensing
 
 This project is released under the zlib License — see [`LICENSE`](LICENSE).
