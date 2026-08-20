@@ -343,6 +343,17 @@
                                  (do (println (str "  BEHIND origin — resolve manually (cd " dir " && git pull --rebase), not auto-pushing"))
                                      :behind)
 
+                                 ;; No upstream means the status line carries no
+                                 ;; ahead/behind at all, so the check below would
+                                 ;; read as "nothing to push" and skip silently -
+                                 ;; the same failure this fn was just fixed for.
+                                 ;; git filter-repo drops the remote, so a repo
+                                 ;; can land here after a history rewrite.
+                                 (not (str/includes? st "..."))
+                                 (do (println (str "  NO UPSTREAM for main in " dir " — not pushing."))
+                                     (println "  Fix with: git branch --set-upstream-to=origin/main main")
+                                     :no-upstream)
+
                                  (not (str/includes? st "ahead"))
                                  (do (println "  up to date, nothing to push") :skipped)
 
@@ -428,7 +439,7 @@
              (println (str "  site:   " site-result))
              (println (str "  wiki:   " wiki-result))
              (println (str "  deploy: " deploy-result))
-             (when (some (fn [r] (contains? #{:behind :push-failed :build-failed
+             (when (some (fn [r] (contains? #{:behind :push-failed :build-failed :no-upstream
                                               :sync-failed :invalidation-failed} r))
                          [site-result wiki-result deploy-result])
                (System/exit 1)))))))}
