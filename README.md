@@ -49,9 +49,9 @@ If the `lein` on your `PATH` can't bootstrap, set `LEIN=/path/to/lein`.
 
 ### macOS
 
-There is no `bwrap` on macOS, so the native build must run with sandboxing
-disabled. Every `bb`/`lein` invocation here already passes
-`--disable-sandbox` for you — see `AGENTS.md` for why that's safe.
+There is no `bwrap` on macOS, so Leiningen's build sandbox cannot work there
+at all. Every `bb`/`lein` invocation here already passes `--disable-sandbox`
+for you — see [`docs/guide/getting-started.md`](docs/guide/getting-started.md).
 
 ## Manual usage
 
@@ -101,8 +101,7 @@ and `camera-2d-mouse-zoom` — so double-check the plan
 Full guide at [`docs/guide/index.md`](docs/guide/index.md): the
 native-value-lifetime rule that shapes every jank/C++ interop pattern here,
 a C-interop toolbox, raylib API coverage notes, the porting workflow, and
-the full example catalog. `AGENTS.md` carries the terse, in-context version
-of the same rules for AI coding agents.
+the full example catalog.
 
 ## Credits
 

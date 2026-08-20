@@ -6,8 +6,7 @@ native C++ values, and this page is about the single rule that boundary
 enforces: **a native cpp value only stays native within the form that
 produced it.** Every lesson below is a consequence of that rule. Each
 lesson names the committed example that proves it — those files are the
-running test suite for this document. The distilled version lives in
-`AGENTS.md`; this is the fuller story.
+running test suite for this document.
 
 ## The one rule that explains most crashes
 

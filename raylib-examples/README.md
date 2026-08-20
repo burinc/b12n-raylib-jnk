@@ -21,8 +21,10 @@ lein with-profile +<name> run --disable-sandbox
 Ports follow the **definitive C sources** in
 [`raysan5/raylib`](https://github.com/raysan5/raylib) (`examples/<category>/`),
 not any intermediate binding. For the jank/C++ interop constraints that shape
-these ports, see the repo-root `AGENTS.md`. One deliberate deviation: every
-example sets `FLAG_WINDOW_HIGHDPI`, so windows scale with your monitor's DPI
+these ports, see
+[`docs/guide/native-value-lifetimes.md`](../docs/guide/native-value-lifetimes.md).
+One deliberate deviation: every example sets `FLAG_WINDOW_HIGHDPI`, so
+windows scale with your monitor's DPI
 (e.g. 2x on a 192-DPI HiDPI display) while the drawing stays at the C's
 logical 800x450.
 

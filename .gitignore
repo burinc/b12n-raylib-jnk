@@ -9,3 +9,17 @@ automation.rae
 
 # screen-grab teardown markers (out-dir scratch; recover-pending! executes these)
 docs/demos/.screen-grab-pending.edn*
+
+# Agent-instruction files. Kept out of the published tree; the canonical
+# copies live in the private planning store and are symlinked back in here
+# for local use. Anchored to the root so a future docs/AGENTS.md is unaffected.
+/AGENTS.md
+/CLAUDE.md
+
+# Local agent / session scratch
+.claude/
+.superpowers/
+.remember/
+
+# macOS
+.DS_Store
