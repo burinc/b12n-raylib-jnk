@@ -1,5 +1,22 @@
 (require '[babashka.fs :as fs]
-         '[jank.build.cmake :as cmake])
+         '[babashka.process :as proc])
+
+;; cmake-build is inlined from org.clojars.kylc/jank-build-cmake 0.1-SNAPSHOT
+;; (jank/build/cmake.bb, Copyright (c) Kyle Cesare, MPL 2.0 - the same licence
+;; this project carries; see ../NOTICE). It is vendored rather than pulled in
+;; through :build-dependencies so that a fresh clone builds without fetching a
+;; floating SNAPSHOT from a third party's Clojars account. Behaviour is
+;; unchanged from the upstream fn, including the "install" target default.
+(defn- cmake-build
+  [{:keys [src-dir build-dir out-dir optimization-level static-build]}
+   {:keys [defines target] :or {target "install"}}]
+  (let [defaults {"CMAKE_BUILD_TYPE"     (if (pos? optimization-level) "Release" "Debug")
+                  "CMAKE_INSTALL_PREFIX" out-dir
+                  "BUILD_SHARED_LIBS"    (if static-build "OFF" "ON")}
+        d-flags  (map (fn [[k v]] (str "-D" (name k) "=" v))
+                      (merge defaults defines))]
+    (proc/shell (concat ["cmake"] d-flags ["-B" build-dir src-dir]))
+    (proc/shell ["cmake" "--build" build-dir "--target" target])))
 
 (let [src-dir (fs/path (:src-dir *input*) "raylib")
       out-dir (:out-dir *input*)
@@ -14,7 +31,7 @@
   ;; shaders: rlLoadShaderProgramCompute, SSBOs, rlComputeShaderDispatch)
   ;; does not run against this build on any platform — see the "Known
   ;; limitations" section of the root README.
-  (cmake/build input {:defines {"BUILD_EXAMPLES" false
+  (cmake-build input {:defines {"BUILD_EXAMPLES" false
                                 "BUILD_SHARED_LIBS" true
                                 "OPENGL_VERSION" "3.3"}})
 

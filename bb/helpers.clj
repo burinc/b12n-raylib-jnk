@@ -75,7 +75,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private raylib-sys-jar
-  "org/clojars/kylc/jank-raylib-sys/6.0-SNAPSHOT/jank-raylib-sys-6.0-SNAPSHOT.jar")
+  "net/b12n/jank-raylib-sys/6.0-SNAPSHOT/jank-raylib-sys-6.0-SNAPSHOT.jar")
 
 (defn- install-lib! [lib]
   (info (str "Installing " lib " → ~/.m2"))

@@ -1,0 +1,92 @@
+Third-party attribution
+=======================
+
+This project is released under the Mozilla Public License 2.0; see LICENSE.
+MPL 2.0 was inherited deliberately: it is the licence of jank itself, of the
+`jank-raylib-sys` wrapper this project carries forward, and of the build
+helper inlined into that wrapper (all three are credited below).
+
+Several components carry the zlib/libpng licence instead. zlib is permissive
+and allows the derived work to be distributed under different terms, but it
+asks that the origin not be misrepresented and that altered versions be
+marked as such. This file is that marking.
+
+
+raylib
+------
+  Copyright (c) 2013-2026 Ramon Santamaria (@raysan5)
+  https://github.com/raysan5/raylib
+  Licensed under the zlib/libpng licence.
+
+  raylib is not copied into this repository. It is referenced as a git
+  submodule (`jank-raylib-sys/raylib`) pinned to an upstream commit, fetched
+  from raysan5/raylib on first build and compiled from source by
+  `jank-raylib-sys/jank-build.bb`.
+
+  One patch is applied to that checkout at build time:
+  `jank-raylib-sys/patches/macos-opengl43-forward-compat.patch`. It adds the
+  `#if defined(__APPLE__)` GLFW forward-compatibility guard that raylib's
+  own RL_OPENGL_33 branch already has but its RL_OPENGL_43 branch is
+  missing. This is an alteration to raylib's source, applied only in a local
+  working tree and never redistributed; see that directory's README.md for
+  the full rationale.
+
+
+raylib examples
+---------------
+  Copyright (c) 2013-2026 Ramon Santamaria (@raysan5) and contributors
+  Licensed under the zlib/libpng licence.
+
+  The example programs under `raylib-examples/src/raylib_examples/` are
+  ports of raylib's own example programs to jank. They are altered versions:
+  the logic is reimplemented in jank, and the interop constraints described
+  in docs/guide/ forced structural changes throughout. Every example's
+  docstring names the upstream C source it was ported from (e.g.
+  `core/core_basic_window`, `shapes/shapes_bouncing_ball`), and
+  `raylib-examples/README.md` lists the same mapping in table form.
+
+  One deliberate behavioural deviation from the originals, applied
+  uniformly: every example sets FLAG_WINDOW_HIGHDPI.
+
+
+rlights.h
+---------
+  Copyright (c) 2017-2024 Victor Fisac (@victorfisac) and
+                          Ramon Santamaria (@raysan5)
+  Licensed under the zlib/libpng licence.
+
+  `jank-raylib-sys/include/jank_rlights.h` is an altered version of
+  raylib's `examples/shaders/rlights.h`. CreateLight and UpdateLightValues
+  are kept verbatim from the original and marked `static`; the surrounding
+  index-based scalar wrappers and per-type uniform setters are new work,
+  needed because jank functions can neither take nor return native values.
+  The file's own header comment carries the same attribution.
+
+
+jank-raylib-sys and jank-build-cmake
+------------------------------------
+  Copyright (c) Kyle Cesare (@kylc)
+  https://github.com/kylc/lein-jank-playground
+  Licensed under the Mozilla Public License 2.0.
+
+  The `jank-raylib-sys` wrapper and the overall lein-jank project layout
+  originate from Kyle Cesare's lein-jank-playground. This repository carries
+  them forward with modifications: lein-jank bumped to 2026.06-1, an
+  `include` verbatim-path added to ship the jank-helper headers, a second
+  include-dir build directive emitted for them, an explicit OPENGL_VERSION
+  pin, and lib/lib64 detection for cross-distro shared-library layout.
+
+  The `cmake-build` function in `jank-raylib-sys/jank-build.bb` is inlined
+  from that project's `org.clojars.kylc/jank-build-cmake` 0.1-SNAPSHOT
+  (`jank/build/cmake.bb`), behaviour unchanged. It is vendored rather than
+  depended on so a fresh clone builds without fetching a floating SNAPSHOT
+  from a third party's Clojars account.
+
+
+jank
+----
+  https://github.com/jank-lang/jank
+  Licensed under the Mozilla Public License 2.0.
+
+  The jank compiler and the lein-jank plugin are build-time and runtime
+  requirements, installed separately. No jank source is vendored here.

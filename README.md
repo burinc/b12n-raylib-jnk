@@ -11,7 +11,10 @@ under `raylib-examples/src/raylib_examples/`; a Leiningen profile picks which
 
 This repo is standalone: it vendors `jank-raylib-sys` (the raylib C-binding
 wrapper, with `raylib` itself as a git submodule) so it builds from a fresh
-clone with nothing else needed beyond the requirements below.
+clone with nothing else needed beyond the requirements below. No third-party
+Maven or Clojars artifacts are fetched for the build — the one build helper
+it used to pull from a Clojars snapshot is now inlined into
+`jank-raylib-sys/jank-build.bb`.
 
 ## Requirements
 
@@ -115,4 +118,9 @@ contributors, vendored here as a git submodule under its own zlib license.
 
 ## License
 
-[MPL 2.0](LICENSE)
+[MPL 2.0](LICENSE) — inherited from jank and from the `jank-raylib-sys`
+wrapper this project carries forward.
+
+Parts of the tree are zlib/libpng licensed instead: raylib itself, the
+example programs these ports are derived from, and the `rlights.h` helper.
+[`NOTICE`](NOTICE) records each one, what was altered, and by whom.
