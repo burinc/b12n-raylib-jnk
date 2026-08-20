@@ -125,9 +125,11 @@ stands in for CI here, and the four places a new example has to be registered.
 
 ## License
 
-[MPL 2.0](LICENSE) — inherited from jank and from the `jank-raylib-sys`
-wrapper this project carries forward.
+[zlib](LICENSE) — the same license as raylib itself, so the original terms
+carry through the ports rather than being replaced by something stricter.
 
-Parts of the tree are zlib/libpng licensed instead: raylib itself, the
-example programs these ports are derived from, and the `rlights.h` helper.
-[`NOTICE`](NOTICE) records each one, what was altered, and by whom.
+Two files are the exception and remain MPL 2.0, since they are derived from
+[`lein-jank-playground`](https://github.com/kylc/lein-jank-playground) and
+MPL is a file-level copyleft: `jank-raylib-sys/project.clj` and
+`jank-raylib-sys/jank-build.bb`. Both carry a notice header.
+[`NOTICE`](NOTICE) records every attribution and what was altered in each.

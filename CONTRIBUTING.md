@@ -151,13 +151,19 @@ a maintainer will record it and commit the GIF.
 
 ## Licensing
 
-This project is released under the Mozilla Public License 2.0 — see
-[`LICENSE`](LICENSE). By contributing, you agree your contribution is licensed
-under those terms.
+This project is released under the zlib License — see [`LICENSE`](LICENSE).
+That is the same license raylib itself uses. By contributing, you agree your
+contribution is licensed under those terms.
 
-Parts of the tree are zlib/libpng licensed instead, including the raylib
-examples these ports derive from. [`NOTICE`](NOTICE) records each one. If your
-example is a port of an upstream raylib example, **name the original C file in
-its docstring** (e.g. `Based on raylib/examples/shapes/shapes_bouncing_ball.c`)
-and in the README table, so the attribution stays traceable — that is what
-zlib asks for in return.
+Two files under `jank-raylib-sys/` are the exception and remain MPL 2.0
+(`project.clj` and `jank-build.bb`, both derived from
+[`lein-jank-playground`](https://github.com/kylc/lein-jank-playground)). If
+your change touches either, it stays MPL — see
+[`jank-raylib-sys/README.md`](jank-raylib-sys/README.md). Everything else,
+including all the examples, is zlib.
+
+If your example is a port of an upstream raylib example, **name the original
+C file in its docstring** (e.g.
+`Based on raylib/examples/shapes/shapes_bouncing_ball.c`) and in the README
+table, so the attribution stays traceable — that is what zlib asks for in
+return. [`NOTICE`](NOTICE) records the rest.
