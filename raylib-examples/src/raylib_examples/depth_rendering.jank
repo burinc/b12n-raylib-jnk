@@ -20,42 +20,8 @@
     3x3x3 DrawCube, the 20x20 plane at scale 2 a 40x40 DrawPlane.
   - flipY is the INT-uniform per-type setter (the mandelbrot-set
     lesson, as a scalar setter)."
+  (:require [raylib-examples.rendertex :as rt])
   (:include "raylib.h" "rlgl.h"))
-
-;; Custom render texture with a readable depth TEXTURE (same shim as
-;; depth-writing, from the C's LoadRenderTextureDepthTex).
-(cpp/raw "static RenderTexture2D jank_load_rt_depth(int width, int height) {
-  RenderTexture2D target = { 0 };
-  target.id = rlLoadFramebuffer();
-  if (target.id > 0) {
-    rlEnableFramebuffer(target.id);
-    target.texture.id = rlLoadTexture(0, width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
-    target.texture.width = width;
-    target.texture.height = height;
-    target.texture.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-    target.texture.mipmaps = 1;
-    target.depth.id = rlLoadTextureDepth(width, height, false);
-    target.depth.width = width;
-    target.depth.height = height;
-    target.depth.format = 19; /* DEPTH_COMPONENT_24BIT: not defined in raylib */
-    target.depth.mipmaps = 1;
-    rlFramebufferAttach(target.id, target.texture.id, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
-    rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
-    if (rlFramebufferComplete(target.id)) TraceLog(LOG_INFO, \"FBO: [ID %i] Framebuffer object created successfully\", target.id);
-    rlDisableFramebuffer();
-  } else TraceLog(LOG_WARNING, \"FBO: Framebuffer object can not be created\");
-  return target;
-}
-static void jank_unload_rt_depth(RenderTexture2D target) {
-  if (target.id > 0) {
-    rlUnloadTexture(target.texture.id);
-    rlUnloadTexture(target.depth.id);
-    rlUnloadFramebuffer(target.id);
-  }
-}
-static void jank_set_int(Shader s, int loc, int v) {
-  SetShaderValue(s, loc, &v, SHADER_UNIFORM_INT);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -70,12 +36,14 @@ static void jank_set_int(Shader s, int loc, int v) {
                              (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
                              (cpp/float 45.0)
                              cpp/CAMERA_PERSPECTIVE)
-        target (cpp/jank_load_rt_depth WIDTH HEIGHT)
+        target-box (rt/load-depth! WIDTH HEIGHT)
+        target (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) target-box))
         depth-shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/depth_render.fs"))
         depth-loc (int (cpp/GetShaderLocation depth-shader "depthTexture"))
         flip-y-loc (int (cpp/GetShaderLocation depth-shader "flipY"))]
 
-    (cpp/jank_set_int depth-shader flip-y-loc 1)
+    (cpp/SetShaderValue depth-shader (int flip-y-loc)
+                        (cpp/new cpp/int (cpp/int 1)) cpp/SHADER_UNIFORM_INT)
 
     (cpp/DisableCursor)
     (cpp/SetTargetFPS 60)
@@ -116,7 +84,7 @@ static void jank_set_int(Shader s, int loc, int v) {
         (cpp/EndDrawing)
         (recur)))
 
-    (cpp/jank_unload_rt_depth target)
+    (rt/unload-depth! target-box)
     (cpp/UnloadShader depth-shader))
 
   (cpp/CloseWindow))
