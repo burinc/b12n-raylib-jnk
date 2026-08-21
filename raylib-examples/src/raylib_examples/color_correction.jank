@@ -21,19 +21,6 @@
     jank_draw_centered shim that reads .width/.height and centers."
   (:include "raylib.h"))
 
-;; FLOAT uniform setter, a centered DrawTexture (int math/field reads in
-;; C), and a gray builder (Color's unsigned-char ctor rejects jank ints).
-(cpp/raw "static void jank_set_float(Shader s, int loc, double a) {
-  float v = (float)a;
-  SetShaderValue(s, loc, &v, SHADER_UNIFORM_FLOAT);
-}
-static void jank_draw_centered(Texture2D t, int cx, int cy) {
-  DrawTexture(t, cx - t.width/2, cy - t.height/2, WHITE);
-}
-static Color jank_rgb(int r, int g, int b) {
-  return (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
@@ -75,22 +62,39 @@ static Color jank_rgb(int r, int g, int b) {
                            (adj saturation (cpp/IsKeyDown cpp/KEY_A) (cpp/IsKeyDown cpp/KEY_S) 1.5 -100.0 100.0))
               brightness (if reset? 0.0
                            (adj brightness (cpp/IsKeyDown cpp/KEY_Z) (cpp/IsKeyDown cpp/KEY_X) 1.5 -100.0 100.0))]
-          (cpp/jank_set_float shader contrast-loc contrast)
-          (cpp/jank_set_float shader saturation-loc saturation)
-          (cpp/jank_set_float shader brightness-loc brightness)
+          (cpp/SetShaderValue shader (int contrast-loc)
+                              (cpp/new cpp/float (cpp/float contrast)) cpp/SHADER_UNIFORM_FLOAT)
+          (cpp/SetShaderValue shader (int saturation-loc)
+                              (cpp/new cpp/float (cpp/float saturation)) cpp/SHADER_UNIFORM_FLOAT)
+          (cpp/SetShaderValue shader (int brightness-loc)
+                              (cpp/new cpp/float (cpp/float brightness)) cpp/SHADER_UNIFORM_FLOAT)
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)
 
           (cpp/BeginShaderMode shader)
-          (cond (= idx 0) (cpp/jank_draw_centered parrots 290 225)
-                (= idx 1) (cpp/jank_draw_centered cat 290 225)
-                (= idx 2) (cpp/jank_draw_centered mandrill 290 225)
-                :else (cpp/jank_draw_centered fudesumi 290 225))
+          (cond (= idx 0) (cpp/DrawTexture parrots
+                                            (- 290 (int (quot (int (+ 0.0 (.-width parrots))) 2)))
+                                            (- 225 (int (quot (int (+ 0.0 (.-height parrots))) 2)))
+                                            cpp/WHITE)
+                (= idx 1) (cpp/DrawTexture cat
+                                            (- 290 (int (quot (int (+ 0.0 (.-width cat))) 2)))
+                                            (- 225 (int (quot (int (+ 0.0 (.-height cat))) 2)))
+                                            cpp/WHITE)
+                (= idx 2) (cpp/DrawTexture mandrill
+                                            (- 290 (int (quot (int (+ 0.0 (.-width mandrill))) 2)))
+                                            (- 225 (int (quot (int (+ 0.0 (.-height mandrill))) 2)))
+                                            cpp/WHITE)
+                :else (cpp/DrawTexture fudesumi
+                                            (- 290 (int (quot (int (+ 0.0 (.-width fudesumi))) 2)))
+                                            (- 225 (int (quot (int (+ 0.0 (.-height fudesumi))) 2)))
+                                            cpp/WHITE))
           (cpp/EndShaderMode)
 
-          (cpp/DrawLine 580 0 580 HEIGHT (cpp/jank_rgb 218 218 218))
-          (cpp/DrawRectangle 580 0 (- WIDTH 580) HEIGHT (cpp/jank_rgb 232 232 232))
+          (cpp/DrawLine 580 0 580 HEIGHT (cpp/Color (cpp/cast cpp/uint8_t 218) (cpp/cast cpp/uint8_t 218)
+                                     (cpp/cast cpp/uint8_t 218) (cpp/cast cpp/uint8_t 255)))
+          (cpp/DrawRectangle 580 0 (- WIDTH 580) HEIGHT (cpp/Color (cpp/cast cpp/uint8_t 232) (cpp/cast cpp/uint8_t 232)
+                                     (cpp/cast cpp/uint8_t 232) (cpp/cast cpp/uint8_t 255)))
 
           (cpp/DrawText "Color Correction" 585 40 20 cpp/GRAY)
           (cpp/DrawText "Press [1] - [4] to change picture" 588 75 8 cpp/GRAY)
