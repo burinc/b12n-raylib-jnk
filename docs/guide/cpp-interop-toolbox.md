@@ -88,39 +88,46 @@ it isn't. Add `fflush(stdout);` at the end of any shim callback that
 prints. Trace: `custom_logging.jank` first smoke returned zero log
 lines; adding `fflush` surfaced all 42 reformatted lines.
 
-## Shared C helpers ship as wrapper headers (from the rlights arc, 2026-07-11)
+## Shared helpers are a jank namespace, not a C header
 
-When several examples need the same C helper (rlights.h's Light array,
-the per-type uniform setters), per-file `cpp/raw` duplication is not the
-only option: the `-sys` wrapper can SHIP a header and emit a second
-`jank-build::include-dir=` directive pointing at it. Proven with
-`jank-raylib-sys/include/jank_rlights.h` + `basic_lighting.jank`, which
-has no `cpp/raw` block at all — just
-`(:include "raylib.h" "jank_rlights.h")`.
+This page used to advise shipping shared C helpers as a header from the
+`-sys` wrapper, and this project did exactly that for rlights. **That was
+the wrong call**, and the reasoning behind it was wrong: it rested on the
+belief that a jank fn could neither take nor return a native value, so light
+state had to live in a static C array behind scalar wrappers.
 
-Design constraints for such headers:
+jank's opaque boxes carry native values across fn boundaries. Stripped down,
+the header was only doing two things a jank namespace can do:
 
-- **A `Light` has no conversion trait**, so a jank fn cannot take or
-  return one implicitly, and a "shared jank namespace" wrapping lights
-  would need every crossing boxed. For state the shaders read every
-  frame that is the wrong trade, so the reusable unit is a
-  C header whose state (the `Light` array) is module-local and whose
-  API is index-based with scalar parameters
-  (`jank_rl_create_light(type, px, py, pz, ..., shader) -> int`).
-- Mark **everything `static`** (functions AND state): each including
-  module gets a private copy, so two modules in one binary never
-  collide at link time.
-- Wrapper packaging: add the dir to `:verbatim-paths` in the wrapper's
-  project.clj, emit the directive from jank-build.bb off
-  `(:src-dir *input*)` (NOT the cmake out-dir), and `bb install`.
-- **Cache gotcha (cost one debug cycle):** consumer projects cache the
-  emitted directives in `target/_cache/...-out-.../jank-build-cache.txt`
-  and do NOT re-run jank-build.bb just because the artifact changed.
-  After editing a wrapper's jank-build.bb or headers: `bb install`,
-  then delete the consumer's `target/_cache/` (this forces a full
-  raylib rebuild, ~2-4 min). Symptom of staleness:
-  `fatal error: 'jank_rlights.h' file not found` even though the new
-  jar extracted.
+- **Taking the address of a value** for an API like `SetShaderValue`.
+  `cpp/new` produces that pointer directly:
+  `(cpp/new cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))`.
+- **Holding structs.** A `Light` is plain data plus five cached `int`
+  uniform locations. An ordinary jank map holds that; there was never a
+  reason for a C array.
+
+`rlights.jank` is the result — no header, no `cpp/raw`, nothing to install,
+and a project that wants lighting copies one file. See
+[`native-value-lifetimes.md`](native-value-lifetimes.md#getting-a-native-value-out-anyway).
+
+Three things about boxing that cost a compile each to learn:
+
+- A `Shader` passed as a jank fn argument arrives as an `object_ref` and the
+  native call rejects it. Box it: `(cpp/box (cpp/new cpp/Shader shader))`,
+  then `cpp/unbox` + `cpp/*` inside the helper.
+- **The boxing cannot be wrapped in a helper fn.** By the time a fn body
+  runs, its argument is already an `object_ref` and `cpp/new` has nothing to
+  copy from. The box must be made where the value is still native.
+- A `Camera3D` argument has no readable members for the same reason, so
+  destructure it at the call site and pass scalars.
+
+**When a C shim is still unavoidable:** assignment. jank has no assignment
+form at all — no `set!`, no `cpp/aset`, no member write — so
+`shader.locs[idx] = loc` needs three lines of C. `rlights.jank` keeps
+exactly one such shim, and it is the only `cpp/raw` in the lighting path.
+Note that a boxed copy shares the pointer members of the original (`Shader`
+is `{unsigned int id; int *locs;}`), so writing through the box is visible
+to the caller.
 
 ## Pointer-taking APIs work via `(cpp/& x)` (from the image arc, 2026-07-03)
 
