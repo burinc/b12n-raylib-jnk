@@ -12,22 +12,8 @@
     wrapping at the keyframe count.
   - The C's SetMaterialTexture(&model.materials[0], ...) is the
     familiar material-texture write shim."
+  (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
-
-(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}
-static ModelAnimation *jank_anims = NULL;
-static int jank_anims_count = 0;
-static int jank_load_anims(const char* path) {
-  jank_anims = LoadModelAnimations(path, &jank_anims_count);
-  return jank_anims_count;
-}
-static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
-static const char* jank_anim_name(int i) { return jank_anims[i].name; }
-static void jank_update_anim(Model m, int i, int frame) {
-  UpdateModelAnimation(m, jank_anims[i], frame);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -44,10 +30,14 @@ static void jank_update_anim(Model m, int i, int frame) {
                              cpp/CAMERA_PERSPECTIVE)
         model (cpp/LoadModel (str RES "models/iqm/guy.iqm"))
         texture (cpp/LoadTexture (str RES "models/iqm/guytex.png"))
-        _ (int (cpp/jank_load_anims (str RES "models/iqm/guyanim.iqm")))
-        keyframes (int (cpp/jank_anim_keyframes 0))]
+        ;; the array outlives this call by living in the outer let, not in a
+        ;; cpp/raw static; the count comes back through an int* out-param
+        anim-n (cpp/int 0)
+        anims (cpp/LoadModelAnimations (str RES "models/iqm/guyanim.iqm") (cpp/& anim-n))
+        keyframes (int (+ 0.0 (.-keyframeCount (cpp/aget anims (cpp/int 0)))))]
 
-    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (md/set-texture! (cpp/box (cpp/new cpp/Model model))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
 
     (cpp/SetTargetFPS 60)
 
@@ -57,7 +47,8 @@ static void jank_update_anim(Model m, int i, int frame) {
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
 
         (let [frame (inc frame)
-              _ (cpp/jank_update_anim model 0 (int frame))
+              _ (cpp/UpdateModelAnimation model (cpp/aget anims (cpp/int 0))
+                                            (cpp/float (+ 0.0 (int frame))))
               frame (if (>= frame keyframes) 0 frame)]
 
           (cpp/BeginDrawing)
@@ -74,7 +65,7 @@ static void jank_update_anim(Model m, int i, int frame) {
           (cpp/DrawGrid 10 (cpp/float 1.0))
           (cpp/EndMode3D)
 
-          (cpp/DrawText (str "Current animation: " (cpp/jank_anim_name 0)) 10 10 20 cpp/MAROON)
+          (cpp/DrawText (str "Current animation: " (str (.-name (cpp/aget anims (cpp/int 0))))) 10 10 20 cpp/MAROON)
           (cpp/DrawText "(c) Guy IQM 3D model by @culacant" (- WIDTH 200) (- HEIGHT 20) 10 cpp/GRAY)
 
           (cpp/EndDrawing)
