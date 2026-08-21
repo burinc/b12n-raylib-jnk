@@ -17,3 +17,6 @@ docs/demos/.screen-grab-pending.edn*
 # clj-kondo's analysis cache. The config beside it IS tracked - it is what
 # makes clj-kondo usable on .jank sources at all.
 .clj-kondo/.cache/
+
+# clojure-lsp's analysis cache, created by any clojure-lsp invocation.
+.lsp/
