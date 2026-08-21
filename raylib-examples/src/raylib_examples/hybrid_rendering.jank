@@ -16,54 +16,8 @@
     no raymath include), reading fields straight off (cpp/& camera).
   - rlEnableDepthTest is a direct rlgl call (depth testing must be
     on manually while mixing rendering methods inside the FBO)."
+  (:require [raylib-examples.rendertex :as rt])
   (:include "raylib.h" "rlgl.h" "math.h"))
-
-;; Depth-texture FBO (the depth-writing shim) + the camera uniform push.
-(cpp/raw "static RenderTexture2D jank_load_rt_depth(int width, int height) {
-  RenderTexture2D target = { 0 };
-  target.id = rlLoadFramebuffer();
-  if (target.id > 0) {
-    rlEnableFramebuffer(target.id);
-    target.texture.id = rlLoadTexture(0, width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
-    target.texture.width = width;
-    target.texture.height = height;
-    target.texture.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-    target.texture.mipmaps = 1;
-    target.depth.id = rlLoadTextureDepth(width, height, false);
-    target.depth.width = width;
-    target.depth.height = height;
-    target.depth.format = 19; /* DEPTH_COMPONENT_24BIT: not defined in raylib */
-    target.depth.mipmaps = 1;
-    rlFramebufferAttach(target.id, target.texture.id, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
-    rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
-    if (rlFramebufferComplete(target.id)) TraceLog(LOG_INFO, \"FBO: [ID %i] Framebuffer object created successfully\", target.id);
-    rlDisableFramebuffer();
-  } else TraceLog(LOG_WARNING, \"FBO: Framebuffer object can not be created\");
-  return target;
-}
-static void jank_unload_rt_depth(RenderTexture2D target) {
-  if (target.id > 0) {
-    rlUnloadTexture(target.texture.id);
-    rlUnloadTexture(target.depth.id);
-    rlUnloadFramebuffer(target.id);
-  }
-}
-static void jank_set_vec2(Shader s, int loc, double a, double b) {
-  float v[2] = { (float)a, (float)b };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
-}
-/* camPos straight off the camera; camDir = normalize(target - position) * camDist */
-static void jank_push_march_cam(Shader s, int posLoc, int dirLoc, Camera3D* c, double camDist) {
-  float pos[3] = { c->position.x, c->position.y, c->position.z };
-  float dx = c->target.x - c->position.x;
-  float dy = c->target.y - c->position.y;
-  float dz = c->target.z - c->position.z;
-  float len = sqrtf(dx*dx + dy*dy + dz*dz);
-  float k = (len > 0.0f) ? ((float)camDist/len) : 0.0f;
-  float dir[3] = { dx*k, dy*k, dz*k };
-  SetShaderValue(s, posLoc, pos, SHADER_UNIFORM_VEC3);
-  SetShaderValue(s, dirLoc, dir, SHADER_UNIFORM_VEC3);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -78,7 +32,8 @@ static void jank_push_march_cam(Shader s, int posLoc, int dirLoc, Camera3D* c, d
         cam-pos-loc (int (cpp/GetShaderLocation shdr-raymarch "camPos"))
         cam-dir-loc (int (cpp/GetShaderLocation shdr-raymarch "camDir"))
         screen-center-loc (int (cpp/GetShaderLocation shdr-raymarch "screenCenter"))
-        target (cpp/jank_load_rt_depth WIDTH HEIGHT)
+        target-box (rt/load-depth! WIDTH HEIGHT)
+        target (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) target-box))
         camera (cpp/Camera3D (cpp/Vector3 (cpp/float 0.5) (cpp/float 1.0) (cpp/float 1.5))
                              (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
                              (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
@@ -87,15 +42,31 @@ static void jank_push_march_cam(Shader s, int posLoc, int dirLoc, Camera3D* c, d
         ;; FOV pre-baked into the ray direction length: 1/tan(fovy/2)
         cam-dist (/ 1.0 (+ 0.0 (cpp/tan (* 45.0 0.5 (/ 3.141592653589793 180.0)))))]
 
-    (cpp/jank_set_vec2 shdr-raymarch screen-center-loc (/ WIDTH 2.0) (/ HEIGHT 2.0))
+    (cpp/SetShaderValue shdr-raymarch (int screen-center-loc)
+                        (cpp/new cpp/Vector2 (cpp/float (/ WIDTH 2.0)) (cpp/float (/ HEIGHT 2.0)))
+                        cpp/SHADER_UNIFORM_VEC2)
 
     (cpp/SetTargetFPS 60)
 
     (loop []
       (when (cpp/! (cpp/WindowShouldClose))
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
-        (cpp/jank_push_march_cam shdr-raymarch cam-pos-loc cam-dir-loc
-                                 (cpp/& camera) cam-dist)
+        ;; camera position, and a direction scaled to cam-dist, as VEC3s
+        (let [px (+ 0.0 (.-x (.-position camera)))
+              py (+ 0.0 (.-y (.-position camera)))
+              pz (+ 0.0 (.-z (.-position camera)))
+              dx (- (+ 0.0 (.-x (.-target camera))) px)
+              dy (- (+ 0.0 (.-y (.-target camera))) py)
+              dz (- (+ 0.0 (.-z (.-target camera))) pz)
+              len (+ 0.0 (cpp/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))
+              k (if (> len 0.0) (/ cam-dist len) 0.0)]
+          (cpp/SetShaderValue shdr-raymarch (int cam-pos-loc)
+                              (cpp/new cpp/Vector3 (cpp/float px) (cpp/float py) (cpp/float pz))
+                              cpp/SHADER_UNIFORM_VEC3)
+          (cpp/SetShaderValue shdr-raymarch (int cam-dir-loc)
+                              (cpp/new cpp/Vector3 (cpp/float (* dx k)) (cpp/float (* dy k))
+                                                   (cpp/float (* dz k)))
+                              cpp/SHADER_UNIFORM_VEC3))
 
         (cpp/BeginTextureMode target)
         (cpp/ClearBackground cpp/WHITE)
@@ -141,7 +112,7 @@ static void jank_push_march_cam(Shader s, int posLoc, int dirLoc, Camera3D* c, d
 
         (recur)))
 
-    (cpp/jank_unload_rt_depth target)
+    (rt/unload-depth! target-box)
     (cpp/UnloadShader shdr-raymarch)
     (cpp/UnloadShader shdr-raster))
 

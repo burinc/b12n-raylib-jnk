@@ -23,54 +23,11 @@
   - Pass-boundary matrices (rlGetMatrixModelview/Projection,
     MatrixMultiply) are frame-local native let-locals handed to
     SetShaderValueMatrix by value."
+  (:require [raylib-examples.models :as md]
+            [raylib-examples.rendertex :as rt])
   (:require [raylib-examples.rlights :as rl]
             [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h" "raymath.h" "math.h"))
-
-;; Depth-only shadowmap FBO + scene + model/animation helpers.
-(cpp/raw "static RenderTexture2D jank_load_shadowmap_rt(int width, int height) {
-  RenderTexture2D target = { 0 };
-  target.id = rlLoadFramebuffer();
-  target.texture.width = width;
-  target.texture.height = height;
-  if (target.id > 0) {
-    rlEnableFramebuffer(target.id);
-    target.depth.id = rlLoadTextureDepth(width, height, false);
-    target.depth.width = width;
-    target.depth.height = height;
-    target.depth.format = 19; /* DEPTH_COMPONENT_24BIT */
-    target.depth.mipmaps = 1;
-    rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
-    if (rlFramebufferComplete(target.id)) TraceLog(LOG_INFO, \"FBO: [ID %i] Framebuffer object created successfully\", target.id);
-    rlDisableFramebuffer();
-  } else TraceLog(LOG_WARNING, \"FBO: Framebuffer object can not be created\");
-  return target;
-}
-static void jank_unload_shadowmap_rt(RenderTexture2D target) {
-  if (target.id > 0) rlUnloadFramebuffer(target.id);
-}
-static void jank_model_set_shader_all(Model* m, Shader s) {
-  for (int i = 0; i < m->materialCount; i++) m->materials[i].shader = s;
-}
-static ModelAnimation *jank_anims = NULL;
-static int jank_anims_count = 0;
-static int jank_load_anims(const char* path) {
-  jank_anims = LoadModelAnimations(path, &jank_anims_count);
-  return jank_anims_count;
-}
-static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
-static void jank_update_anim(Model m, int i, int frame) {
-  UpdateModelAnimation(m, jank_anims[i], frame);
-}
-/* the scene, drawn identically into both passes */
-static void jank_draw_scene(Model cube, Model robot) {
-  DrawModelEx(cube, Vector3Zero(), (Vector3){ 0.0f, 1.0f, 0.0f }, 0.0f,
-              (Vector3){ 10.0f, 1.0f, 10.0f }, BLUE);
-  DrawModelEx(cube, (Vector3){ 1.5f, 1.0f, -1.5f }, (Vector3){ 0.0f, 1.0f, 0.0f }, 0.0f,
-              Vector3One(), WHITE);
-  DrawModelEx(robot, (Vector3){ 0.0f, 0.5f, 0.0f }, (Vector3){ 0.0f, 1.0f, 0.0f }, 0.0f,
-              (Vector3){ 1.0f, 1.0f, 1.0f }, RED);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -83,8 +40,8 @@ static void jank_draw_scene(Model cube, Model robot) {
   (cpp/InitWindow WIDTH HEIGHT "raylib [shaders] example - shadowmap rendering (jank)")
 
   (let [camera (cpp/Camera3D (cpp/Vector3 (cpp/float 10.0) (cpp/float 10.0) (cpp/float 10.0))
-                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
-                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
                              (cpp/float 45.0)
                              cpp/CAMERA_PERSPECTIVE)
         shadow-shader (cpp/LoadShader (str RES "shaders/glsl330/shadowmap.vs")
@@ -100,9 +57,13 @@ static void jank_draw_scene(Model cube, Model robot) {
         res-loc (int (cpp/GetShaderLocation shadow-shader "shadowMapResolution"))
         cube (cpp/LoadModelFromMesh (cpp/GenMeshCube (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0)))
         robot (cpp/LoadModel (str RES "models/robot.glb"))
-        anim-count (int (cpp/jank_load_anims (str RES "models/robot.glb")))
-        keyframes (int (cpp/jank_anim_keyframes 0))
-        shadow-map (cpp/jank_load_shadowmap_rt SHADOWMAP-RES SHADOWMAP-RES)
+        ;; count through an int* out-param, array in the outer let
+        anim-n (cpp/int 0)
+        anims (cpp/LoadModelAnimations (str RES "models/robot.glb") (cpp/& anim-n))
+        anim-count (int (+ 0.0 anim-n))
+        keyframes (int (+ 0.0 (.-keyframeCount (cpp/aget anims (cpp/int 0)))))
+        shadow-box (rt/load-shadowmap! SHADOWMAP-RES SHADOWMAP-RES)
+        shadow-map (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) shadow-box))
         ;; initial light dir = normalize(0.35, -1, -0.35)
         len0 (+ 0.0 (cpp/sqrt (+ (* 0.35 0.35) 1.0 (* 0.35 0.35))))
         lx0 (/ 0.35 len0)
@@ -115,8 +76,10 @@ static void jank_draw_scene(Model cube, Model robot) {
     (sh/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
     (sh/set-int! sh-box res-loc SHADOWMAP-RES)
 
-    (cpp/jank_model_set_shader_all (cpp/& cube) shadow-shader)
-    (cpp/jank_model_set_shader_all (cpp/& robot) shadow-shader)
+    (md/set-shader-all! (cpp/box (cpp/new cpp/Model cube)) (int (.-materialCount cube))
+                        (cpp/box (cpp/new cpp/Shader shadow-shader)))
+    (md/set-shader-all! (cpp/box (cpp/new cpp/Model robot)) (int (.-materialCount robot))
+                        (cpp/box (cpp/new cpp/Shader shadow-shader)))
 
     (cpp/SetTargetFPS 60)
 
@@ -133,7 +96,8 @@ static void jank_draw_scene(Model cube, Model robot) {
           (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
 
           (let [fc (int (mod (inc fc) keyframes))
-                _ (cpp/jank_update_anim robot 0 fc)
+                _ (cpp/UpdateModelAnimation robot (cpp/aget anims (cpp/int 0))
+                                            (cpp/float (+ 0.0 fc)))
                 step (* 0.05 60.0 dt)
                 ;; box the native key states before they feed and-logic
                 left? (if (cpp/IsKeyDown cpp/KEY_LEFT) true false)
@@ -154,8 +118,8 @@ static void jank_draw_scene(Model cube, Model robot) {
                 light-camera (cpp/Camera3D (cpp/Vector3 (cpp/float (* lx -15.0))
                                                         (cpp/float (* ly -15.0))
                                                         (cpp/float (* lz -15.0)))
-                                           (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
-                                           (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
                                            (cpp/float 20.0)
                                            cpp/CAMERA_ORTHOGRAPHIC)]
 
@@ -167,7 +131,22 @@ static void jank_draw_scene(Model cube, Model robot) {
             (cpp/BeginMode3D light-camera)
             (let [light-view (cpp/rlGetMatrixModelview)
                   light-proj (cpp/rlGetMatrixProjection)]
-              (cpp/jank_draw_scene cube robot)
+              ;; the scene, drawn identically into both passes
+              (cpp/DrawModelEx cube (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                               (cpp/float 0.0)
+                               (cpp/Vector3 (cpp/float 10.0) (cpp/float 1.0) (cpp/float 10.0))
+                               cpp/BLUE)
+              (cpp/DrawModelEx cube (cpp/Vector3 (cpp/float 1.5) (cpp/float 1.0) (cpp/float -1.5))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                               (cpp/float 0.0)
+                               (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                               cpp/WHITE)
+              (cpp/DrawModelEx robot (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                               (cpp/float 0.0)
+                               (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                               cpp/RED)
               (cpp/EndMode3D)
               (cpp/EndTextureMode)
 
@@ -184,7 +163,22 @@ static void jank_draw_scene(Model cube, Model robot) {
               (sh/set-int! sh-box shadow-map-loc 10)
 
               (cpp/BeginMode3D camera)
-              (cpp/jank_draw_scene cube robot)
+              ;; the scene, drawn identically into both passes
+              (cpp/DrawModelEx cube (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                               (cpp/float 0.0)
+                               (cpp/Vector3 (cpp/float 10.0) (cpp/float 1.0) (cpp/float 10.0))
+                               cpp/BLUE)
+              (cpp/DrawModelEx cube (cpp/Vector3 (cpp/float 1.5) (cpp/float 1.0) (cpp/float -1.5))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                               (cpp/float 0.0)
+                               (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                               cpp/WHITE)
+              (cpp/DrawModelEx robot (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.5) (cpp/float 0.0))
+                               (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                               (cpp/float 0.0)
+                               (cpp/Vector3 (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
+                               cpp/RED)
               (cpp/EndMode3D)
 
               (cpp/DrawText "Use the arrow keys to rotate the light!" 10 10 30 cpp/RED)
@@ -201,6 +195,6 @@ static void jank_draw_scene(Model cube, Model robot) {
     (cpp/UnloadShader shadow-shader)
     (cpp/UnloadModel cube)
     (cpp/UnloadModel robot)
-    (cpp/jank_unload_shadowmap_rt shadow-map))
+    (rt/unload-shadowmap! shadow-box))
 
   (cpp/CloseWindow))

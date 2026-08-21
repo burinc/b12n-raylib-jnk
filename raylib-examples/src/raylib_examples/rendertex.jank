@@ -1,0 +1,99 @@
+(ns raylib-examples.rendertex
+  "Render targets with a SAMPLEABLE depth attachment, in pure jank.
+
+  raylib's own LoadRenderTexture attaches depth as a renderbuffer, which
+  the GPU can write but a shader cannot read. Examples that sample depth
+  have to build the framebuffer by hand with rlgl, and four of them
+  carried the same ~25-line cpp/raw block to do it.
+
+  None of it needs C. cpp/new with no arguments value-initialises, which
+  is the C's `= { 0 }`, and cpp/= writes each field afterwards.
+
+  Both loaders return the target BOXED. A RenderTexture2D has no
+  conversion trait, so it cannot be returned from a jank fn bare; the box
+  is an ordinary jank object and travels freely. Its fields are plain GPU
+  ids, so a boxed copy still addresses the same framebuffer.
+
+  See docs/guide/native-value-lifetimes.md."
+  (:include "raylib.h" "rlgl.h"))
+
+;; raylib does not expose a constant for this one.
+(def ^:private DEPTH-COMPONENT-24BIT 19)
+
+(defn load-depth!
+  "A render target with both a colour texture and a sampleable depth
+  texture. Boxed."
+  [width height]
+  (let [t (cpp/new cpp/RenderTexture2D)]
+    (cpp/= (.-id (cpp/* t)) (cpp/rlLoadFramebuffer))
+    (if (> (int (+ 0.0 (.-id (cpp/* t)))) 0)
+      (do
+        (cpp/rlEnableFramebuffer (.-id (cpp/* t)))
+        (cpp/= (.-id (.-texture (cpp/* t)))
+               (cpp/rlLoadTexture cpp/nullptr (cpp/int width) (cpp/int height)
+                                  (cpp/int cpp/PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) (cpp/int 1)))
+        (cpp/= (.-width (.-texture (cpp/* t))) (cpp/int width))
+        (cpp/= (.-height (.-texture (cpp/* t))) (cpp/int height))
+        (cpp/= (.-format (.-texture (cpp/* t)))
+               (cpp/int cpp/PIXELFORMAT_UNCOMPRESSED_R8G8B8A8))
+        (cpp/= (.-mipmaps (.-texture (cpp/* t))) (cpp/int 1))
+        (cpp/= (.-id (.-depth (cpp/* t)))
+               (cpp/rlLoadTextureDepth (cpp/int width) (cpp/int height) false))
+        (cpp/= (.-width (.-depth (cpp/* t))) (cpp/int width))
+        (cpp/= (.-height (.-depth (cpp/* t))) (cpp/int height))
+        (cpp/= (.-format (.-depth (cpp/* t))) (cpp/int DEPTH-COMPONENT-24BIT))
+        (cpp/= (.-mipmaps (.-depth (cpp/* t))) (cpp/int 1))
+        (cpp/rlFramebufferAttach (.-id (cpp/* t)) (.-id (.-texture (cpp/* t)))
+                                 (cpp/int cpp/RL_ATTACHMENT_COLOR_CHANNEL0)
+                                 (cpp/int cpp/RL_ATTACHMENT_TEXTURE2D) (cpp/int 0))
+        (cpp/rlFramebufferAttach (.-id (cpp/* t)) (.-id (.-depth (cpp/* t)))
+                                 (cpp/int cpp/RL_ATTACHMENT_DEPTH)
+                                 (cpp/int cpp/RL_ATTACHMENT_TEXTURE2D) (cpp/int 0))
+        (when (cpp/rlFramebufferComplete (.-id (cpp/* t)))
+          (println "FBO:" (int (+ 0.0 (.-id (cpp/* t)))) "framebuffer created"))
+        (cpp/rlDisableFramebuffer))
+      (println "FBO: framebuffer object can not be created"))
+    (cpp/box t)))
+
+(defn load-shadowmap!
+  "A depth-only render target, for shadow mapping. Boxed."
+  [width height]
+  (let [t (cpp/new cpp/RenderTexture2D)]
+    (cpp/= (.-id (cpp/* t)) (cpp/rlLoadFramebuffer))
+    (cpp/= (.-width (.-texture (cpp/* t))) (cpp/int width))
+    (cpp/= (.-height (.-texture (cpp/* t))) (cpp/int height))
+    (if (> (int (+ 0.0 (.-id (cpp/* t)))) 0)
+      (do
+        (cpp/rlEnableFramebuffer (.-id (cpp/* t)))
+        (cpp/= (.-id (.-depth (cpp/* t)))
+               (cpp/rlLoadTextureDepth (cpp/int width) (cpp/int height) false))
+        (cpp/= (.-width (.-depth (cpp/* t))) (cpp/int width))
+        (cpp/= (.-height (.-depth (cpp/* t))) (cpp/int height))
+        (cpp/= (.-format (.-depth (cpp/* t))) (cpp/int DEPTH-COMPONENT-24BIT))
+        (cpp/= (.-mipmaps (.-depth (cpp/* t))) (cpp/int 1))
+        (cpp/rlFramebufferAttach (.-id (cpp/* t)) (.-id (.-depth (cpp/* t)))
+                                 (cpp/int cpp/RL_ATTACHMENT_DEPTH)
+                                 (cpp/int cpp/RL_ATTACHMENT_TEXTURE2D) (cpp/int 0))
+        (when (cpp/rlFramebufferComplete (.-id (cpp/* t)))
+          (println "FBO:" (int (+ 0.0 (.-id (cpp/* t)))) "framebuffer created"))
+        (cpp/rlDisableFramebuffer))
+      (println "FBO: framebuffer object can not be created"))
+    (cpp/box t)))
+
+(defn unload-depth!
+  "Release a target from load-depth! (colour texture, depth texture, FBO)."
+  [t-box]
+  (let [t (cpp/unbox (:* cpp/RenderTexture2D) t-box)]
+    (when (> (int (+ 0.0 (.-id (cpp/* t)))) 0)
+      (cpp/rlUnloadTexture (.-id (.-texture (cpp/* t))))
+      (cpp/rlUnloadTexture (.-id (.-depth (cpp/* t))))
+      (cpp/rlUnloadFramebuffer (.-id (cpp/* t)))))
+  nil)
+
+(defn unload-shadowmap!
+  "Release a target from load-shadowmap! (the FBO only)."
+  [t-box]
+  (let [t (cpp/unbox (:* cpp/RenderTexture2D) t-box)]
+    (when (> (int (+ 0.0 (.-id (cpp/* t)))) 0)
+      (cpp/rlUnloadFramebuffer (.-id (cpp/* t)))))
+  nil)

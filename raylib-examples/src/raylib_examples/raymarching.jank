@@ -19,23 +19,6 @@
     IsWindowResized re-send path is dropped."
   (:include "raylib.h"))
 
-;; Push the two view VEC3 uniforms straight from the camera struct;
-;; jank can't read nested native fields as ergonomically as C can.
-(cpp/raw "static void jank_set_view(Shader s, int eyeLoc, int centerLoc, Camera3D* c) {
-  float eye[3]    = { c->position.x, c->position.y, c->position.z };
-  float center[3] = { c->target.x,   c->target.y,   c->target.z };
-  SetShaderValue(s, eyeLoc,    eye,    SHADER_UNIFORM_VEC3);
-  SetShaderValue(s, centerLoc, center, SHADER_UNIFORM_VEC3);
-}
-static void jank_set_vec2(Shader s, int loc, double a, double b) {
-  float v[2] = { (float)a, (float)b };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
-}
-static void jank_set_float(Shader s, int loc, double a) {
-  float v = (float)a;
-  SetShaderValue(s, loc, &v, SHADER_UNIFORM_FLOAT);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
@@ -54,7 +37,9 @@ static void jank_set_float(Shader s, int loc, double a) {
         center-loc (int (cpp/GetShaderLocation shader "viewCenter"))
         runtime-loc (int (cpp/GetShaderLocation shader "runTime"))
         resolution-loc (int (cpp/GetShaderLocation shader "resolution"))]
-    (cpp/jank_set_vec2 shader resolution-loc (+ 0.0 WIDTH) (+ 0.0 HEIGHT))
+    (cpp/SetShaderValue shader (int resolution-loc)
+                        (cpp/new cpp/Vector2 (cpp/float (+ 0.0 WIDTH)) (cpp/float (+ 0.0 HEIGHT)))
+                        cpp/SHADER_UNIFORM_VEC2)
     (cpp/DisableCursor)
     (cpp/SetTargetFPS 60)
 
@@ -63,8 +48,18 @@ static void jank_set_float(Shader s, int loc, double a) {
       (if (cpp/! (cpp/WindowShouldClose))
         (let [_ (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FIRST_PERSON)
               run-time (+ run-time (+ 0.0 (cpp/GetFrameTime)))]
-          (cpp/jank_set_view shader eye-loc center-loc (cpp/& camera))
-          (cpp/jank_set_float shader runtime-loc run-time)
+          (cpp/SetShaderValue shader (int eye-loc)
+                              (cpp/new cpp/Vector3 (.-x (.-position camera))
+                                                   (.-y (.-position camera))
+                                                   (.-z (.-position camera)))
+                              cpp/SHADER_UNIFORM_VEC3)
+          (cpp/SetShaderValue shader (int center-loc)
+                              (cpp/new cpp/Vector3 (.-x (.-target camera))
+                                                   (.-y (.-target camera))
+                                                   (.-z (.-target camera)))
+                              cpp/SHADER_UNIFORM_VEC3)
+          (cpp/SetShaderValue shader (int runtime-loc)
+                              (cpp/new cpp/float (cpp/float run-time)) cpp/SHADER_UNIFORM_FLOAT)
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)

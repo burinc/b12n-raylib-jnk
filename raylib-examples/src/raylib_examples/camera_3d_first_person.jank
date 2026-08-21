@@ -24,27 +24,6 @@
   (:require [clojure.string :as str])
   (:include "raylib.h" "rcamera.h"))
 
-;; Struct field writes need C: reset roll, and the C's P-key isometric /
-;; perspective camera reconfigurations (CameraYaw/CameraPitch from
-;; rcamera.h, compiled into libraylib).
-(cpp/raw "static void jank_cam_reset_up(Camera3D* c) { c->up = (Vector3){ 0.0f, 1.0f, 0.0f }; }
-static void jank_cam_iso(Camera3D* c) {
-  c->position = (Vector3){ 0.0f, 2.0f, -100.0f };
-  c->target = (Vector3){ 0.0f, 2.0f, 0.0f };
-  c->up = (Vector3){ 0.0f, 1.0f, 0.0f };
-  c->projection = CAMERA_ORTHOGRAPHIC;
-  c->fovy = 20.0f;
-  CameraYaw(c, -135*DEG2RAD, true);
-  CameraPitch(c, -45*DEG2RAD, true, true, false);
-}
-static void jank_cam_persp(Camera3D* c) {
-  c->position = (Vector3){ 0.0f, 2.0f, 10.0f };
-  c->target = (Vector3){ 0.0f, 2.0f, 0.0f };
-  c->up = (Vector3){ 0.0f, 1.0f, 0.0f };
-  c->projection = CAMERA_PERSPECTIVE;
-  c->fovy = 60.0f;
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def COLUMNS 20)
@@ -104,12 +83,28 @@ static void jank_cam_persp(Camera3D* c) {
                          (cpp/IsKeyPressed cpp/KEY_FOUR) MODE-ORBITAL
                          :else nil)
               mode (or pick mode)
-              _ (when pick (cpp/jank_cam_reset_up (cpp/& camera)))
+              _ (when pick
+                  (cpp/= (.-up camera) (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0)))
+                  nil)
               persp? (= (int (+ 0.0 (.-projection camera))) PROJ-PERSPECTIVE)
               mode (if (cpp/IsKeyPressed cpp/KEY_P)
                      (do (if persp?
-                           (cpp/jank_cam_iso (cpp/& camera))
-                           (cpp/jank_cam_persp (cpp/& camera)))
+                           ;; isometric: orthographic, pulled back and rotated
+                           (do (cpp/= (.-position camera) (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float -100.0)))
+                               (cpp/= (.-target camera) (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float 0.0)))
+                               (cpp/= (.-up camera) (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0)))
+                               (cpp/= (.-projection camera) (cpp/int cpp/CAMERA_ORTHOGRAPHIC))
+                               (cpp/= (.-fovy camera) (cpp/float 20.0))
+                               (cpp/CameraYaw (cpp/& camera) (cpp/float (* -135.0 cpp/DEG2RAD)) true)
+                               (cpp/CameraPitch (cpp/& camera) (cpp/float (* -45.0 cpp/DEG2RAD))
+                                                true true false)
+                               nil)
+                           (do (cpp/= (.-position camera) (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float 10.0)))
+                               (cpp/= (.-target camera) (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float 0.0)))
+                               (cpp/= (.-up camera) (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0)))
+                               (cpp/= (.-projection camera) (cpp/int cpp/CAMERA_PERSPECTIVE))
+                               (cpp/= (.-fovy camera) (cpp/float 60.0))
+                               nil))
                          MODE-THIRD)
                      mode)]
 

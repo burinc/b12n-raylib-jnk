@@ -17,13 +17,6 @@
     packed RGBA int built from the palette index."
   (:include "raylib.h"))
 
-;; ivec3-array uniform staging; only -main touches these (per-fn static rule).
-(cpp/raw "static int jank_ui_buf[24] = { 0 };
-static void jank_ui_set(int i, int v) { jank_ui_buf[i] = v; }
-static void jank_set_uniform_v(Shader s, int loc, int type, int count) {
-  SetShaderValueV(s, loc, jank_ui_buf, type, count);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
@@ -40,6 +33,22 @@ static void jank_set_uniform_v(Shader s, int loc, int type, int count) {
    [21 25 26, 138 76 88, 217 98 117, 230 184 193, 69 107 115, 75 151 166, 165 189 194, 255 245 247]])
 
 (def palette-names ["3-BIT RGB" "AMMO-8 (GameBoy-like)" "RKBV (2-strip film)"])
+
+(defn- int-array!
+  "A native int[n] filled from `values`, returned BOXED.
+
+  jank's own (cpp/new (:array cpp/int n)) does not compile, so the array
+  comes from MemAlloc reinterpreted with cpp/unsafe-cast; cpp/aget + cpp/=
+  fill it. Boxed on the way out because an int* is a native value and
+  cannot be returned bare."
+  [values]
+  (let [n (count values)
+        p (cpp/unsafe-cast (:* cpp/int) (cpp/MemAlloc (cpp/cast cpp/uint (* n 4))))]
+    (loop [i 0]
+      (when (< i n)
+        (cpp/= (cpp/aget p (cpp/int i)) (cpp/int (int (nth values i))))
+        (recur (inc i))))
+    (cpp/box p)))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -60,13 +69,14 @@ static void jank_set_uniform_v(Shader s, int loc, int type, int count) {
               current (int (mod current (count palettes)))
               pal (nth palettes current)]
 
-          ;; stage the 24 ints, send as 8 ivec3 (re-sent per frame, like the C)
-          (loop [i 0]
-            (when (< i 24)
-              (cpp/jank_ui_set (int i) (int (nth pal i)))
-              (recur (inc i))))
-          (cpp/jank_set_uniform_v shader palette-loc
-                                  cpp/SHADER_UNIFORM_IVEC3 COLORS-PER-PALETTE)
+          ;; the 24 ints as one native array, sent as 8 ivec3 (re-sent per
+          ;; frame, like the C)
+          (let [pal-box (int-array! pal)]
+            (cpp/SetShaderValueV shader (int palette-loc)
+                                 (cpp/unbox (:* cpp/int) pal-box)
+                                 cpp/SHADER_UNIFORM_IVEC3 (cpp/int COLORS-PER-PALETTE))
+            (cpp/MemFree (cpp/unsafe-cast (:* cpp/void)
+                                          (cpp/unbox (:* cpp/int) pal-box))))
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)

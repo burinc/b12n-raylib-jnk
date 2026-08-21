@@ -13,47 +13,53 @@
   mutated through (cpp/& img). No -sys wrapper change."
   (:include "raylib.h"))
 
-(cpp/raw "
-static float jank_gaussian_kernel[] = { 1.0f, 2.0f, 1.0f,
-                                        2.0f, 4.0f, 2.0f,
-                                        1.0f, 2.0f, 1.0f };
-static float jank_sobel_kernel[]    = { 1.0f, 0.0f, -1.0f,
-                                        2.0f, 0.0f, -2.0f,
-                                        1.0f, 0.0f, -1.0f };
-static float jank_sharpen_kernel[]  = { 0.0f, -1.0f,  0.0f,
-                                       -1.0f,  5.0f, -1.0f,
-                                        0.0f, -1.0f,  0.0f };
-static void jank_normalize_kernel(float *kernel, int size) {
-  float sum = 0.0f;
-  for (int i = 0; i < size; i++) sum += kernel[i];
-  if (sum != 0.0f) for (int i = 0; i < size; i++) kernel[i] /= sum;
-}
-")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
+
+(defn- make-kernel
+  "A native float[n] holding `values`, normalised so the weights sum to 1
+  (a kernel summing to 0, like sobel, is left as-is).
+
+  jank's own array allocation is unusable here: (cpp/new (:array cpp/float 9))
+  emits C++ that will not compile, and the multi-arg form is rejected by the
+  analyser. MemAlloc plus cpp/unsafe-cast reaches the same float*, and
+  cpp/aget + cpp/= fill it, so the gap costs ergonomics rather than
+  capability. The array outlives this fn because MemAlloc is heap.
+
+  Returned BOXED: a float* is a native value, so returning it bare fails
+  with \"returning a native object of type 'float *'\"."
+  [values]
+  (let [n (count values)
+        p (cpp/unsafe-cast (:* cpp/float)
+                           (cpp/MemAlloc (cpp/cast cpp/uint (* n 4))))
+        sum (reduce + 0.0 values)
+        scale (if (zero? sum) 1.0 (/ 1.0 sum))]
+    (loop [i 0]
+      (when (< i n)
+        (cpp/= (cpp/aget p (cpp/int i)) (cpp/float (* (nth values i) scale)))
+        (recur (inc i))))
+    (cpp/box p)))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - image kernel (jank)")
   (cpp/SetTargetFPS 60)
 
-  ;; normalize each kernel in place once (sobel sums to 0 -> left as-is)
-  (cpp/jank_normalize_kernel cpp/jank_gaussian_kernel 9)
-  (cpp/jank_normalize_kernel cpp/jank_sharpen_kernel 9)
-  (cpp/jank_normalize_kernel cpp/jank_sobel_kernel 9)
-
-  (let [image (cpp/LoadImage (str RES "cat.png"))
+  (let [;; the three 3x3 kernels, normalised on the way in
+        gaussian (make-kernel [1.0 2.0 1.0  2.0 4.0 2.0  1.0 2.0 1.0])
+        sharpen  (make-kernel [0.0 -1.0 0.0  -1.0 5.0 -1.0  0.0 -1.0 0.0])
+        sobel    (make-kernel [1.0 0.0 -1.0  2.0 0.0 -2.0  1.0 0.0 -1.0])
+        image (cpp/LoadImage (str RES "cat.png"))
         cat-sharpen (cpp/ImageCopy image)
         cat-sobel (cpp/ImageCopy image)
         cat-gauss (cpp/ImageCopy image)]
-    (cpp/ImageKernelConvolution (cpp/& cat-sharpen) cpp/jank_sharpen_kernel 9)
-    (cpp/ImageKernelConvolution (cpp/& cat-sobel) cpp/jank_sobel_kernel 9)
+    (cpp/ImageKernelConvolution (cpp/& cat-sharpen) (cpp/unbox (:* cpp/float) sharpen) 9)
+    (cpp/ImageKernelConvolution (cpp/& cat-sobel) (cpp/unbox (:* cpp/float) sobel) 9)
     ;; a 6x-iterated Gaussian for a stronger blur
     (loop [i 0]
       (when (< i 6)
-        (cpp/ImageKernelConvolution (cpp/& cat-gauss) cpp/jank_gaussian_kernel 9)
+        (cpp/ImageKernelConvolution (cpp/& cat-gauss) (cpp/unbox (:* cpp/float) gaussian) 9)
         (recur (inc i))))
 
     ;; crop all four to a 200x450 column
