@@ -21,33 +21,41 @@
             [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h"))
 
-;; The instance transforms + Material field writes.
-(cpp/raw "#define JANK_MAX_INSTANCES 10000
-static Matrix jank_transforms[JANK_MAX_INSTANCES];
-static void jank_build_transforms(void) {
-  for (int i = 0; i < JANK_MAX_INSTANCES; i++) {
-    Matrix translation = MatrixTranslate((float)GetRandomValue(-50, 50),
-                                         (float)GetRandomValue(-50, 50),
-                                         (float)GetRandomValue(-50, 50));
-    Vector3 axis = Vector3Normalize((Vector3){ (float)GetRandomValue(0, 360),
-                                               (float)GetRandomValue(0, 360),
-                                               (float)GetRandomValue(0, 360) });
-    float angle = (float)GetRandomValue(0, 180)*DEG2RAD;
-    jank_transforms[i] = MatrixMultiply(MatrixRotate(axis, angle), translation);
-  }
-}
-static void jank_draw_instanced(Mesh mesh, Material mat) {
-  DrawMeshInstanced(mesh, mat, jank_transforms, JANK_MAX_INSTANCES);
-}
-static void jank_mat_set_shader(Material* m, Shader s) { m->shader = s; }
-static void jank_mat_set_color(Material* m, int map, int r, int g, int b, int a) {
-  m->maps[map].color = (Color){ (unsigned char)r, (unsigned char)g,
-                                (unsigned char)b, (unsigned char)a };
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(def MAX-INSTANCES 10000)
+
+(defn- build-transforms!
+  "MAX-INSTANCES random rotate+translate matrices in one native array,
+  returned BOXED.
+
+  A Matrix is 64 bytes, so this is 640 KB from MemAlloc reinterpreted as
+  Matrix* with cpp/unsafe-cast; cpp/aget + cpp/= write each element.
+  jank's own (cpp/new (:array cpp/Matrix n)) does not compile.
+
+  One-shot at startup, so the loop cost does not matter: a 10k jank loop
+  is well under a frame."
+  []
+  (let [p (cpp/unsafe-cast (:* cpp/Matrix)
+                           (cpp/MemAlloc (cpp/cast cpp/uint (* MAX-INSTANCES 64))))]
+    (loop [i 0]
+      (when (< i MAX-INSTANCES)
+        (cpp/= (cpp/aget p (cpp/int i))
+               (cpp/MatrixMultiply
+                (cpp/MatrixRotate
+                 (cpp/Vector3Normalize
+                  (cpp/Vector3 (cpp/float (+ 0.0 (cpp/GetRandomValue (cpp/int 0) (cpp/int 360))))
+                               (cpp/float (+ 0.0 (cpp/GetRandomValue (cpp/int 0) (cpp/int 360))))
+                               (cpp/float (+ 0.0 (cpp/GetRandomValue (cpp/int 0) (cpp/int 360))))))
+                 (cpp/float (* (+ 0.0 (cpp/GetRandomValue (cpp/int 0) (cpp/int 180))) cpp/DEG2RAD)))
+                (cpp/MatrixTranslate
+                 (cpp/float (+ 0.0 (cpp/GetRandomValue (cpp/int -50) (cpp/int 50))))
+                 (cpp/float (+ 0.0 (cpp/GetRandomValue (cpp/int -50) (cpp/int 50))))
+                 (cpp/float (+ 0.0 (cpp/GetRandomValue (cpp/int -50) (cpp/int 50)))))))
+        (recur (inc i))))
+    (cpp/box p)))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -66,9 +74,8 @@ static void jank_mat_set_color(Material* m, int map, int r, int g, int b, int a)
         view-loc (int (cpp/GetShaderLocation shader "viewPos"))
         ambient-loc (int (cpp/GetShaderLocation shader "ambient"))
         mat-instances (cpp/LoadMaterialDefault)
-        mat-default (cpp/LoadMaterialDefault)]
-
-    (cpp/jank_build_transforms)
+        mat-default (cpp/LoadMaterialDefault)
+        transforms (build-transforms!)]
 
     (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MATRIX_MVP
                                 (int (cpp/GetShaderLocation shader "mvp")))
@@ -83,11 +90,13 @@ static void jank_mat_set_color(Material* m, int map, int r, int g, int b, int a)
                                       :shader sh-box})
 
     ;; instanced cubes: RED + the instancing shader; plain cubes: BLUE default
-    (cpp/jank_mat_set_shader (cpp/& mat-instances) shader)
-    (cpp/jank_mat_set_color (cpp/& mat-instances) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
-                            230 41 55 255)
-    (cpp/jank_mat_set_color (cpp/& mat-default) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
-                            0 121 241 255)
+    (cpp/= (.-shader mat-instances) shader)
+    (cpp/= (.-color (cpp/aget (.-maps mat-instances) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)))
+           (cpp/Color (cpp/cast cpp/uint8_t 230) (cpp/cast cpp/uint8_t 41)
+                      (cpp/cast cpp/uint8_t 55) (cpp/cast cpp/uint8_t 255)))
+    (cpp/= (.-color (cpp/aget (.-maps mat-default) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)))
+           (cpp/Color (cpp/cast cpp/uint8_t 0) (cpp/cast cpp/uint8_t 121)
+                      (cpp/cast cpp/uint8_t 241) (cpp/cast cpp/uint8_t 255)))
 
     (cpp/SetTargetFPS 60)
 
@@ -104,7 +113,9 @@ static void jank_mat_set_color(Material* m, int map, int r, int g, int b, int a)
         (cpp/DrawMesh cube mat-default
                       (cpp/MatrixTranslate (cpp/float -10.0) (cpp/float 0.0) (cpp/float 0.0)))
         ;; 10000 cubes, one draw call
-        (cpp/jank_draw_instanced cube mat-instances)
+        (cpp/DrawMeshInstanced cube mat-instances
+                               (cpp/unbox (:* cpp/Matrix) transforms)
+                               (cpp/int MAX-INSTANCES))
         (cpp/DrawMesh cube mat-default
                       (cpp/MatrixTranslate (cpp/float 10.0) (cpp/float 0.0) (cpp/float 0.0)))
         (cpp/EndMode3D)
