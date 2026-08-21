@@ -16,19 +16,9 @@
     axis/angle/scale args are all by-value and call directly.
   - The frame counter is a jank int re-sent as an INT uniform each
     frame through the rlights setter toolbox."
-  (:require [raylib-examples.shaders :as sh])
+  (:require [raylib-examples.models :as md]
+            [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h"))
-
-;; Material writes + the absolute XYZ-rotation transform set.
-(cpp/raw "static void jank_model_set_map_texture(Model* m, int map, Texture2D tex) {
-  m->materials[0].maps[map].texture = tex;
-}
-static void jank_model_set_shader(Model* m, Shader s) {
-  m->materials[0].shader = s;
-}
-static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz) {
-  m->transform = MatrixRotateXYZ((Vector3){ (float)rx, (float)ry, (float)rz });
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -53,17 +43,21 @@ static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz)
         tex-mask (cpp/LoadTexture (str RES "mask.png"))
         frame-loc (int (cpp/GetShaderLocation shader "frame"))]
 
-    (cpp/jank_model_set_map_texture (cpp/& model1) (cpp/int cpp/MATERIAL_MAP_DIFFUSE) tex-diffuse)
-    (cpp/jank_model_set_map_texture (cpp/& model2) (cpp/int cpp/MATERIAL_MAP_DIFFUSE) tex-diffuse)
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model model1)) 0 (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
+                         (cpp/box (cpp/new cpp/Texture2D tex-diffuse)))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model model2)) 0 (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
+                         (cpp/box (cpp/new cpp/Texture2D tex-diffuse)))
 
     ;; the mask rides the spare EMISSION slot (cube-map slots won't do)
-    (cpp/jank_model_set_map_texture (cpp/& model1) (cpp/int cpp/MATERIAL_MAP_EMISSION) tex-mask)
-    (cpp/jank_model_set_map_texture (cpp/& model2) (cpp/int cpp/MATERIAL_MAP_EMISSION) tex-mask)
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model model1)) 0 (cpp/int cpp/MATERIAL_MAP_EMISSION)
+                         (cpp/box (cpp/new cpp/Texture2D tex-mask)))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model model2)) 0 (cpp/int cpp/MATERIAL_MAP_EMISSION)
+                         (cpp/box (cpp/new cpp/Texture2D tex-mask)))
     (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_EMISSION
                                 (int (cpp/GetShaderLocation shader "mask")))
 
-    (cpp/jank_model_set_shader (cpp/& model1) shader)
-    (cpp/jank_model_set_shader (cpp/& model2) shader)
+    (md/set-shader! (cpp/box (cpp/new cpp/Model model1)) 0 (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-shader! (cpp/box (cpp/new cpp/Model model2)) 0 (cpp/box (cpp/new cpp/Shader shader)))
 
     (cpp/DisableCursor)
     (cpp/SetTargetFPS 60)
@@ -82,7 +76,8 @@ static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz)
               rz (- rz 0.0025)]
 
           (sh/set-int! sh-box frame-loc (int frames))
-          (cpp/jank_model_set_rotate_xyz (cpp/& model1) rx ry rz)
+          (cpp/= (.-transform model1)
+                 (cpp/MatrixRotateXYZ (cpp/Vector3 (cpp/float rx) (cpp/float ry) (cpp/float rz))))
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/DARKBLUE)

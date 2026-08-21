@@ -16,20 +16,10 @@
   - First UpdateCameraPro: movement/rotation Vector3s built inline
     from jank-computed key/mouse values, called on (cpp/& camera).
   - Lights + uniforms ride the rlights namespace."
-  (:require [raylib-examples.rlights :as rl]
+  (:require [raylib-examples.models :as md]
+            [raylib-examples.rlights :as rl]
             [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h"))
-
-;; Center a model on its bounding-box XZ middle + shader-all-materials.
-(cpp/raw "static void jank_model_center_xz(Model* m) {
-  BoundingBox bb = GetModelBoundingBox(*m);
-  float cx = bb.min.x + (bb.max.x - bb.min.x)/2.0f;
-  float cz = bb.min.z + (bb.max.z - bb.min.z)/2.0f;
-  m->transform = MatrixTranslate(-cx, 0, -cz);
-}
-static void jank_model_set_shader_all(Model* m, Shader s) {
-  for (int i = 0; i < m->materialCount; i++) m->materials[i].shader = s;
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -42,6 +32,21 @@ static void jank_model_set_shader_all(Model* m, Shader s) {
              {:x 20.0 :y -20.0 :z 20.0}
              {:x -20.0 :y 20.0 :z 20.0}
              {:x 20.0 :y -20.0 :z -20.0}])
+
+(defn- center-xz!
+  "model.transform = MatrixTranslate(-cx, 0, -cz), centering the model's
+  bounding box on the X/Z plane. Takes a BOXED model: Model has no
+  conversion trait, so it cannot arrive as a bare jank fn argument."
+  [m-box]
+  (let [m  (cpp/unbox (:* cpp/Model) m-box)
+        bb (cpp/GetModelBoundingBox (cpp/* m))
+        lo (.-min bb)
+        hi (.-max bb)
+        cx (+ (+ 0.0 (.-x lo)) (/ (- (+ 0.0 (.-x hi)) (+ 0.0 (.-x lo))) 2.0))
+        cz (+ (+ 0.0 (.-z lo)) (/ (- (+ 0.0 (.-z hi)) (+ 0.0 (.-z lo))) 2.0))]
+    (cpp/= (.-transform (cpp/* m))
+           (cpp/MatrixTranslate (cpp/float (- cx)) (cpp/float 0.0) (cpp/float (- cz)))))
+  nil)
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -63,18 +68,22 @@ static void jank_model_set_shader_all(Model* m, Shader s) {
         view-loc (int (cpp/GetShaderLocation shader "viewPos"))
         ambient-loc (int (cpp/GetShaderLocation shader "ambient"))]
 
-    (cpp/jank_model_center_xz (cpp/& m0))
-    (cpp/jank_model_center_xz (cpp/& m1))
-    (cpp/jank_model_center_xz (cpp/& m2))
-    (cpp/jank_model_center_xz (cpp/& m3))
+    (center-xz! (cpp/box (cpp/new cpp/Model m0)))
+    (center-xz! (cpp/box (cpp/new cpp/Model m1)))
+    (center-xz! (cpp/box (cpp/new cpp/Model m2)))
+    (center-xz! (cpp/box (cpp/new cpp/Model m3)))
 
     (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
     (sh/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
 
-    (cpp/jank_model_set_shader_all (cpp/& m0) shader)
-    (cpp/jank_model_set_shader_all (cpp/& m1) shader)
-    (cpp/jank_model_set_shader_all (cpp/& m2) shader)
-    (cpp/jank_model_set_shader_all (cpp/& m3) shader)
+    (md/set-shader-all! (cpp/box (cpp/new cpp/Model m0)) (int (.-materialCount m0))
+                        (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-shader-all! (cpp/box (cpp/new cpp/Model m1)) (int (.-materialCount m1))
+                        (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-shader-all! (cpp/box (cpp/new cpp/Model m2)) (int (.-materialCount m2))
+                        (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-shader-all! (cpp/box (cpp/new cpp/Model m3)) (int (.-materialCount m3))
+                        (cpp/box (cpp/new cpp/Shader shader)))
 
     ;; four GRAY point lights
     (loop [i 0]
