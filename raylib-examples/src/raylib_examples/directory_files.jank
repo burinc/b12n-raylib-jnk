@@ -27,8 +27,6 @@
 
 ;; Subscript the FilePathList's char** paths in raw C++ and hand back the
 ;; element pointer (jank can't index a raw char**).
-(cpp/raw "static const char* jank_path_at(char** paths, int i) { return paths[i]; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def FILTER "DIRS*;.png;.c")
@@ -44,7 +42,7 @@
         n (+ 0 (.-count files))
         v (loop [i 0 acc []]
             (if (< i n)
-              (let [p (str (cpp/jank_path_at (.-paths files) i))]
+              (let [p (str (cpp/aget (.-paths files) (cpp/int i)))]
                 (recur (inc i)
                        (conj acc {:path p
                                   :name (str (cpp/GetFileName p))

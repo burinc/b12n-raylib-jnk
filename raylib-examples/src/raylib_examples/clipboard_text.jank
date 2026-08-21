@@ -22,8 +22,6 @@
   (:include "raylib.h"))
 
 ;; GetClipboardText can return NULL; fold NULL to \"\" so `str` never sees it.
-(cpp/raw "static const char* jank_clip() { const char* s = GetClipboardText(); return s ? s : \"\"; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def MAX-CHARS 255)
@@ -72,7 +70,7 @@
 
             ;; copy/cut push the buffer to the clipboard; paste pulls it back.
             _ (when (or copy? cut?) (cpp/SetClipboardText buf))
-            clip (if (or copy? cut? paste?) (str (cpp/jank_clip)) clip)
+            clip (if (or copy? cut? paste?) (let [s (cpp/GetClipboardText)] (if (cpp/bool s) (str s) "")) clip)
             buf (cond cut? ""
                       clear? ""
                       paste? clip
