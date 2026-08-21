@@ -12,13 +12,14 @@
     shader is read back through a Shader-returning shim so Z can
     restore it; swapping shaders on the material reuses the
     (cpp/& model) write shim per press and per outline pass.
-  - The spinning light uses jank_rlights.h's jank_rl_set_light_pos +
-    jank_rl_update_light; its indicator sphere position is the same
+  - The spinning light uses rlights' set-light-pos! + update-light!;
+    its indicator sphere position is the same
     sin/cos math on the jank side.
   - rlSetCullFace takes the RL_CULL_FACE_* enum directly (rlgl.h).
   - The C's Clamp reduces to nested ifs; numBands is re-sent per
     frame, matching the C."
-  (:include "raylib.h" "rlgl.h" "math.h" "jank_rlights.h"))
+  (:require [raylib-examples.rlights :as rl])
+  (:include "raylib.h" "rlgl.h" "math.h"))
 
 ;; Material shader read-back + write (no jank spelling for either).
 (cpp/raw "static Shader jank_model_get_shader(Model* m) {
@@ -45,20 +46,26 @@ static void jank_model_set_shader(Model* m, Shader s) {
         model (cpp/LoadModel (str RES "models/old_car_new.glb"))
         cel-shader (cpp/LoadShader (str RES "shaders/glsl330/cel.vs")
                                    (str RES "shaders/glsl330/cel.fs"))
+        ;; boxed here, where the shader is still native (see rlights ns)
+        cel-box (cpp/box (cpp/new cpp/Shader cel-shader))
         view-loc (int (cpp/GetShaderLocation cel-shader "viewPos"))
         default-shader (cpp/jank_model_get_shader (cpp/& model))
         num-bands-loc (int (cpp/GetShaderLocation cel-shader "numBands"))
         outline-shader (cpp/LoadShader (str RES "shaders/glsl330/outline_hull.vs")
                                        (str RES "shaders/glsl330/outline_hull.fs"))
+        ;; boxed here, where the shader is still native (see rlights ns)
+        outline-box (cpp/box (cpp/new cpp/Shader outline-shader))
         outline-thickness-loc (int (cpp/GetShaderLocation outline-shader "outlineThickness"))]
 
-    (cpp/jank_rl_shader_set_loc (cpp/& cel-shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (rl/set-shader-loc! cel-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
     (cpp/jank_model_set_shader (cpp/& model) cel-shader)
 
     ;; one white directional light, spun per frame below
-    (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_DIRECTIONAL)
-                              50.0 50.0 50.0 0.0 0.0 0.0
-                              255 255 255 255 cel-shader)
+    (rl/create-light! {:type rl/LIGHT-DIRECTIONAL
+                                      :px 50.0 :py 50.0 :pz 50.0
+                                      :tx 0.0 :ty 0.0 :tz 0.0
+                                      :r 255 :g 255 :b 255 :a 255
+                                      :shader cel-box})
 
     (cpp/SetTargetFPS 60)
 
@@ -68,7 +75,8 @@ static void jank_model_set_shader(Model* m, Shader s) {
            num-bands 10.0]
       (when (cpp/! (cpp/WindowShouldClose))
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
-        (cpp/jank_rl_push_view_pos cel-shader view-loc (cpp/& camera))
+        (let [p (.-position camera)]
+          (rl/push-view-pos! cel-box view-loc (.-x p) (.-y p) (.-z p)))
 
         (let [cel? (if (cpp/IsKeyPressed cpp/KEY_Z) (not cel?) cel?)
               _ (when (cpp/IsKeyPressed cpp/KEY_Z)
@@ -89,11 +97,11 @@ static void jank_model_set_shader(Model* m, Shader s) {
               light-x (* (cpp/sin (* t -0.3)) 5.0)
               light-z (* (cpp/cos (* t -0.3)) 5.0)]
 
-          (cpp/jank_rl_set_float cel-shader num-bands-loc num-bands)
+          (rl/set-float! cel-box num-bands-loc num-bands)
 
           ;; spin the light against the camera orbit
-          (cpp/jank_rl_set_light_pos 0 light-x 5.0 light-z)
-          (cpp/jank_rl_update_light cel-shader 0)
+          (rl/set-light-pos! 0 light-x 5.0 light-z)
+          (rl/update-light! cel-box 0)
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)
@@ -102,7 +110,7 @@ static void jank_model_set_shader(Model* m, Shader s) {
 
           (when outline?
             ;; outline pass: cull front faces, draw extruded back faces
-            (cpp/jank_rl_set_float outline-shader outline-thickness-loc 0.005)
+            (rl/set-float! outline-box outline-thickness-loc 0.005)
             (cpp/rlSetCullFace cpp/RL_CULL_FACE_FRONT)
             (cpp/jank_model_set_shader (cpp/& model) outline-shader)
             (cpp/DrawModel model

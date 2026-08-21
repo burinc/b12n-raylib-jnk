@@ -15,11 +15,12 @@
     (fog-rendering's spin was a multiply) - its own shim.
   - Light movement is jank math: dx/dz accumulated from WASD, hand
     normalized with cpp/sqrt (no Vector3Normalize needed).
-  - Uniforms ride jank_rlights.h's generic setters even though the
+  - Uniforms ride rlights' generic setters even though the
     example creates no lights - the header doubles as the shared
     uniform toolbox."
   (:require [clojure.string :as string])
-  (:include "raylib.h" "raymath.h" "math.h" "jank_rlights.h"))
+  (:require [raylib-examples.rlights :as rl])
+  (:include "raylib.h" "raymath.h" "math.h"))
 
 ;; Material map setup + absolute Y-rotation transform set.
 (cpp/raw "static void jank_model_setup_map(Model* m, int map, Texture2D tex) {
@@ -57,15 +58,17 @@ static void jank_model_set_rotate_y(Model* m, double angle) {
                              cpp/CAMERA_PERSPECTIVE)
         shader (cpp/LoadShader (str RES "shaders/glsl330/normalmap.vs")
                                (str RES "shaders/glsl330/normalmap.fs"))
+        ;; boxed here, where the shader is still native (see rlights ns)
+        sh-box (cpp/box (cpp/new cpp/Shader shader))
         view-loc (int (cpp/GetShaderLocation shader "viewPos"))
         light-pos-loc (int (cpp/GetShaderLocation shader "lightPos"))
         specular-loc (int (cpp/GetShaderLocation shader "specularExponent"))
         use-nm-loc (int (cpp/GetShaderLocation shader "useNormalMap"))
         plane (cpp/LoadModel (str RES "models/plane.glb"))]
 
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_NORMAL
+    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_NORMAL
                                 (int (cpp/GetShaderLocation shader "normalMap")))
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
 
     (cpp/jank_model_set_shader (cpp/& plane) shader)
     (cpp/jank_model_setup_map (cpp/& plane) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
@@ -100,10 +103,11 @@ static void jank_model_set_rotate_y(Model* m, double angle) {
           ;; spin the plane at a constant rate (absolute transform set)
           (cpp/jank_model_set_rotate_y (cpp/& plane) (* (+ 0.0 (cpp/GetTime)) 0.5))
 
-          (cpp/jank_rl_set_vec3 shader light-pos-loc lx 1.0 lz)
-          (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
-          (cpp/jank_rl_set_float shader specular-loc specular)
-          (cpp/jank_rl_set_int shader use-nm-loc (if use-nm? 1 0))
+          (rl/set-vec3! sh-box light-pos-loc lx 1.0 lz)
+          (let [p (.-position camera)]
+            (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
+          (rl/set-float! sh-box specular-loc specular)
+          (rl/set-int! sh-box use-nm-loc (if use-nm? 1 0))
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)

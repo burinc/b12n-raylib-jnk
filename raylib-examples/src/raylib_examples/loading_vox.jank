@@ -15,8 +15,9 @@
     XZ-middle and setting a MatrixTranslate transform.
   - First UpdateCameraPro: movement/rotation Vector3s built inline
     from jank-computed key/mouse values, called on (cpp/& camera).
-  - Lights + uniforms ride jank_rlights.h."
-  (:include "raylib.h" "raymath.h" "jank_rlights.h"))
+  - Lights + uniforms ride the rlights namespace."
+  (:require [raylib-examples.rlights :as rl])
+  (:include "raylib.h" "raymath.h"))
 
 ;; Center a model on its bounding-box XZ middle + shader-all-materials.
 (cpp/raw "static void jank_model_center_xz(Model* m) {
@@ -56,6 +57,8 @@ static void jank_model_set_shader_all(Model* m, Shader s) {
         m3 (cpp/LoadModel (str RES "models/vox/fez.vox"))
         shader (cpp/LoadShader (str RES "shaders/glsl330/voxel_lighting.vs")
                                (str RES "shaders/glsl330/voxel_lighting.fs"))
+        ;; boxed here, where the shader is still native (see rlights ns)
+        sh-box (cpp/box (cpp/new cpp/Shader shader))
         view-loc (int (cpp/GetShaderLocation shader "viewPos"))
         ambient-loc (int (cpp/GetShaderLocation shader "ambient"))]
 
@@ -64,8 +67,8 @@ static void jank_model_set_shader_all(Model* m, Shader s) {
     (cpp/jank_model_center_xz (cpp/& m2))
     (cpp/jank_model_center_xz (cpp/& m3))
 
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
-    (cpp/jank_rl_set_vec4 shader ambient-loc 0.1 0.1 0.1 1.0)
+    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (rl/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
 
     (cpp/jank_model_set_shader_all (cpp/& m0) shader)
     (cpp/jank_model_set_shader_all (cpp/& m1) shader)
@@ -76,9 +79,11 @@ static void jank_model_set_shader_all(Model* m, Shader s) {
     (loop [i 0]
       (when (< i 4)
         (let [{:keys [x y z]} (nth LIGHTS i)]
-          (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_POINT)
-                                    x y z 0.0 0.0 0.0
-                                    130 130 130 255 shader))
+          (rl/create-light! {:type rl/LIGHT-POINT
+                                      :px x :py y :pz z
+                                      :tx 0.0 :ty 0.0 :tz 0.0
+                                      :r 130 :g 130 :b 130 :a 255
+                                      :shader sh-box}))
         (recur (inc i))))
 
     (cpp/SetTargetFPS 60)
@@ -108,10 +113,11 @@ static void jank_model_set_shader_all(Model* m, Shader s) {
                                (cpp/Vector3 (cpp/float rot-x) (cpp/float rot-y) (cpp/float 0.0))
                                (cpp/float zoom))
 
-          (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
+          (let [p (.-position camera)]
+              (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
           (loop [i 0]
             (when (< i 4)
-              (cpp/jank_rl_update_light shader (int i))
+              (rl/update-light! sh-box (int i))
               (recur (inc i))))
 
           (cpp/BeginDrawing)
@@ -129,7 +135,7 @@ static void jank_model_set_shader_all(Model* m, Shader s) {
           (loop [i 0]
             (when (< i 4)
               (let [{:keys [x y z]} (nth LIGHTS i)]
-                (if (= 1 (int (cpp/jank_rl_light_enabled (int i))))
+                (if (rl/light-enabled? (int i))
                   (cpp/DrawSphereEx (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
                                     (cpp/float 0.2) 8 8 cpp/GRAY)
                   (cpp/DrawSphereWires (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))

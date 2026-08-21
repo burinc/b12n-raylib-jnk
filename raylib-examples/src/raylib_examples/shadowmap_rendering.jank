@@ -23,7 +23,8 @@
   - Pass-boundary matrices (rlGetMatrixModelview/Projection,
     MatrixMultiply) are frame-local native let-locals handed to
     SetShaderValueMatrix by value."
-  (:include "raylib.h" "rlgl.h" "raymath.h" "math.h" "jank_rlights.h"))
+  (:require [raylib-examples.rlights :as rl])
+  (:include "raylib.h" "rlgl.h" "raymath.h" "math.h"))
 
 ;; Depth-only shadowmap FBO + scene + model/animation helpers.
 (cpp/raw "static RenderTexture2D jank_load_shadowmap_rt(int width, int height) {
@@ -87,6 +88,8 @@ static void jank_draw_scene(Model cube, Model robot) {
                              cpp/CAMERA_PERSPECTIVE)
         shadow-shader (cpp/LoadShader (str RES "shaders/glsl330/shadowmap.vs")
                                       (str RES "shaders/glsl330/shadowmap.fs"))
+        ;; boxed here, where the shader is still native (see rlights ns)
+        sh-box (cpp/box (cpp/new cpp/Shader shadow-shader))
         view-loc (int (cpp/GetShaderLocation shadow-shader "viewPos"))
         light-dir-loc (int (cpp/GetShaderLocation shadow-shader "lightDir"))
         light-col-loc (int (cpp/GetShaderLocation shadow-shader "lightColor"))
@@ -105,11 +108,11 @@ static void jank_draw_scene(Model cube, Model robot) {
         ly0 (/ -1.0 len0)
         lz0 (/ -0.35 len0)]
 
-    (cpp/jank_rl_shader_set_loc (cpp/& shadow-shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
-    (cpp/jank_rl_set_vec3 shadow-shader light-dir-loc lx0 ly0 lz0)
-    (cpp/jank_rl_set_vec4 shadow-shader light-col-loc 1.0 1.0 1.0 1.0)
-    (cpp/jank_rl_set_vec4 shadow-shader ambient-loc 0.1 0.1 0.1 1.0)
-    (cpp/jank_rl_set_int shadow-shader res-loc SHADOWMAP-RES)
+    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (rl/set-vec3! sh-box light-dir-loc lx0 ly0 lz0)
+    (rl/set-vec4! sh-box light-col-loc 1.0 1.0 1.0 1.0)
+    (rl/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
+    (rl/set-int! sh-box res-loc SHADOWMAP-RES)
 
     (cpp/jank_model_set_shader_all (cpp/& cube) shadow-shader)
     (cpp/jank_model_set_shader_all (cpp/& robot) shadow-shader)
@@ -124,7 +127,8 @@ static void jank_draw_scene(Model cube, Model robot) {
       (when (cpp/! (cpp/WindowShouldClose))
         (let [dt (+ 0.0 (cpp/GetFrameTime))]
           ;; view pos from the PRE-update camera position, matching the C
-          (cpp/jank_rl_push_view_pos shadow-shader view-loc (cpp/& camera))
+          (let [p (.-position camera)]
+            (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
           (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
 
           (let [fc (int (mod (inc fc) keyframes))
@@ -154,7 +158,7 @@ static void jank_draw_scene(Model cube, Model robot) {
                                            (cpp/float 20.0)
                                            cpp/CAMERA_ORTHOGRAPHIC)]
 
-            (cpp/jank_rl_set_vec3 shadow-shader light-dir-loc lx ly lz)
+            (rl/set-vec3! sh-box light-dir-loc lx ly lz)
 
             ;; PASS 1: depth from the light's point of view
             (cpp/BeginTextureMode shadow-map)
@@ -176,7 +180,7 @@ static void jank_draw_scene(Model cube, Model robot) {
               (cpp/rlActiveTextureSlot 10)
               (let [depth-tex (.-depth shadow-map)]
                 (cpp/rlEnableTexture (.-id depth-tex)))
-              (cpp/jank_rl_set_int shadow-shader shadow-map-loc 10)
+              (rl/set-int! sh-box shadow-map-loc 10)
 
               (cpp/BeginMode3D camera)
               (cpp/jank_draw_scene cube robot)

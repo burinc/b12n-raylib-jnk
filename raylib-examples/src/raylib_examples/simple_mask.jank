@@ -15,8 +15,9 @@
     from three jank-threaded angles (a 3-angle shim); DrawModelEx's
     axis/angle/scale args are all by-value and call directly.
   - The frame counter is a jank int re-sent as an INT uniform each
-    frame through the jank_rlights.h setter toolbox."
-  (:include "raylib.h" "raymath.h" "jank_rlights.h"))
+    frame through the rlights setter toolbox."
+  (:require [raylib-examples.rlights :as rl])
+  (:include "raylib.h" "raymath.h"))
 
 ;; Material writes + the absolute XYZ-rotation transform set.
 (cpp/raw "static void jank_model_set_map_texture(Model* m, int map, Texture2D tex) {
@@ -46,6 +47,8 @@ static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz)
         model2 (cpp/LoadModelFromMesh (cpp/GenMeshCube (cpp/float 0.8) (cpp/float 0.8) (cpp/float 0.8)))
         model3 (cpp/LoadModelFromMesh (cpp/GenMeshSphere (cpp/float 1.0) 16 16))
         shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/mask.fs"))
+        ;; boxed here, where the shader is still native (see rlights ns)
+        sh-box (cpp/box (cpp/new cpp/Shader shader))
         tex-diffuse (cpp/LoadTexture (str RES "plasma.png"))
         tex-mask (cpp/LoadTexture (str RES "mask.png"))
         frame-loc (int (cpp/GetShaderLocation shader "frame"))]
@@ -56,7 +59,7 @@ static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz)
     ;; the mask rides the spare EMISSION slot (cube-map slots won't do)
     (cpp/jank_model_set_map_texture (cpp/& model1) (cpp/int cpp/MATERIAL_MAP_EMISSION) tex-mask)
     (cpp/jank_model_set_map_texture (cpp/& model2) (cpp/int cpp/MATERIAL_MAP_EMISSION) tex-mask)
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_EMISSION
+    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_EMISSION
                                 (int (cpp/GetShaderLocation shader "mask")))
 
     (cpp/jank_model_set_shader (cpp/& model1) shader)
@@ -78,7 +81,7 @@ static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz)
               ry (+ ry 0.005)
               rz (- rz 0.0025)]
 
-          (cpp/jank_rl_set_int shader frame-loc (int frames))
+          (rl/set-int! sh-box frame-loc (int frames))
           (cpp/jank_model_set_rotate_xyz (cpp/& model1) rx ry rz)
 
           (cpp/BeginDrawing)

@@ -19,7 +19,7 @@
     plain texture's pair uses (cpp/& texture) directly.
   - Material texture writes reuse the mesh-instancing Material shims
     (ALBEDO = the atlas, METALNESS = the lightmap's texture)."
-  (:include "raylib.h" "rlgl.h" "raymath.h" "jank_rlights.h"))
+  (:include "raylib.h" "rlgl.h" "raymath.h"))
 
 ;; The C's texcoords2 upload, verbatim (no jank spelling for the
 ;; malloc'd attribute array + VAO wiring), plus Material/RT helpers.

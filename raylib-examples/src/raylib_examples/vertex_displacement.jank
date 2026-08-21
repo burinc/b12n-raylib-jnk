@@ -14,9 +14,10 @@
     feed the rlgl calls directly.
   - GenImagePerlinNoise is a plain call; the material shader write is
     the usual (cpp/& model) shim; the time FLOAT uniform rides the
-    jank_rlights.h setter toolbox (location hoisted out of the loop,
+    rlights setter toolbox (location hoisted out of the loop,
     unlike the C's per-frame lookup)."
-  (:include "raylib.h" "rlgl.h" "jank_rlights.h"))
+  (:require [raylib-examples.rlights :as rl])
+  (:include "raylib.h" "rlgl.h"))
 
 (cpp/raw "static void jank_model_set_shader(Model* m, Shader s) {
   m->materials[0].shader = s;
@@ -37,6 +38,8 @@
                              cpp/CAMERA_PERSPECTIVE)
         shader (cpp/LoadShader (str RES "shaders/glsl330/vertex_displacement.vs")
                                (str RES "shaders/glsl330/vertex_displacement.fs"))
+        ;; boxed here, where shader is still native (see rlights ns)
+        sh-box (cpp/box (cpp/new cpp/Shader shader))
         perlin-image (cpp/GenImagePerlinNoise 512 512 0 0 (cpp/float 1.0))
         perlin-map (cpp/LoadTextureFromImage perlin-image)
         _ (cpp/UnloadImage perlin-image)
@@ -60,7 +63,7 @@
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FREE)
 
         (let [time (+ time (+ 0.0 (cpp/GetFrameTime)))]
-          (cpp/jank_rl_set_float shader time-loc time)
+          (rl/set-float! sh-box time-loc time)
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)
