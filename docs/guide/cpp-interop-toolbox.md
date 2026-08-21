@@ -121,13 +121,34 @@ Three things about boxing that cost a compile each to learn:
 - A `Camera3D` argument has no readable members for the same reason, so
   destructure it at the call site and pass scalars.
 
-**When a C shim is still unavoidable:** assignment. jank has no assignment
-form at all — no `set!`, no `cpp/aset`, no member write — so
-`shader.locs[idx] = loc` needs three lines of C. `rlights.jank` keeps
-exactly one such shim, and it is the only `cpp/raw` in the lighting path.
-Note that a boxed copy shares the pointer members of the original (`Shader`
-is `{unsigned int id; int *locs;}`), so writing through the box is visible
-to the caller.
+**Assignment needs no C shim.** An earlier version of this page said jank
+had no assignment form. It does: **`cpp/=`**, which takes an lvalue.
+
+```clojure
+(cpp/= (.-fovy c) (cpp/float 45.0))               ; struct field via a pointer
+(cpp/= (cpp/aget (.-locs sh) (cpp/int i)) (cpp/int 7))  ; array element
+```
+
+`clojure.core/aset` is sugar for the second form — it expands to
+`(cpp/= (cpp/aget array idx) val)`. Note that **`cpp/aset` does not
+exist**; reaching for it (the obvious partner to `cpp/aget`) is what sent
+this project down the wrong path for a long time. Use `aset`, or `cpp/=`
+directly.
+
+Two gotchas:
+
+- `cpp/=` yields the assigned lvalue, a native reference. A fn whose last
+  form is an assignment therefore tries to **return** that reference and
+  fails with `not convertible to a jank runtime object`. End such fns in an
+  explicit `nil`.
+- For the same reason you cannot factor out an accessor: a
+  `(defn- material [m i] (cpp/aget (.-materials m) i))` helper would return
+  a `Material &`. Inline the lookup instead.
+
+A boxed copy shares the pointer members of the original (`Shader` is
+`{unsigned int id; int *locs;}`, `Model` holds `Material *materials`), so
+writing through the box is visible to the caller. That is what lets one
+shared helper namespace serve every consumer.
 
 ## Pointer-taking APIs work via `(cpp/& x)` (from the image arc, 2026-07-03)
 
@@ -242,8 +263,8 @@ loop state).
   `codepoints_loading.jank` fills a `cpp/raw` static `int[512]` element-wise
   through a one-line setter shim (`jank_cp_set`) and hands the pointer to
   `LoadFontEx`. A `Vector2[]` should work the same way (a setter shim taking
-  x,y scalars), but that's still unprobed; `cpp/new` + `aset` also remain
-  unprobed. Workarounds that keep the visual identical still
+  x,y scalars). `cpp/new` + `cpp/=` is now proven — see the assignment
+  section above. Workarounds that keep the visual identical still
   apply: draw per-segment `DrawLineEx` between consecutive points
   (`math_sine_cosine.jank`'s waves), or recompute each primitive's vertices
   inline instead of filling an array (`triangle_strip.jank` draws each wedge's

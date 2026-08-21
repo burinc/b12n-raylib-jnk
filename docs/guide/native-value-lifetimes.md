@@ -102,7 +102,58 @@ See the jank book's
 [Working with native values](https://book.jank-lang.org/cpp-interop/native-values.html)
 for both mechanisms.
 
+## Writing to a native value
+
+Reading a member gives you a reference (`(.-fovy c)`); **`cpp/=` writes one**.
+It takes an lvalue, so both shapes work:
+
+```clojure
+(cpp/= (.-fovy c) (cpp/float 45.0))                     ; field, through a pointer
+(cpp/= (cpp/aget (.-locs sh) (cpp/int i)) (cpp/int 7))  ; array element
+```
+
+`clojure.core/aset` is sugar for the second — it expands to exactly that.
+**`cpp/aset` does not exist**, which is a trap, because `cpp/aget` does and
+the pair looks symmetric. This project used C shims for assignment far longer
+than it needed to for precisely that reason.
+
+`raylib-examples/src/raylib_examples/models.jank` is the worked example:
+binding a texture or shader into a `Model` material — the most repeated bit
+of C in this suite — is now ordinary jank.
+
+## The four faces of one boundary rule
+
+These are all the same rule (a native value has no runtime representation),
+and each one cost a compile to learn. Worth reading together, because the
+next one never looks like the last:
+
+1. **A native argument arrives as an `object_ref`.** Pass a `Shader` to a
+   jank fn and the native call inside rejects it. Box it.
+2. **Boxing cannot be wrapped in a fn.** A `(defn box-it [s] (cpp/box (cpp/new cpp/Shader s)))`
+   fails identically — by the time the body runs, `s` is already an
+   `object_ref` and `cpp/new` has nothing to copy from. **Box where the value
+   is still native**, at the `let` that produced it.
+3. **A native value cannot be returned.** So you cannot factor out an
+   accessor: `(defn- material [m i] (cpp/aget (.-materials m) i))` would
+   return a `Material &`. Inline the lookup.
+4. **`cpp/=` yields the assigned lvalue**, which is a native reference. A fn
+   whose last form is an assignment tries to return it and fails. End such
+   fns in an explicit `nil`.
+
+A useful corollary: a boxed copy **shares the pointer members** of the
+original. `Shader` is `{unsigned int id; int *locs;}` and `Model` holds
+`Material *materials`, so writing through the box reaches the caller's value.
+That is what makes one shared helper namespace viable instead of a shim per
+consumer.
+
 ## Frame-crossing mutable native state: park it in a cpp/raw static
+
+> **This section predates opaque boxes and may be obsolete.** A box held in
+> an atom should be able to carry recreated native state across frames, which
+> is what the static exists for. That has **not** been probed — three
+> examples still use the static pattern (`viewport_scaling`, `game_of_life`,
+> `hot_reloading`). Treat what follows as the pattern that is known to work,
+> not as the only one.
 
 When a native resource must BOTH persist across frames AND be recreated at
 runtime with computed sizes, neither of the two usual homes works: `loop`/
