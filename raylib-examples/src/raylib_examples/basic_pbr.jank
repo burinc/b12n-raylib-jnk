@@ -20,80 +20,10 @@
   - Teardown keeps the C's unbind dance (shader zeroed, material
     unloaded manually, maps NULLed) as a Model-by-value shim so the
     shared PBR shader isn't double-freed."
+  (:require [raylib-examples.models :as md])
   (:require [raylib-examples.rlights :as rl]
             [raylib-examples.shaders :as sh])
   (:include "raylib.h"))
-
-;; The PBR light array (type/enabled/pos/target/color/intensity + six
-;; locations each) and the example's careful model teardown.
-(cpp/raw "#define JANK_PBR_MAX_LIGHTS 4
-typedef struct {
-  int type, enabled;
-  Vector3 position, target;
-  float color[4];
-  float intensity;
-  int typeLoc, enabledLoc, positionLoc, targetLoc, colorLoc, intensityLoc;
-} PbrLight;
-static PbrLight jank_pbr_lights[JANK_PBR_MAX_LIGHTS];
-static int jank_pbr_count = 0;
-
-static void jank_pbr_update(Shader shader, int i) {
-  PbrLight *l = &jank_pbr_lights[i];
-  SetShaderValue(shader, l->enabledLoc, &l->enabled, SHADER_UNIFORM_INT);
-  SetShaderValue(shader, l->typeLoc, &l->type, SHADER_UNIFORM_INT);
-  float position[3] = { l->position.x, l->position.y, l->position.z };
-  SetShaderValue(shader, l->positionLoc, position, SHADER_UNIFORM_VEC3);
-  float target[3] = { l->target.x, l->target.y, l->target.z };
-  SetShaderValue(shader, l->targetLoc, target, SHADER_UNIFORM_VEC3);
-  SetShaderValue(shader, l->colorLoc, l->color, SHADER_UNIFORM_VEC4);
-  SetShaderValue(shader, l->intensityLoc, &l->intensity, SHADER_UNIFORM_FLOAT);
-}
-static int jank_pbr_create(int type, double px, double py, double pz,
-                           int r, int g, int b, int a,
-                           double intensity, Shader shader) {
-  if (jank_pbr_count >= JANK_PBR_MAX_LIGHTS) return -1;
-  int i = jank_pbr_count;
-  PbrLight *l = &jank_pbr_lights[i];
-  l->enabled = 1;
-  l->type = type;
-  l->position = (Vector3){ (float)px, (float)py, (float)pz };
-  l->target = (Vector3){ 0 };
-  l->color[0] = (float)r/255.0f; l->color[1] = (float)g/255.0f;
-  l->color[2] = (float)b/255.0f; l->color[3] = (float)a/255.0f;
-  l->intensity = (float)intensity;
-  l->enabledLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].enabled\", i));
-  l->typeLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].type\", i));
-  l->positionLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].position\", i));
-  l->targetLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].target\", i));
-  l->colorLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].color\", i));
-  l->intensityLoc = GetShaderLocation(shader, TextFormat(\"lights[%i].intensity\", i));
-  jank_pbr_update(shader, i);
-  jank_pbr_count++;
-  return i;
-}
-static void jank_pbr_toggle(int i) {
-  jank_pbr_lights[i].enabled = !jank_pbr_lights[i].enabled;
-}
-static int jank_pbr_enabled(int i) { return jank_pbr_lights[i].enabled; }
-
-static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader = s; }
-static void jank_mat_map_texture(Model* m, int map, Texture2D tex) {
-  m->materials[0].maps[map].texture = tex;
-}
-static void jank_mat_map_color(Model* m, int map, int r, int g, int b, int a) {
-  m->materials[0].maps[map].color = (Color){ (unsigned char)r, (unsigned char)g,
-                                             (unsigned char)b, (unsigned char)a };
-}
-static void jank_mat_map_value(Model* m, int map, double v) {
-  m->materials[0].maps[map].value = (float)v;
-}
-/* the C's teardown: unbind the shared shader so it isn't double-freed */
-static void jank_pbr_unload_model(Model m) {
-  m.materials[0].shader = (Shader){ 0 };
-  UnloadMaterial(m.materials[0]);
-  m.materials[0].maps = NULL;
-  UnloadModel(m);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -155,40 +85,59 @@ static void jank_pbr_unload_model(Model m) {
     (sh/set-float! sh-box (int (cpp/GetShaderLocation shader "ambient")) 0.02)
 
     ;; car: PBR maps + defaults
-    (cpp/jank_model_set_shader (cpp/& car) shader)
-    (cpp/jank_mat_map_color (cpp/& car) (cpp/int cpp/MATERIAL_MAP_ALBEDO) 255 255 255 255)
-    (cpp/jank_mat_map_value (cpp/& car) (cpp/int cpp/MATERIAL_MAP_METALNESS) 1.0)
-    (cpp/jank_mat_map_value (cpp/& car) (cpp/int cpp/MATERIAL_MAP_ROUGHNESS) 0.0)
-    (cpp/jank_mat_map_value (cpp/& car) (cpp/int cpp/MATERIAL_MAP_OCCLUSION) 1.0)
-    (cpp/jank_mat_map_color (cpp/& car) (cpp/int cpp/MATERIAL_MAP_EMISSION) 255 162 0 255)
-    (cpp/jank_mat_map_texture (cpp/& car) (cpp/int cpp/MATERIAL_MAP_ALBEDO)
-                              (cpp/LoadTexture (str RES "old_car_d.png")))
-    (cpp/jank_mat_map_texture (cpp/& car) (cpp/int cpp/MATERIAL_MAP_METALNESS)
-                              (cpp/LoadTexture (str RES "old_car_mra.png")))
-    (cpp/jank_mat_map_texture (cpp/& car) (cpp/int cpp/MATERIAL_MAP_NORMAL)
-                              (cpp/LoadTexture (str RES "old_car_n.png")))
-    (cpp/jank_mat_map_texture (cpp/& car) (cpp/int cpp/MATERIAL_MAP_EMISSION)
-                              (cpp/LoadTexture (str RES "old_car_e.png")))
+    (md/set-shader! (cpp/box (cpp/new cpp/Model car)) 0 (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-map-color! (cpp/box (cpp/new cpp/Model car)) (cpp/int cpp/MATERIAL_MAP_ALBEDO)
+                       (cpp/box (cpp/new cpp/Color (cpp/cast cpp/uint8_t 255)
+                                                   (cpp/cast cpp/uint8_t 255)
+                                                   (cpp/cast cpp/uint8_t 255)
+                                                   (cpp/cast cpp/uint8_t 255))))
+    (md/set-map-value! (cpp/box (cpp/new cpp/Model car)) (cpp/int cpp/MATERIAL_MAP_METALNESS) 1.0)
+    (md/set-map-value! (cpp/box (cpp/new cpp/Model car)) (cpp/int cpp/MATERIAL_MAP_ROUGHNESS) 0.0)
+    (md/set-map-value! (cpp/box (cpp/new cpp/Model car)) (cpp/int cpp/MATERIAL_MAP_OCCLUSION) 1.0)
+    (md/set-map-color! (cpp/box (cpp/new cpp/Model car)) (cpp/int cpp/MATERIAL_MAP_EMISSION)
+                       (cpp/box (cpp/new cpp/Color (cpp/cast cpp/uint8_t 255)
+                                                   (cpp/cast cpp/uint8_t 162)
+                                                   (cpp/cast cpp/uint8_t 0)
+                                                   (cpp/cast cpp/uint8_t 255))))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model car)) 0 (cpp/int cpp/MATERIAL_MAP_ALBEDO)
+                              (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTexture (str RES "old_car_d.png")))))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model car)) 0 (cpp/int cpp/MATERIAL_MAP_METALNESS)
+                              (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTexture (str RES "old_car_mra.png")))))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model car)) 0 (cpp/int cpp/MATERIAL_MAP_NORMAL)
+                              (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTexture (str RES "old_car_n.png")))))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model car)) 0 (cpp/int cpp/MATERIAL_MAP_EMISSION)
+                              (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTexture (str RES "old_car_e.png")))))
 
     ;; floor: road maps + defaults
-    (cpp/jank_model_set_shader (cpp/& floor) shader)
-    (cpp/jank_mat_map_color (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_ALBEDO) 255 255 255 255)
-    (cpp/jank_mat_map_value (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_METALNESS) 0.8)
-    (cpp/jank_mat_map_value (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_ROUGHNESS) 0.1)
-    (cpp/jank_mat_map_value (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_OCCLUSION) 1.0)
-    (cpp/jank_mat_map_color (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_EMISSION) 0 0 0 255)
-    (cpp/jank_mat_map_texture (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_ALBEDO)
-                              (cpp/LoadTexture (str RES "road_a.png")))
-    (cpp/jank_mat_map_texture (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_METALNESS)
-                              (cpp/LoadTexture (str RES "road_mra.png")))
-    (cpp/jank_mat_map_texture (cpp/& floor) (cpp/int cpp/MATERIAL_MAP_NORMAL)
-                              (cpp/LoadTexture (str RES "road_n.png")))
+    (md/set-shader! (cpp/box (cpp/new cpp/Model floor)) 0 (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-map-color! (cpp/box (cpp/new cpp/Model floor)) (cpp/int cpp/MATERIAL_MAP_ALBEDO)
+                       (cpp/box (cpp/new cpp/Color (cpp/cast cpp/uint8_t 255)
+                                                   (cpp/cast cpp/uint8_t 255)
+                                                   (cpp/cast cpp/uint8_t 255)
+                                                   (cpp/cast cpp/uint8_t 255))))
+    (md/set-map-value! (cpp/box (cpp/new cpp/Model floor)) (cpp/int cpp/MATERIAL_MAP_METALNESS) 0.8)
+    (md/set-map-value! (cpp/box (cpp/new cpp/Model floor)) (cpp/int cpp/MATERIAL_MAP_ROUGHNESS) 0.1)
+    (md/set-map-value! (cpp/box (cpp/new cpp/Model floor)) (cpp/int cpp/MATERIAL_MAP_OCCLUSION) 1.0)
+    (md/set-map-color! (cpp/box (cpp/new cpp/Model floor)) (cpp/int cpp/MATERIAL_MAP_EMISSION)
+                       (cpp/box (cpp/new cpp/Color (cpp/cast cpp/uint8_t 0)
+                                                   (cpp/cast cpp/uint8_t 0)
+                                                   (cpp/cast cpp/uint8_t 0)
+                                                   (cpp/cast cpp/uint8_t 255))))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model floor)) 0 (cpp/int cpp/MATERIAL_MAP_ALBEDO)
+                              (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTexture (str RES "road_a.png")))))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model floor)) 0 (cpp/int cpp/MATERIAL_MAP_METALNESS)
+                              (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTexture (str RES "road_mra.png")))))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model floor)) 0 (cpp/int cpp/MATERIAL_MAP_NORMAL)
+                              (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTexture (str RES "road_n.png")))))
 
     ;; the four point lights (LIGHT_POINT = 1 in the PBR enum)
     (loop [i 0]
       (when (< i 4)
         (let [{:keys [x y z r g b intensity]} (nth LIGHTS i)]
-          (cpp/jank_pbr_create 1 x y z (int r) (int g) (int b) 255 intensity shader))
+          (rl/create-light! {:type rl/LIGHT-POINT
+                             :px x :py y :pz z :tx 0.0 :ty 0.0 :tz 0.0
+                             :r (int r) :g (int g) :b (int b) :a 255
+                             :intensity intensity :shader sh-box}))
         (recur (inc i))))
 
     ;; texture maps all in use
@@ -206,13 +155,13 @@ static void jank_pbr_unload_model(Model m) {
           (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
 
         ;; the C toggles lights 2/1/3/0 on keys 1/2/3/4
-        (when (cpp/IsKeyPressed cpp/KEY_ONE) (cpp/jank_pbr_toggle 2))
-        (when (cpp/IsKeyPressed cpp/KEY_TWO) (cpp/jank_pbr_toggle 1))
-        (when (cpp/IsKeyPressed cpp/KEY_THREE) (cpp/jank_pbr_toggle 3))
-        (when (cpp/IsKeyPressed cpp/KEY_FOUR) (cpp/jank_pbr_toggle 0))
+        (when (cpp/IsKeyPressed cpp/KEY_ONE) (rl/toggle-light! 2))
+        (when (cpp/IsKeyPressed cpp/KEY_TWO) (rl/toggle-light! 1))
+        (when (cpp/IsKeyPressed cpp/KEY_THREE) (rl/toggle-light! 3))
+        (when (cpp/IsKeyPressed cpp/KEY_FOUR) (rl/toggle-light! 0))
         (loop [i 0]
           (when (< i 4)
-            (cpp/jank_pbr_update shader (int i))
+            (rl/update-light! sh-box i)
             (recur (inc i))))
 
         (cpp/BeginDrawing)
@@ -244,7 +193,7 @@ static void jank_pbr_unload_model(Model m) {
         (loop [i 0]
           (when (< i 4)
             (let [{:keys [x y z] :as light} (nth LIGHTS i)]
-              (if (= 1 (int (cpp/jank_pbr_enabled (int i))))
+              (if (rl/light-enabled? i)
                 (cpp/DrawSphereEx (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
                                   (cpp/float 0.2) 8 8
                                   (cpp/GetColor (light-color light)))
@@ -264,8 +213,15 @@ static void jank_pbr_unload_model(Model m) {
         (cpp/EndDrawing)
         (recur)))
 
-    (cpp/jank_pbr_unload_model car)
-    (cpp/jank_pbr_unload_model floor)
+    ;; unbind the shared shader first so it is not freed twice
+    (cpp/= (.-shader (cpp/aget (.-materials car) (cpp/int 0))) (cpp/* (cpp/new cpp/Shader)))
+    (cpp/UnloadMaterial (cpp/aget (.-materials car) (cpp/int 0)))
+    (cpp/= (.-maps (cpp/aget (.-materials car) (cpp/int 0))) (cpp/cast (:* cpp/MaterialMap) cpp/nullptr))
+    (cpp/UnloadModel car)
+    (cpp/= (.-shader (cpp/aget (.-materials floor) (cpp/int 0))) (cpp/* (cpp/new cpp/Shader)))
+    (cpp/UnloadMaterial (cpp/aget (.-materials floor) (cpp/int 0)))
+    (cpp/= (.-maps (cpp/aget (.-materials floor) (cpp/int 0))) (cpp/cast (:* cpp/MaterialMap) cpp/nullptr))
+    (cpp/UnloadModel floor)
     (cpp/UnloadShader shader))
 
   (cpp/CloseWindow))

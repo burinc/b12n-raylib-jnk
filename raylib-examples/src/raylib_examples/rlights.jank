@@ -47,7 +47,7 @@
 
   Mirrors CreateLight: the shader declares lights[i].{enabled,type,position,
   target,color}, so the locations depend on the index and are looked up once."
-  [{:keys [type px py pz tx ty tz r g b a shader]}]
+  [{:keys [type px py pz tx ty tz r g b a shader intensity]}]
   (let [i (count (deref lights))
         s (cpp/unbox (:* cpp/Shader) shader)
         at (fn [field] (int (cpp/GetShaderLocation (cpp/* s) (str "lights[" i "]." field))))
@@ -57,22 +57,29 @@
                :r r :g g :b b :a a
                :enabled-loc (at "enabled") :type-loc (at "type")
                :position-loc (at "position") :target-loc (at "target")
-               :color-loc (at "color")}]
+               :color-loc (at "color")
+               ;; PBR shaders add an intensity term; plain lighting shaders
+               ;; do not declare it, and GetShaderLocation returns -1 there,
+               ;; so update-light! simply skips it.
+               :intensity intensity :intensity-loc (at "intensity")}]
     (swap! lights conj light)
     i))
 
 (defn update-light!
   "Push light i's current state to the shader. Mirrors UpdateLightValues."
   [sh-box i]
-  (let [{:keys [enabled type px py pz tx ty tz r g b a
-                enabled-loc type-loc position-loc target-loc color-loc]}
+  (let [{:keys [enabled type px py pz tx ty tz r g b a intensity
+                enabled-loc type-loc position-loc target-loc color-loc
+                intensity-loc]}
         (nth (deref lights) i)]
     (sh/set-int! sh-box enabled-loc enabled)
     (sh/set-int! sh-box type-loc type)
     (sh/set-vec3! sh-box position-loc px py pz)
     (sh/set-vec3! sh-box target-loc tx ty tz)
     ;; colors are 0-255 in raylib, 0-1 in GLSL
-    (sh/set-vec4! sh-box color-loc (/ r 255.0) (/ g 255.0) (/ b 255.0) (/ a 255.0))))
+    (sh/set-vec4! sh-box color-loc (/ r 255.0) (/ g 255.0) (/ b 255.0) (/ a 255.0))
+    (when (and intensity (>= intensity-loc 0))
+      (sh/set-float! sh-box intensity-loc intensity))))
 
 (defn toggle-light!
   [i]

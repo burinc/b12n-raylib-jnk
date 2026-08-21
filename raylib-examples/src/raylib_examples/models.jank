@@ -63,6 +63,15 @@
       (recur (inc i))))
   nil)
 
+(defn set-map-value!
+  "model.materials[0].maps[map].value = v"
+  [m-box map v]
+  (let [m (cpp/unbox (:* cpp/Model) m-box)]
+    (cpp/= (.-value (cpp/aget (.-maps (cpp/aget (.-materials m) (cpp/int 0)))
+                              (cpp/int map)))
+           (cpp/float v)))
+  nil)
+
 (defn set-map-color!
   "model.materials[0].maps[map].color = color"
   [m-box map c-box]

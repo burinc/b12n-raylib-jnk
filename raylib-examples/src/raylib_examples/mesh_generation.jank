@@ -18,32 +18,8 @@
   - GenImageChecked takes the two Colors inline; the atlas texture is
     assigned to all nine materials by nine explicit shim calls (a
     jank loop cannot carry the native models)."
+  (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
-
-;; The C's GenMeshCustom, verbatim: a single triangle with MemAlloc'd
-;; attribute arrays. Plus the usual material-texture write shim.
-(cpp/raw "static Mesh jank_gen_mesh_custom(void) {
-  Mesh mesh = { 0 };
-  mesh.triangleCount = 1;
-  mesh.vertexCount = mesh.triangleCount*3;
-  mesh.vertices = (float *)MemAlloc(mesh.vertexCount*3*sizeof(float));
-  mesh.texcoords = (float *)MemAlloc(mesh.vertexCount*2*sizeof(float));
-  mesh.normals = (float *)MemAlloc(mesh.vertexCount*3*sizeof(float));
-  mesh.vertices[0] = 0; mesh.vertices[1] = 0; mesh.vertices[2] = 0;
-  mesh.normals[0] = 0; mesh.normals[1] = 1; mesh.normals[2] = 0;
-  mesh.texcoords[0] = 0; mesh.texcoords[1] = 0;
-  mesh.vertices[3] = 1; mesh.vertices[4] = 0; mesh.vertices[5] = 2;
-  mesh.normals[3] = 0; mesh.normals[4] = 1; mesh.normals[5] = 0;
-  mesh.texcoords[2] = 0.5f; mesh.texcoords[3] = 1.0f;
-  mesh.vertices[6] = 2; mesh.vertices[7] = 0; mesh.vertices[8] = 0;
-  mesh.normals[6] = 0; mesh.normals[7] = 1; mesh.normals[8] = 0;
-  mesh.texcoords[4] = 1; mesh.texcoords[5] = 0;
-  UploadMesh(&mesh, false);
-  return mesh;
-}
-static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -74,17 +50,47 @@ static void jank_model_set_texture(Model* m, Texture2D tex) {
         m5 (cpp/LoadModelFromMesh (cpp/GenMeshTorus (cpp/float 0.25) (cpp/float 4.0) 16 32))
         m6 (cpp/LoadModelFromMesh (cpp/GenMeshKnot (cpp/float 1.0) (cpp/float 2.0) 16 128))
         m7 (cpp/LoadModelFromMesh (cpp/GenMeshPoly 5 (cpp/float 2.0)))
-        m8 (cpp/LoadModelFromMesh (cpp/jank_gen_mesh_custom))]
+        ;; the C's GenMeshCustom: one triangle, built field by field.
+        ;; cpp/new with no args value-initialises (the C's `= { 0 }`), the
+        ;; three buffers come from MemAlloc reinterpreted as float*, and
+        ;; cpp/aget + cpp/= fill them.
+        custom (cpp/new cpp/Mesh)
+        _ (do (cpp/= (.-triangleCount (cpp/* custom)) (cpp/int 1))
+              (cpp/= (.-vertexCount (cpp/* custom)) (cpp/int 3))
+              (cpp/= (.-vertices (cpp/* custom))
+                     (cpp/unsafe-cast (:* cpp/float) (cpp/MemAlloc (cpp/cast cpp/uint 36))))
+              (cpp/= (.-texcoords (cpp/* custom))
+                     (cpp/unsafe-cast (:* cpp/float) (cpp/MemAlloc (cpp/cast cpp/uint 24))))
+              (cpp/= (.-normals (cpp/* custom))
+                     (cpp/unsafe-cast (:* cpp/float) (cpp/MemAlloc (cpp/cast cpp/uint 36))))
+              (doseq [[i v] (map-indexed vector [0.0 0.0 0.0  1.0 0.0 2.0  2.0 0.0 0.0])]
+                (cpp/= (cpp/aget (.-vertices (cpp/* custom)) (cpp/int i)) (cpp/float v)))
+              (doseq [[i v] (map-indexed vector [0.0 1.0 0.0  0.0 1.0 0.0  0.0 1.0 0.0])]
+                (cpp/= (cpp/aget (.-normals (cpp/* custom)) (cpp/int i)) (cpp/float v)))
+              (doseq [[i v] (map-indexed vector [0.0 0.0  0.5 1.0  1.0 0.0])]
+                (cpp/= (cpp/aget (.-texcoords (cpp/* custom)) (cpp/int i)) (cpp/float v)))
+              (cpp/UploadMesh custom false)
+              nil)
+        m8 (cpp/LoadModelFromMesh (cpp/* custom))]
 
-    (cpp/jank_model_set_texture (cpp/& m0) texture)
-    (cpp/jank_model_set_texture (cpp/& m1) texture)
-    (cpp/jank_model_set_texture (cpp/& m2) texture)
-    (cpp/jank_model_set_texture (cpp/& m3) texture)
-    (cpp/jank_model_set_texture (cpp/& m4) texture)
-    (cpp/jank_model_set_texture (cpp/& m5) texture)
-    (cpp/jank_model_set_texture (cpp/& m6) texture)
-    (cpp/jank_model_set_texture (cpp/& m7) texture)
-    (cpp/jank_model_set_texture (cpp/& m8) texture)
+    (md/set-texture! (cpp/box (cpp/new cpp/Model m0))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model m1))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model m2))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model m3))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model m4))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model m5))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model m6))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model m7))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model m8))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
 
     (cpp/SetTargetFPS 60)
 

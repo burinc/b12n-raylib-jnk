@@ -21,30 +21,6 @@
     (ALBEDO = the atlas, METALNESS = the lightmap's texture)."
   (:include "raylib.h" "rlgl.h" "raymath.h"))
 
-;; The C's texcoords2 upload, verbatim (no jank spelling for the
-;; malloc'd attribute array + VAO wiring), plus Material/RT helpers.
-(cpp/raw "static void jank_mesh_add_lightmap_uvs(Mesh* mesh) {
-  mesh->texcoords2 = (float *)RL_MALLOC(mesh->vertexCount*2*sizeof(float));
-  mesh->texcoords2[0] = 0.0f; mesh->texcoords2[1] = 0.0f;
-  mesh->texcoords2[2] = 1.0f; mesh->texcoords2[3] = 0.0f;
-  mesh->texcoords2[4] = 0.0f; mesh->texcoords2[5] = 1.0f;
-  mesh->texcoords2[6] = 1.0f; mesh->texcoords2[7] = 1.0f;
-  mesh->vboId[SHADER_LOC_VERTEX_TEXCOORD02] =
-    rlLoadVertexBuffer(mesh->texcoords2, mesh->vertexCount*2*sizeof(float), false);
-  rlEnableVertexArray(mesh->vaoId);
-  rlSetVertexAttribute(5, 2, RL_FLOAT, 0, 0, 0); /* index 5 = texcoords2 */
-  rlEnableVertexAttribute(5);
-  rlDisableVertexArray();
-}
-static void jank_mat_set_shader(Material* m, Shader s) { m->shader = s; }
-static void jank_mat_set_texture(Material* m, int map, Texture2D tex) {
-  m->maps[map].texture = tex;
-}
-static void jank_rt_trilinear(RenderTexture2D* rt) {
-  GenTextureMipmaps(&rt->texture);
-  SetTextureFilter(rt->texture, TEXTURE_FILTER_TRILINEAR);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def MAP-SIZE 16)
@@ -69,15 +45,30 @@ static void jank_rt_trilinear(RenderTexture2D* rt) {
         material (cpp/LoadMaterialDefault)]
 
     ;; second UV channel for the lightmap (GenMeshPlane has none)
-    (cpp/jank_mesh_add_lightmap_uvs (cpp/& mesh))
+    ;; GenMeshPlane has no second UV channel, so allocate one and register
+    ;; it as vertex attribute 5 (texcoords2).
+    (cpp/= (.-texcoords2 mesh)
+           (cpp/unsafe-cast (:* cpp/float)
+                            (cpp/MemAlloc (cpp/cast cpp/uint (* 2 4 (int (+ 0.0 (.-vertexCount mesh))))))))
+    (doseq [[i v] (map-indexed vector [0.0 0.0  1.0 0.0  0.0 1.0  1.0 1.0])]
+      (cpp/= (cpp/aget (.-texcoords2 mesh) (cpp/int i)) (cpp/float v)))
+    (cpp/= (cpp/aget (.-vboId mesh) (cpp/int cpp/SHADER_LOC_VERTEX_TEXCOORD02))
+           (cpp/rlLoadVertexBuffer (.-texcoords2 mesh)
+                                   (cpp/int (* 2 4 (int (+ 0.0 (.-vertexCount mesh)))))
+                                   (cpp/bool false)))
+    (cpp/rlEnableVertexArray (.-vaoId mesh))
+    (cpp/rlSetVertexAttribute (cpp/int 5) (cpp/int 2) (cpp/int cpp/RL_FLOAT)
+                              (cpp/bool false) (cpp/int 0) (cpp/int 0))
+    (cpp/rlEnableVertexAttribute (cpp/int 5))
+    (cpp/rlDisableVertexArray)
 
     (cpp/GenTextureMipmaps (cpp/& texture))
     (cpp/SetTextureFilter texture cpp/TEXTURE_FILTER_TRILINEAR)
 
-    (cpp/jank_mat_set_shader (cpp/& material) shader)
-    (cpp/jank_mat_set_texture (cpp/& material) (cpp/int cpp/MATERIAL_MAP_ALBEDO) texture)
-    (cpp/jank_mat_set_texture (cpp/& material) (cpp/int cpp/MATERIAL_MAP_METALNESS)
-                              (.-texture lightmap))
+    (cpp/= (.-shader material) shader)
+    (cpp/= (.-texture (cpp/aget (.-maps material) (cpp/int cpp/MATERIAL_MAP_ALBEDO))) texture)
+    (cpp/= (.-texture (cpp/aget (.-maps material) (cpp/int cpp/MATERIAL_MAP_METALNESS)))
+           (.-texture lightmap))
 
     ;; bake three additive flames into the lightmap, once (a jank helper
     ;; can't take the Texture/Color natives - rule 2 - so they stay inline)
@@ -107,7 +98,8 @@ static void jank_rt_trilinear(RenderTexture2D* rt) {
       (cpp/BeginBlendMode cpp/BLEND_ALPHA)
       (cpp/EndTextureMode))
 
-    (cpp/jank_rt_trilinear (cpp/& lightmap))
+    (cpp/GenTextureMipmaps (cpp/& (.-texture lightmap)))
+    (cpp/SetTextureFilter (.-texture lightmap) cpp/TEXTURE_FILTER_TRILINEAR)
 
     (cpp/SetTargetFPS 60)
 

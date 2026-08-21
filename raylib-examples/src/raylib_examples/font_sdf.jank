@@ -23,31 +23,6 @@
   (:require [clojure.string :as string])
   (:include "raylib.h"))
 
-;; Font assembly kept in C: LoadFontData's int* out-param and
-;; GenImageFontAtlas's Rectangle** out-param have no jank spelling yet.
-;; Parameters mirror the C: default = 95 glyphs, 4px padding, pack 0;
-;; SDF = autocount, 0 padding, skyline pack 1.
-(cpp/raw "static Font jank_build_font(const char* path, int sdf) {
-  int fileSize = 0;
-  unsigned char *fileData = LoadFileData(path, &fileSize);
-  Font font = { 0 };
-  font.baseSize = 16;
-  font.glyphCount = 95;
-  if (sdf) {
-    font.glyphs = LoadFontData(fileData, fileSize, 16, 0, 0, FONT_SDF, &font.glyphCount);
-    Image atlas = GenImageFontAtlas(font.glyphs, &font.recs, 95, 16, 0, 1);
-    font.texture = LoadTextureFromImage(atlas);
-    UnloadImage(atlas);
-  } else {
-    font.glyphs = LoadFontData(fileData, fileSize, 16, 0, 95, FONT_DEFAULT, &font.glyphCount);
-    Image atlas = GenImageFontAtlas(font.glyphs, &font.recs, 95, 16, 4, 0);
-    font.texture = LoadTextureFromImage(atlas);
-    UnloadImage(atlas);
-  }
-  UnloadFileData(fileData);
-  return font;
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/text/resources/")
@@ -60,13 +35,46 @@
         dot (string/index-of s ".")]
     (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
 
+(defn- build-font!
+  "The C's LoadFontData + GenImageFontAtlas pair, returning a BOXED Font.
+
+  Two out-params drive this and both are ordinary jank. LoadFontData
+  reports the glyph count through an int*, which is the address of the
+  font's OWN glyphCount field; GenImageFontAtlas takes a Rectangle**, the
+  address of the font's recs field, and fills it in. cpp/& produces both.
+
+  Boxed on the way out: a Font has no conversion trait, so a jank fn
+  cannot return one bare."
+  [path sdf?]
+  (let [f (cpp/new cpp/Font)
+        size (cpp/int 0)
+        data (cpp/LoadFileData path (cpp/& size))]
+    (cpp/= (.-baseSize (cpp/* f)) (cpp/int 16))
+    (cpp/= (.-glyphCount (cpp/* f)) (cpp/int 95))
+    (cpp/= (.-glyphs (cpp/* f))
+           (cpp/LoadFontData data size (cpp/int 16) cpp/nullptr
+                             (cpp/int (if sdf? 0 95))
+                             (cpp/int (if sdf? cpp/FONT_SDF cpp/FONT_DEFAULT))
+                             (cpp/& (.-glyphCount (cpp/* f)))))
+    (let [atlas (cpp/GenImageFontAtlas (.-glyphs (cpp/* f))
+                                       (cpp/& (.-recs (cpp/* f)))
+                                       (cpp/int 95) (cpp/int 16)
+                                       (cpp/int (if sdf? 0 4))
+                                       (cpp/int (if sdf? 1 0)))]
+      (cpp/= (.-texture (cpp/* f)) (cpp/LoadTextureFromImage atlas))
+      (cpp/UnloadImage atlas))
+    (cpp/UnloadFileData data)
+    (cpp/box f)))
+
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - font sdf (jank)")
 
   (let [font-path (str RES "anonymous_pro_bold.ttf")
-        font-default (cpp/jank_build_font font-path 0)
-        font-sdf (cpp/jank_build_font font-path 1)
+        default-box (build-font! font-path false)
+        sdf-box (build-font! font-path true)
+        font-default (cpp/* (cpp/unbox (:* cpp/Font) default-box))
+        font-sdf (cpp/* (cpp/unbox (:* cpp/Font) sdf-box))
         shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/sdf.fs"))]
 
     ;; bilinear filtering on the atlas is required for SDF sampling
