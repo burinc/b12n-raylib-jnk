@@ -265,9 +265,9 @@ Not raylib ports. These demonstrate the language boundary itself, and are
 counted separately so the raylib port totals above stay comparable with
 upstream.
 
-| `bb` name | What it shows |
-|---|---|
-| `opaque-boxes` | A native `Color` returned from a fn, kept in an immutable vector and captured in a closure, via `cpp/new` + `cpp/box` + `cpp/unbox`. See [`native-value-lifetimes.md`](native-value-lifetimes.md#getting-a-native-value-out-anyway). |
+| | `bb` name | What it shows |
+|---|---|---|
+| [<img src="../demos/opaque-boxes.gif" width="80">](../demos/opaque-boxes.gif) | `opaque-boxes` | A native `Color` returned from a fn, kept in an immutable vector and captured in a closure, via `cpp/new` + `cpp/box` + `cpp/unbox`. See [`native-value-lifetimes.md`](native-value-lifetimes.md#getting-a-native-value-out-anyway). |
 
 ## Adding an example — the four touchpoints
 
