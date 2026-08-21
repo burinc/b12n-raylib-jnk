@@ -1,4 +1,4 @@
-# The example catalog — 209 raylib demos in jank
+# The example catalog: 209 raylib demos in jank
 
 A map of the whole suite. Each example is one namespace under
 `raylib-examples/src/raylib_examples/`, runnable by a friendly `bb <name>`
@@ -30,8 +30,8 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/delta-time.gif" width="80">](../demos/delta-time.gif) | `delta-time` | Delta-time vs per-frame movement |
 | [<img src="../demos/basic-screen-manager.gif" width="80">](../demos/basic-screen-manager.gif) | `basic-screen-manager` | A LOGO/TITLE/GAMEPLAY/ENDING flow |
 | [<img src="../demos/camera-2d-platformer.gif" width="80">](../demos/camera-2d-platformer.gif) | `camera-2d-platformer` | A platformer with 5 camera-follow modes |
-| — | `input-gestures` | Log detected mouse/touch gestures |
-| — | `window-letterbox` | A fixed 640x480 game letterboxed on resize |
+| *(none)* | `input-gestures` | Log detected mouse/touch gestures |
+| *(none)* | `window-letterbox` | A fixed 640x480 game letterboxed on resize |
 | [<img src="../demos/camera-2d-split-screen.gif" width="80">](../demos/camera-2d-split-screen.gif) | `camera-2d-split-screen` | Two players, two cameras, split screen |
 | [<img src="../demos/smooth-pixelperfect.gif" width="80">](../demos/smooth-pixelperfect.gif) | `smooth-pixelperfect` | Sub-pixel smoothing of upscaled pixel art |
 | [<img src="../demos/camera-2d-mouse-zoom.gif" width="80">](../demos/camera-2d-mouse-zoom.gif) | `camera-2d-mouse-zoom` | Pan + zoom-to-cursor a 2D camera |
@@ -40,12 +40,12 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/picking-3d.gif" width="80">](../demos/picking-3d.gif) | `picking-3d` | Click a 3D box to pick it with a world-space ray |
 | [<img src="../demos/input-multitouch.gif" width="80">](../demos/input-multitouch.gif) | `input-multitouch` | A ball at every active touch/mouse point |
 | [<img src="../demos/input-virtual-controls.gif" width="80">](../demos/input-virtual-controls.gif) | `input-virtual-controls` | An on-screen D-pad moving a player circle |
-| — | `window-flags` | Toggle window state flags live with a bouncing ball |
+| *(none)* | `window-flags` | Toggle window state flags live with a bouncing ball |
 | [<img src="../demos/render-texture.gif" width="80">](../demos/render-texture.gif) | `render-texture` | A ball bouncing inside a rotated off-screen render texture |
 | [<img src="../demos/monitor-detector.gif" width="80">](../demos/monitor-detector.gif) | `monitor-detector` | A scaled map of every attached monitor with its specs |
 | [<img src="../demos/input-actions.gif" width="80">](../demos/input-actions.gif) | `input-actions` | Remappable abstract actions (WASD/arrows) via a keyset map |
 | [<img src="../demos/highdpi-demo.gif" width="80">](../demos/highdpi-demo.gif) | `highdpi-demo` | Logical-points vs physical-pixels grids with live DPI scale |
-| — | `highdpi-testbed` | A HighDPI diagnostic overlay: grid, monitor/DPI info, crosshair |
+| *(none)* | `highdpi-testbed` | A HighDPI diagnostic overlay: grid, monitor/DPI info, crosshair |
 | [<img src="../demos/random-sequence.gif" width="80">](../demos/random-sequence.gif) | `random-sequence` | Colored bars in a random no-repeat permutation (LoadRandomSequence) |
 | [<img src="../demos/clipboard-text.gif" width="80">](../demos/clipboard-text.gif) | `clipboard-text` | Type + cut/copy/paste with the system clipboard |
 | [<img src="../demos/undo-redo.gif" width="80">](../demos/undo-redo.gif) | `undo-redo` | A grid player with a 26-slot undo/redo ring buffer |
@@ -176,7 +176,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/geometric-shapes.gif" width="80">](../demos/geometric-shapes.gif) | `geometric-shapes` | 3D cubes/spheres/cylinders/capsules on a grid |
 | [<img src="../demos/box-collisions.gif" width="80">](../demos/box-collisions.gif) | `box-collisions` | A player cube colliding with 3D obstacles |
 | [<img src="../demos/billboard-rendering.gif" width="80">](../demos/billboard-rendering.gif) | `billboard-rendering` | Camera-facing billboards + an orbiting camera |
-| — | `waving-cubes` | 3375 rainbow cubes waving in 3D |
+| *(none)* | `waving-cubes` | 3375 rainbow cubes waving in 3D |
 | [<img src="../demos/orthographic-projection.gif" width="80">](../demos/orthographic-projection.gif) | `orthographic-projection` | Toggle perspective vs orthographic camera |
 | [<img src="../demos/tesseract-view.gif" width="80">](../demos/tesseract-view.gif) | `tesseract-view` | A rotating 4D hypercube projected to 3D |
 | [<img src="../demos/rlgl-solar-system.gif" width="80">](../demos/rlgl-solar-system.gif) | `rlgl-solar-system` | Sun/Earth/Moon via the rlgl matrix stack |
@@ -235,7 +235,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/normalmap-rendering.gif" width="80">](../demos/normalmap-rendering.gif) | `normalmap-rendering` | A spinning plane lit through a tangent-space normal map |
 | [<img src="../demos/simple-mask.gif" width="80">](../demos/simple-mask.gif) | `simple-mask` | An animated mask texture eats holes in two models' plasma skin |
 | [<img src="../demos/vertex-displacement.gif" width="80">](../demos/vertex-displacement.gif) | `vertex-displacement` | A plane mesh riding Perlin-noise waves in the vertex shader |
-| — | `rlgl-compute` | Game of Life stepped entirely on the GPU by compute shaders |
+| *(none)* | `rlgl-compute` | Game of Life stepped entirely on the GPU by compute shaders |
 | [<img src="../demos/mesh-instancing.gif" width="80">](../demos/mesh-instancing.gif) | `mesh-instancing` | Ten thousand lit cubes in one draw call (DrawMeshInstanced) |
 | [<img src="../demos/lightmap-rendering.gif" width="80">](../demos/lightmap-rendering.gif) | `lightmap-rendering` | A plane lit by a baked lightmap through a second UV channel |
 | [<img src="../demos/shadowmap-rendering.gif" width="80">](../demos/shadowmap-rendering.gif) | `shadowmap-rendering` | Real shadows: an animated robot under the shadowmapping algorithm |
@@ -269,11 +269,11 @@ upstream.
 |---|---|---|
 | [<img src="../demos/opaque-boxes.gif" width="80">](../demos/opaque-boxes.gif) | `opaque-boxes` | A native `Color` returned from a fn, kept in an immutable vector and captured in a closure, via `cpp/new` + `cpp/box` + `cpp/unbox`. See [`native-value-lifetimes.md`](native-value-lifetimes.md#getting-a-native-value-out-anyway). |
 
-## Adding an example — the four touchpoints
+## Adding an example: the four touchpoints
 
 See [`porting-workflow.md`](porting-workflow.md) for the full end-to-end
 process (source of truth, docstring format, the headless smoke test). The
-short version: a new example touches four places in the same commit —
+short version is that a new example touches four places in the same commit:
 `raylib-examples/project.clj` (a `:profiles` entry), `bb.edn` (a `bb <name>`
 task), `bb/helpers.clj` (a row in the `examples` registry vector, including
 its `:cat`), and `raylib-examples/README.md` (move it from the "not yet
@@ -282,8 +282,8 @@ per-example catalog, so it needs no change.
 
 ## See also
 
-- [`porting-workflow.md`](porting-workflow.md) — the full registration
+- [`porting-workflow.md`](porting-workflow.md): the full registration
   recipe and the headless smoke-test technique this catalog's examples were
   all verified with.
-- [`native-value-lifetimes.md`](native-value-lifetimes.md) — the interop
+- [`native-value-lifetimes.md`](native-value-lifetimes.md): the interop
   rule every example in this catalog is written against.

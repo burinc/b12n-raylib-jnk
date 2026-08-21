@@ -1,9 +1,9 @@
 # Native value lifetimes
 
-jank is **native** Clojure (C++/LLVM) — no JVM and no Java interop. The
+jank is **native** Clojure (C++/LLVM), with no JVM and no Java interop. The
 compiler statically type-checks the boundary between jank objects and native
 C++ values, and this page is about what that boundary actually enforces.
-Each lesson names the committed example that proves it — those files are the
+Each lesson names the committed example that proves it; those files are the
 running test suite for this document.
 
 ## The rule that explains most crashes
@@ -24,29 +24,29 @@ into a runtime object the way the JVM can. What follows from that:
 
 That second case is the one this repo lives in, and the rest of this page is
 about it. **It is a restriction on implicit conversion, not a life sentence
-for the value** — see [Getting a native value out anyway](#getting-a-native-value-out-anyway)
+for the value**. See [Getting a native value out anyway](#getting-a-native-value-out-anyway)
 below, which is the supported way through.
 
 ### Where a non-convertible value works without any ceremony
 
 A `Color`, `Vector2`, `Rectangle`, `Camera2D`, ... may be:
 
-- constructed inline as a call argument — `(cpp/DrawCircleV (cpp/Vector2 ...) ...)` ✅
+- constructed inline as a call argument: `(cpp/DrawCircleV (cpp/Vector2 ...) ...)` ✅
 - bound to a `let`-local and used in the same scope ✅
 - bound in a `let` OUTSIDE the frame loop and used inside it (lexical
-  capture) ✅ — this is how create-once GPU resources live
+  capture) ✅. This is how create-once GPU resources live
   (`lines_drawing.jank`'s RenderTexture, `words_alignment.jank`'s Font)
 
 ### Where it fails, if you do nothing about it
 
-- returned from a fn ❌ — `returning a native object of type 'Color', which
+- returned from a fn ❌: `returning a native object of type 'Color', which
   is not convertible to a jank runtime object`. Even via nested `if`
   (`dashed_line.jank` learned this).
-- passed as a fn parameter and then used in a native call ❌ — it boxes to an
+- passed as a fn parameter and then used in a native call ❌: it boxes to an
   `object_ref` and the native call rejects it (`digital_clock.jank`'s
   draw-hand; `tiled_drawing.jank` hit this trying to pass a `Texture2D` to a
-  `draw-tiled` helper — `No matching call to 'DrawTexturePro' ... argument 0
-  having type 'jank::runtime::object_ref &'` — and had to inline the helper so
+  `draw-tiled` helper, `No matching call to 'DrawTexturePro' ... argument 0
+  having type 'jank::runtime::object_ref &'`, and had to inline the helper so
   the texture stayed a captured `let`-local).
 - carried through `loop`/`recur` state ❌ (`input_mouse.jank`).
 
@@ -67,7 +67,7 @@ jank has opaque boxes for exactly this. `cpp/box` puts a raw pointer into an
 ordinary jank object that can then travel anywhere in the runtime;
 `cpp/unbox` takes it back out, and jank checks the type you ask for against
 the one that went in. Because the box can outlive the call, the value it
-points at must be heap-allocated with `cpp/new` — a `let`-local would be
+points at must be heap-allocated with `cpp/new`; a `let`-local would be
 destroyed at the end of its scope, leaving the box dangling.
 
 ```clojure
@@ -112,14 +112,14 @@ It takes an lvalue, so both shapes work:
 (cpp/= (cpp/aget (.-locs sh) (cpp/int i)) (cpp/int 7))  ; array element
 ```
 
-`clojure.core/aset` is sugar for the second — it expands to exactly that.
+`clojure.core/aset` is sugar for the second; it expands to exactly that.
 **`cpp/aset` does not exist**, which is a trap, because `cpp/aget` does and
 the pair looks symmetric. This project used C shims for assignment far longer
 than it needed to for precisely that reason.
 
 `raylib-examples/src/raylib_examples/models.jank` is the worked example:
-binding a texture or shader into a `Model` material — the most repeated bit
-of C in this suite — is now ordinary jank.
+binding a texture or shader into a `Model` material, the most repeated bit
+of C in this suite, is now ordinary jank.
 
 ## The four faces of one boundary rule
 
@@ -130,7 +130,7 @@ next one never looks like the last:
 1. **A native argument arrives as an `object_ref`.** Pass a `Shader` to a
    jank fn and the native call inside rejects it. Box it.
 2. **Boxing cannot be wrapped in a fn.** A `(defn box-it [s] (cpp/box (cpp/new cpp/Shader s)))`
-   fails identically — by the time the body runs, `s` is already an
+   fails identically: by the time the body runs, `s` is already an
    `object_ref` and `cpp/new` has nothing to copy from. **Box where the value
    is still native**, at the `let` that produced it.
 3. **A native value cannot be returned.** So you cannot factor out an
@@ -150,15 +150,15 @@ consumer.
 
 > **This section predates opaque boxes and may be obsolete.** A box held in
 > an atom should be able to carry recreated native state across frames, which
-> is what the static exists for. That has **not** been probed — three
+> is what the static exists for. That has **not** been probed; three
 > examples still use the static pattern (`viewport_scaling`, `game_of_life`,
 > `hot_reloading`). Treat what follows as the pattern that is known to work,
 > not as the only one.
 
 When a native resource must BOTH persist across frames AND be recreated at
 runtime with computed sizes, neither of the two usual homes works: `loop`/
-`recur` state can't carry a native value (the same rule as above — a native
-value can't cross a fn boundary — applied to loop/recur state), and a
+`recur` state can't carry a native value (the same rule as above, that a native
+value can't cross a fn boundary, applied to loop/recur state), and a
 create-once outer-`let` local can't be rebound. Park the value in a `cpp/raw` static
 with tiny accessor fns instead:
 
@@ -202,7 +202,7 @@ across fns.)
 ## Create-once native resources
 
 `LoadRenderTexture` / `GetFontDefault` style resources bind in a `let`
-outside the frame loop and get used inside it — lexical capture keeps them
+outside the frame loop and get used inside it; lexical capture keeps them
 native. Unload after the loop.
 
 ```clojure
@@ -213,5 +213,5 @@ native. Unload after the loop.
 ```
 
 Two RenderTextures at once work (`camera_2d_split_screen.jank`). Blit a
-RenderTexture with a **negative source height** — RTs are stored upside
+RenderTexture with a **negative source height**: RTs are stored upside
 down (`lines_drawing.jank`, `window_letterbox.jank`).
