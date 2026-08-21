@@ -1,0 +1,73 @@
+(ns raylib-examples.models
+  "Model material helpers in pure jank.
+
+  Binding a texture or a shader into a Model's material is the single most
+  repeated bit of C in this suite - `m->materials[0].maps[..].texture = tex`
+  and `m->materials[0].shader = s` appeared in 25 examples as a per-file
+  cpp/raw shim. None of it needs C.
+
+  jank's assignment form is `cpp/=`. It takes an lvalue, so a struct field
+  reached through `.-field` or an array element reached through `cpp/aget`
+  can be written directly. (This is what `clojure.core/aset` expands to; it
+  is not mentioned in the book's native-values page, which is why this
+  project used C for it far longer than it needed to.)
+
+  Two gotchas, both of which cost a compile:
+
+  - `cpp/=` yields the assigned lvalue, which is a native reference. A fn
+    whose last form is an assignment therefore tries to RETURN that
+    reference and fails with `not convertible to a jank runtime object`.
+    Every fn here ends in an explicit `nil`. The same rule rules out a
+    tidy `(defn- material [m i] ...)` helper: it would return a
+    `Material &`. The lookup is inlined into each fn instead.
+  - Model and Texture2D have no conversion trait, so they cannot be passed
+    as jank fn arguments directly. Callers box them INLINE, where the value
+    is still native:
+
+      (cpp/box (cpp/new cpp/Model model))
+
+    Writing through the box reaches the caller's model, because Model holds
+    `Material *materials` and a copy shares that array.
+
+  See docs/guide/native-value-lifetimes.md."
+  (:include "raylib.h"))
+
+(defn set-map-texture!
+  "model.materials[mat].maps[map].texture = texture"
+  [m-box mat map t-box]
+  (let [m (cpp/unbox (:* cpp/Model) m-box)]
+    (cpp/= (.-texture (cpp/aget (.-maps (cpp/aget (.-materials m) (cpp/int mat)))
+                                (cpp/int map)))
+           (cpp/* (cpp/unbox (:* cpp/Texture2D) t-box))))
+  nil)
+
+(defn set-texture!
+  "model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture"
+  [m-box t-box]
+  (set-map-texture! m-box 0 cpp/MATERIAL_MAP_DIFFUSE t-box))
+
+(defn set-shader!
+  "model.materials[mat].shader = shader"
+  [m-box mat sh-box]
+  (let [m (cpp/unbox (:* cpp/Model) m-box)]
+    (cpp/= (.-shader (cpp/aget (.-materials m) (cpp/int mat)))
+           (cpp/* (cpp/unbox (:* cpp/Shader) sh-box))))
+  nil)
+
+(defn set-shader-all!
+  "Set the shader on every material of the model."
+  [m-box n sh-box]
+  (loop [i 0]
+    (when (< i n)
+      (set-shader! m-box i sh-box)
+      (recur (inc i))))
+  nil)
+
+(defn set-map-color!
+  "model.materials[0].maps[map].color = color"
+  [m-box map c-box]
+  (let [m (cpp/unbox (:* cpp/Model) m-box)]
+    (cpp/= (.-color (cpp/aget (.-maps (cpp/aget (.-materials m) (cpp/int 0)))
+                              (cpp/int map)))
+           (cpp/* (cpp/unbox (:* cpp/Color) c-box))))
+  nil)

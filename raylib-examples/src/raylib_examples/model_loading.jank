@@ -21,17 +21,11 @@
   - Simplification vs the C: the drag&drop model/texture-swap path is
     dropped (a runtime-replaced Model needs the cpp/raw static
     pattern; drop_files already demos dropped-file handling)."
+  (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
 
 ;; Material field write + mesh-bounds read (no jank spelling for
 ;; struct-array member access on the Model).
-(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}
-static BoundingBox jank_model_bounds(Model* m) {
-  return GetMeshBoundingBox(m->meshes[0]);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/models/resources/")
@@ -47,9 +41,14 @@ static BoundingBox jank_model_bounds(Model* m) {
                              cpp/CAMERA_PERSPECTIVE)
         model (cpp/LoadModel (str RES "models/obj/castle.obj"))
         texture (cpp/LoadTexture (str RES "models/obj/castle_diffuse.png"))
-        bounds (cpp/jank_model_bounds (cpp/& model))]
+        ;; raylib already exposes this; the old C shim only existed to take
+        ;; a Model* - model is native right here, so call it directly.
+        bounds (cpp/GetMeshBoundingBox (cpp/aget (.-meshes model) (cpp/int 0)))
+        ;; boxed here, where they are still native (see models ns)
+        m-box (cpp/box (cpp/new cpp/Model model))
+        t-box (cpp/box (cpp/new cpp/Texture2D texture))]
 
-    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (md/set-texture! m-box t-box)
 
     (cpp/SetTargetFPS 60)
 
