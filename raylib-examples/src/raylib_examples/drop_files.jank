@@ -11,8 +11,8 @@
     drops on - no preallocation, no fixed cap.
   - IsFileDropped + LoadDroppedFiles return a FilePathList (char** paths) by
     value; jank can't carry it across frames (rule 2), so each drop is
-    snapshotted into the jank vector immediately (paths[i] via the same
-    cpp/raw subscript shim directory-files uses) and UnloadDroppedFiles frees
+    snapshotted into the jank vector immediately (paths[i] via `cpp/aget`,
+    the same reading directory-files uses) and UnloadDroppedFiles frees
     the native list."
   (:include "raylib.h"))
 

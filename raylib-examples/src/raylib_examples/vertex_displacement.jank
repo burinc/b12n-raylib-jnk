@@ -13,7 +13,7 @@
     + rlEnableTexture + rlSetUniformSampler); the .-id field reads
     feed the rlgl calls directly.
   - GenImagePerlinNoise is a plain call; the material shader write is
-    the usual (cpp/& model) shim; the time FLOAT uniform rides the
+    models.jank; the time FLOAT uniform rides the
     rlights setter toolbox (location hoisted out of the loop,
     unlike the C's per-frame lookup)."
   (:require [raylib-examples.models :as md]

@@ -8,27 +8,13 @@
   Based on raylib/examples/shaders/shaders_mandelbrot_set.c
 
   jank-native notes:
-  - First INT uniform: the staging shim grows an int slot
-    (jank_ui_set + jank_set_uniform_i) beside the float buffer; all
-    calls stay in -main per the per-fn static rule.
+  - First INT uniform: cpp/new on a cpp/int gives SetShaderValue the
+    pointer it wants, exactly as the float and vector cases do.
   - The C's adaptive iteration formula (nested sqrtf/fabsf) becomes
     cpp/sqrt from math.h with an if-based abs; state (zoom, offset,
     iteration multiplier) threads as jank reals and uniforms re-send
     every frame (the julia-set simplification)."
   (:include "raylib.h" "math.h"))
-
-;; Uniform staging: float[4] for FLOAT/VEC2, an int slot for INT.
-;; Only -main touches these statics.
-(cpp/raw "static float jank_uf_buf[4] = { 0 };
-static int jank_ui_buf[1] = { 0 };
-static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
-static void jank_ui_set(int v) { jank_ui_buf[0] = v; }
-static void jank_set_uniform(Shader s, int loc, int type) {
-  SetShaderValue(s, loc, jank_uf_buf, type);
-}
-static void jank_set_uniform_i(Shader s, int loc) {
-  SetShaderValue(s, loc, jank_ui_buf, SHADER_UNIFORM_INT);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -101,13 +87,14 @@ static void jank_set_uniform_i(Shader s, int loc) {
                    oy)]
 
           ;; re-send all uniforms (iterations recomputed from the zoom)
-          (cpp/jank_uf_set 0 zoom)
-          (cpp/jank_set_uniform shader zoom-loc cpp/SHADER_UNIFORM_FLOAT)
-          (cpp/jank_uf_set 0 ox)
-          (cpp/jank_uf_set 1 oy)
-          (cpp/jank_set_uniform shader offset-loc cpp/SHADER_UNIFORM_VEC2)
-          (cpp/jank_ui_set (max-iterations zoom mult))
-          (cpp/jank_set_uniform_i shader iter-loc)
+          (cpp/SetShaderValue shader (int zoom-loc)
+                              (cpp/new cpp/float (cpp/float zoom)) cpp/SHADER_UNIFORM_FLOAT)
+          (cpp/SetShaderValue shader (int offset-loc)
+                              (cpp/new cpp/Vector2 (cpp/float ox) (cpp/float oy))
+                              cpp/SHADER_UNIFORM_VEC2)
+          (cpp/SetShaderValue shader (int iter-loc)
+                              (cpp/new cpp/int (cpp/int (max-iterations zoom mult)))
+                              cpp/SHADER_UNIFORM_INT)
 
           (cpp/BeginTextureMode target)
           (cpp/ClearBackground cpp/BLACK)

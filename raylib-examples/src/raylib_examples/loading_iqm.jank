@@ -8,10 +8,10 @@
 
   jank-native notes:
   - First IQM format (model + animations from separate files); the
-    usual animation shims, with the frame threaded as a jank int
-    wrapping at the keyframe count.
-  - The C's SetMaterialTexture(&model.materials[0], ...) is the
-    familiar material-texture write shim."
+    animation array binds in the outer let, with the frame threaded as
+    a jank int wrapping at the keyframe count.
+  - The C's SetMaterialTexture(&model.materials[0], ...) is
+    models.jank's set-texture!."
   (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
 

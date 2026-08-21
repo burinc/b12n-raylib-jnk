@@ -9,8 +9,8 @@
 
   jank-native notes:
   - First LoadTextureCubemap: Image in by value + the layout enum,
-    a Texture back - bound to MATERIAL_MAP_CUBEMAP via the map-slot
-    shim. rlDisableBackfaceCulling / rlDisableDepthMask around the
+    a Texture back - bound to MATERIAL_MAP_CUBEMAP via models.jank's
+    set-map-texture!. rlDisableBackfaceCulling / rlDisableDepthMask around the
     draw are direct rlgl calls.
   - Simplifications vs the C (both off by default there): the HDR
     panorama->cubemap path (GenTextureCubemap render-to-cubemap) and

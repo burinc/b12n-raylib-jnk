@@ -9,9 +9,8 @@
 
   jank-native notes:
   - All fractal state (c, zoom, offset, speed) threads as jank reals;
-    the three uniforms are re-sent every frame through the cpp/raw
-    static float buffer + jank_set_uniform wrapper (the texture-outline
-    pattern, calls confined to -main). The C only re-sends zoom/offset
+    the three uniforms are re-sent every frame as plain SetShaderValue
+    calls over cpp/new Vector2/float. The C only re-sends zoom/offset
     on change - re-sending every frame is visually identical and
     simpler.
   - The C's pointsOfInterest float[6][2] is a jank vector of pairs."

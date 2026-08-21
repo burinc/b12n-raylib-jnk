@@ -9,17 +9,9 @@
 
   jank-native notes:
   - The simplest animated-uniform shader port: one FLOAT uniform
-    (uTime) re-staged every frame through the cpp/raw static float
-    buffer + jank_set_uniform wrapper (the texture-outline pattern),
-    fed from GetTime rather than an accumulated frame delta."
+    (uTime) re-sent every frame as a plain SetShaderValue over a
+    cpp/new float, fed from GetTime rather than an accumulated frame delta."
   (:include "raylib.h"))
-
-;; Uniform staging (see texture-outline); only -main touches these.
-(cpp/raw "static float jank_uf_buf[4] = { 0 };
-static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
-static void jank_set_uniform(Shader s, int loc, int type) {
-  SetShaderValue(s, loc, jank_uf_buf, type);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -39,8 +31,8 @@ static void jank_set_uniform(Shader s, int loc, int type) {
 
     (loop []
       (when (cpp/! (cpp/WindowShouldClose))
-        (cpp/jank_uf_set 0 (+ 0.0 (cpp/GetTime)))
-        (cpp/jank_set_uniform shader time-loc cpp/SHADER_UNIFORM_FLOAT)
+        (cpp/SetShaderValue shader (int time-loc)
+                            (cpp/new cpp/float (cpp/float (+ 0.0 (cpp/GetTime)))) cpp/SHADER_UNIFORM_FLOAT)
 
         (cpp/BeginDrawing)
         (cpp/ClearBackground cpp/RAYWHITE)

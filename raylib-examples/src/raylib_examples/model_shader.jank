@@ -10,7 +10,7 @@
   jank-native notes:
   - The first model-based shader port after the Mesh/Model unblock:
     LoadModel(OBJ) + the material .shader / .texture field writes
-    (texture-tiling's (cpp/& model) shim pair) are all it takes.
+    (models.jank, which spells both with cpp/=) are all it takes.
   - SetConfigFlags(FLAG_MSAA_4X_HINT) before InitWindow works as a
     plain call with the C constant."
   (:require [raylib-examples.models :as md])

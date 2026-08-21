@@ -9,8 +9,9 @@
   Based on raylib/examples/models/models_animation_blending.c
 
   jank-native notes:
-  - First UpdateModelAnimationEx: a shim taking both animation
-    indices, both (fractional) frames and the blend factor.
+  - First UpdateModelAnimationEx: both animations are cpp/aget off the
+    ModelAnimation array, with both fractional frames and the blend
+    factor as cpp/floats.
   - The raygui dropdowns/sliders/progress bars become keyboard
     controls + hand-drawn bars (the animation-timing pattern).
   - The C's SUPPORT_GPU_SKINNING block is compiled out by default

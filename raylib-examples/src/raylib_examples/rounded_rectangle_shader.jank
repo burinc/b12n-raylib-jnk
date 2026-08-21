@@ -9,10 +9,9 @@
 
   jank-native notes:
   - First VEC4 uniforms: colors and the corner-radius/rectangle vectors
-    all ship as 4-float SetShaderValue calls. Rather than the mandelbrot
-    static float[4] + index-setter dance, this port adds tiny per-type C
-    setters (jank_set_vec4 / jank_set_vec2 / jank_set_float) that build
-    the array in C from scalar args, so each uniform is one cpp/ call.
+    all ship as 4-float SetShaderValue calls. raylib's own Vector4 and
+    Vector2 ARE the contiguous float arrays SetShaderValue wants, so
+    cpp/new produces the pointer directly and each uniform is one call.
   - The shader samples the 'rectangle' uniform in bottom-left origin, so
     each panel's y is flipped (HEIGHT - y - h) exactly as the C does.
   - Panels are plain jank data (a vector of maps); the draw loop doseqs

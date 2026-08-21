@@ -7,19 +7,11 @@
   Based on raylib/examples/shaders/shaders_texture_waves.c
 
   jank-native notes:
-  - Third shader port: seven float uniforms plus a vec2, all staged
-    through the cpp/raw static float buffer + jank_set_uniform wrapper
-    (the texture-outline pattern), calls confined to -main per the
-    per-fn static rule. The 'seconds' uniform updates every frame from
+  - Third shader port: seven float uniforms plus a vec2, each a plain
+    SetShaderValue over cpp/new. Nothing is shared between calls, so
+    they are free to live anywhere rather than being confined to -main. The 'seconds' uniform updates every frame from
     a jank real accumulated with GetFrameTime."
   (:include "raylib.h"))
-
-;; Uniform staging (see texture-outline); only -main touches these.
-(cpp/raw "static float jank_uf_buf[4] = { 0 };
-static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
-static void jank_set_uniform(Shader s, int loc, int type) {
-  SetShaderValue(s, loc, jank_uf_buf, type);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -42,15 +34,15 @@ static void jank_set_uniform(Shader s, int loc, int type) {
         speed-y-loc (int (cpp/GetShaderLocation shader "speedY"))]
 
     ;; constant uniforms (each staged then sent, one at a time)
-    (cpp/jank_uf_set 0 800.0)
-    (cpp/jank_uf_set 1 450.0)
-    (cpp/jank_set_uniform shader size-loc cpp/SHADER_UNIFORM_VEC2)
+    (cpp/SetShaderValue shader (int size-loc)
+                        (cpp/new cpp/Vector2 (cpp/float 800.0) (cpp/float 450.0))
+                        cpp/SHADER_UNIFORM_VEC2)
     (loop [i 0]
       (when (< i 6)
-        (cpp/jank_uf_set 0 (nth [25.0 25.0 5.0 5.0 8.0 8.0] i))
-        (cpp/jank_set_uniform shader
-                              (nth [freq-x-loc freq-y-loc amp-x-loc amp-y-loc speed-x-loc speed-y-loc] i)
-                              cpp/SHADER_UNIFORM_FLOAT)
+        (cpp/SetShaderValue shader
+                            (int (nth [freq-x-loc freq-y-loc amp-x-loc amp-y-loc speed-x-loc speed-y-loc] i))
+                            (cpp/new cpp/float (cpp/float (nth [25.0 25.0 5.0 5.0 8.0 8.0] i)))
+                            cpp/SHADER_UNIFORM_FLOAT)
         (recur (inc i))))
 
     (cpp/SetTargetFPS 60)
@@ -60,8 +52,8 @@ static void jank_set_uniform(Shader s, int loc, int type) {
       (when (cpp/! (cpp/WindowShouldClose))
         (let [seconds (+ seconds (+ 0.0 (cpp/GetFrameTime)))]
 
-          (cpp/jank_uf_set 0 seconds)
-          (cpp/jank_set_uniform shader seconds-loc cpp/SHADER_UNIFORM_FLOAT)
+          (cpp/SetShaderValue shader (int seconds-loc)
+                              (cpp/new cpp/float (cpp/float seconds)) cpp/SHADER_UNIFORM_FLOAT)
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)

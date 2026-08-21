@@ -11,8 +11,9 @@
   - First VOX format (the last probe-first model format); the four
     Models are let-locals cycled by a per-index cond (the
     mesh-generation pattern).
-  - Each model is centered by a shim computing its bounding-box
-    XZ-middle and setting a MatrixTranslate transform.
+  - Each model is centered by a local center-xz! taking a BOXED model:
+    it reads the bounding-box XZ-middle and cpp/=s a MatrixTranslate
+    transform. Boxed because Model has no conversion trait.
   - First UpdateCameraPro: movement/rotation Vector3s built inline
     from jank-computed key/mouse values, called on (cpp/& camera).
   - Lights + uniforms ride the rlights namespace."

@@ -8,10 +8,8 @@
 
   jank-native notes:
   - LoadRandomSequence returns a freshly malloc'd `int *` of `count`
-    shuffled values. jank can hold the pointer but can't index `seq[i]`
-    directly, so a tiny `cpp/raw` shim (`jank_seq_at`) does the C
-    subscript and hands back a boxed int - the same escape hatch
-    gif-player uses for image.data pointer arithmetic.
+    shuffled values. jank indexes it directly with `cpp/aget`, which
+    hands back a boxed int and needs no C.
   - The C keeps a malloc'd `ColorRect[]`; jank keeps an ordinary vector
     of `{:rgba :x :y :w :h}` maps instead - no native struct array, no
     RL_CALLOC / RL_FREE. Only the LoadRandomSequence int* needs interop.

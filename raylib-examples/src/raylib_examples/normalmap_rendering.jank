@@ -7,12 +7,13 @@
   Based on raylib/examples/shaders/shaders_normalmap_rendering.c
 
   jank-native notes:
-  - First MATERIAL_MAP_NORMAL use: a per-file shim assigns a texture
-    to any material map slot AND runs the example's mipmaps +
-    trilinear-filter setup on it in one call (GenTextureMipmaps needs
-    the texture pointer, which only exists inside the material).
+  - First MATERIAL_MAP_NORMAL use: models.jank assigns the texture to
+    the map slot, then GenTextureMipmaps and SetTextureFilter run
+    against that same slot, reached with cpp/& and cpp/aget
+    (GenTextureMipmaps needs the texture pointer, which only exists
+    inside the material).
   - plane.transform = MatrixRotateY(t) is an absolute transform SET
-    (fog-rendering's spin was a multiply) - its own shim.
+    (fog-rendering's spin was a multiply), spelled with cpp/=.
   - Light movement is jank math: dx/dz accumulated from WASD, hand
     normalized with cpp/sqrt (no Vector3Normalize needed).
   - Uniforms ride rlights' generic setters even though the

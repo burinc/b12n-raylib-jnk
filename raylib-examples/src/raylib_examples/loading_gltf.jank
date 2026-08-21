@@ -7,9 +7,9 @@
   Based on raylib/examples/models/models_loading_gltf.c
 
   jank-native notes:
-  - The shadowmap-rendering animation shims (LoadModelAnimations
-    behind C statics, UpdateModelAnimation by index + frame) plus one
-    addition: the animation's char[32] name field folds to a jank
+  - LoadModelAnimations returns the array and writes its count through
+    an int* out-param; both bind in the outer let, so nothing has to
+    live in a static. Plus one addition: the animation's char[32] name field folds to a jank
     string through a const-char*-returning accessor.
   - The animation index and frame counter thread as jank ints; the
     frame wraps by the CURRENT animation's keyframe count."

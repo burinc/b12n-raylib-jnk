@@ -10,9 +10,9 @@
   jank-native notes:
   - The raygui dropdown/slider/progress-bar become keyboard controls
     + a hand-drawn timeline (filled bar + keyframe ticks).
-  - This example plays INTERPOLATED frames (fractional speeds), so
-    the update shim takes the frame as a double - unlike the earlier
-    int-frame animation ports.
+  - This example plays INTERPOLATED frames (fractional speeds), so the
+    frame reaches UpdateModelAnimation as a cpp/float - unlike the
+    earlier int-frame animation ports.
   - The C starts on animation index 10 (the robot's walk); kept."
   (:require [clojure.string :as string])
   (:include "raylib.h"))
