@@ -47,10 +47,20 @@ submodule pointer as part of an unrelated change.
 
 ## Before you open a PR
 
-This project has no automated lint, format, or compile gate yet — jank has no
-released binary suitable for CI, so there is nothing to run in Actions and
-nothing to run locally beyond the example itself. The gate is the headless
-smoke run, and it is on you to do it.
+Run the offline checks. They take under a second and CI runs the same ones:
+
+```sh
+bb check
+```
+
+That covers reader syntax on every `.jank` source, all four registration
+touchpoints per example, orphaned sources, and the EDN data files. It does
+**not** compile anything: jank publishes no current prebuilt binary, and its
+own CI builds the compiler from source, which is far beyond what a per-PR job
+can do.
+
+So compiling is still your job, via the headless smoke run. This is the gate
+that actually proves an example works.
 
 ```sh
 cd raylib-examples
