@@ -18,17 +18,10 @@
   - rlSetCullFace takes the RL_CULL_FACE_* enum directly (rlgl.h).
   - The C's Clamp reduces to nested ifs; numBands is re-sent per
     frame, matching the C."
-  (:require [raylib-examples.rlights :as rl]
+  (:require [raylib-examples.models :as md]
+            [raylib-examples.rlights :as rl]
             [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h" "math.h"))
-
-;; Material shader read-back + write (no jank spelling for either).
-(cpp/raw "static Shader jank_model_get_shader(Model* m) {
-  return m->materials[0].shader;
-}
-static void jank_model_set_shader(Model* m, Shader s) {
-  m->materials[0].shader = s;
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -50,7 +43,10 @@ static void jank_model_set_shader(Model* m, Shader s) {
         ;; boxed here, where the shader is still native (see rlights ns)
         cel-box (cpp/box (cpp/new cpp/Shader cel-shader))
         view-loc (int (cpp/GetShaderLocation cel-shader "viewPos"))
-        default-shader (cpp/jank_model_get_shader (cpp/& model))
+        model-box (cpp/box (cpp/new cpp/Model model))
+        ;; a COPY: binding the reference would alias every later set-shader!
+        default-box (cpp/box (cpp/new cpp/Shader
+                                      (.-shader (cpp/aget (.-materials model) (cpp/int 0)))))
         num-bands-loc (int (cpp/GetShaderLocation cel-shader "numBands"))
         outline-shader (cpp/LoadShader (str RES "shaders/glsl330/outline_hull.vs")
                                        (str RES "shaders/glsl330/outline_hull.fs"))
@@ -59,7 +55,7 @@ static void jank_model_set_shader(Model* m, Shader s) {
         outline-thickness-loc (int (cpp/GetShaderLocation outline-shader "outlineThickness"))]
 
     (sh/set-shader-loc! cel-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
-    (cpp/jank_model_set_shader (cpp/& model) cel-shader)
+    (md/set-shader! model-box 0 cel-box)
 
     ;; one white directional light, spun per frame below
     (rl/create-light! {:type rl/LIGHT-DIRECTIONAL
@@ -82,8 +78,8 @@ static void jank_model_set_shader(Model* m, Shader s) {
         (let [cel? (if (cpp/IsKeyPressed cpp/KEY_Z) (not cel?) cel?)
               _ (when (cpp/IsKeyPressed cpp/KEY_Z)
                   (if cel?
-                    (cpp/jank_model_set_shader (cpp/& model) cel-shader)
-                    (cpp/jank_model_set_shader (cpp/& model) default-shader)))
+                    (md/set-shader! model-box 0 cel-box)
+                    (md/set-shader! model-box 0 default-box)))
               outline? (if (cpp/IsKeyPressed cpp/KEY_C) (not outline?) outline?)
               ;; press or hold-to-repeat (native bools boxed one at a time)
               e? (if (cpp/IsKeyPressed cpp/KEY_E) true
@@ -113,13 +109,13 @@ static void jank_model_set_shader(Model* m, Shader s) {
             ;; outline pass: cull front faces, draw extruded back faces
             (sh/set-float! outline-box outline-thickness-loc 0.005)
             (cpp/rlSetCullFace cpp/RL_CULL_FACE_FRONT)
-            (cpp/jank_model_set_shader (cpp/& model) outline-shader)
+            (md/set-shader! model-box 0 outline-box)
             (cpp/DrawModel model
                            (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
                            (cpp/float 0.75) cpp/WHITE)
             (if cel?
-              (cpp/jank_model_set_shader (cpp/& model) cel-shader)
-              (cpp/jank_model_set_shader (cpp/& model) default-shader))
+              (md/set-shader! model-box 0 cel-box)
+              (md/set-shader! model-box 0 default-box))
             (cpp/rlSetCullFace cpp/RL_CULL_FACE_BACK))
 
           (cpp/DrawModel model

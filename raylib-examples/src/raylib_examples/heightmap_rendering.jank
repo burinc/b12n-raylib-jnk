@@ -11,11 +11,8 @@
     the model unblock: the Image goes in by value, the Vector3 size
     inline, and the resulting Mesh feeds LoadModelFromMesh as a call
     argument. Material texture write via the (cpp/& model) shim."
+  (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
-
-(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -38,7 +35,8 @@
         tw (int (+ 0.0 (.-width texture)))
         th (int (+ 0.0 (.-height texture)))]
 
-    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (md/set-texture! (cpp/box (cpp/new cpp/Model model))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
     (cpp/UnloadImage image)
 
     (cpp/SetTargetFPS 60)
