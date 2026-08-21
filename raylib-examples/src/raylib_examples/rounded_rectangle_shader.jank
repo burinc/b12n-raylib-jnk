@@ -20,21 +20,6 @@
     never passing it into a jank fn (which would box a native value)."
   (:include "raylib.h"))
 
-;; Per-type uniform setters: build the small float array in C from
-;; scalar args so each uniform push is a single cpp/ call from -main.
-(cpp/raw "static void jank_set_vec4(Shader s, int loc, double a, double b, double c, double d) {
-  float v[4] = { (float)a, (float)b, (float)c, (float)d };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC4);
-}
-static void jank_set_vec2(Shader s, int loc, double a, double b) {
-  float v[2] = { (float)a, (float)b };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
-}
-static void jank_set_float(Shader s, int loc, double a) {
-  float v = (float)a;
-  SetShaderValue(s, loc, &v, SHADER_UNIFORM_FLOAT);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
@@ -71,11 +56,19 @@ static void jank_set_float(Shader s, int loc, double a) {
     (cpp/SetTargetFPS 60)
 
     ;; Constant uniforms: corner radius, shadow shape, border thickness.
-    (cpp/jank_set_vec4 shader radius-loc 5.0 10.0 15.0 20.0)
-    (cpp/jank_set_float shader shadow-radius-loc 20.0)
-    (cpp/jank_set_vec2 shader shadow-offset-loc 0.0 -5.0)
-    (cpp/jank_set_float shader shadow-scale-loc 0.95)
-    (cpp/jank_set_float shader border-thickness-loc 5.0)
+    (cpp/SetShaderValue shader (int radius-loc)
+                        (cpp/new cpp/Vector4 (cpp/float 5.0) (cpp/float 10.0)
+                                             (cpp/float 15.0) (cpp/float 20.0))
+                        cpp/SHADER_UNIFORM_VEC4)
+    (cpp/SetShaderValue shader (int shadow-radius-loc)
+                        (cpp/new cpp/float (cpp/float 20.0)) cpp/SHADER_UNIFORM_FLOAT)
+    (cpp/SetShaderValue shader (int shadow-offset-loc)
+                        (cpp/new cpp/Vector2 (cpp/float 0.0) (cpp/float -5.0))
+                        cpp/SHADER_UNIFORM_VEC2)
+    (cpp/SetShaderValue shader (int shadow-scale-loc)
+                        (cpp/new cpp/float (cpp/float 0.95)) cpp/SHADER_UNIFORM_FLOAT)
+    (cpp/SetShaderValue shader (int border-thickness-loc)
+                        (cpp/new cpp/float (cpp/float 5.0)) cpp/SHADER_UNIFORM_FLOAT)
 
     (loop []
       (when (cpp/! (cpp/WindowShouldClose))
@@ -96,10 +89,22 @@ static void jank_set_float(Shader s, int loc, double a) {
             (cpp/DrawText (:label p) (int (- x pad)) (int (- y (+ pad 15))) 10 cpp/DARKGRAY)
 
             ;; Per-panel uniforms, then a full-screen shader pass.
-            (cpp/jank_set_vec4 shader rect-loc (+ 0.0 x) (+ 0.0 fy) (+ 0.0 w) (+ 0.0 h))
-            (cpp/jank_set_vec4 shader color-loc (nth color 0) (nth color 1) (nth color 2) (nth color 3))
-            (cpp/jank_set_vec4 shader shadow-color-loc (nth shadow 0) (nth shadow 1) (nth shadow 2) (nth shadow 3))
-            (cpp/jank_set_vec4 shader border-color-loc (nth border 0) (nth border 1) (nth border 2) (nth border 3))
+            (cpp/SetShaderValue shader (int rect-loc)
+                        (cpp/new cpp/Vector4 (cpp/float (+ 0.0 x)) (cpp/float (+ 0.0 fy))
+                                             (cpp/float (+ 0.0 w)) (cpp/float (+ 0.0 h)))
+                        cpp/SHADER_UNIFORM_VEC4)
+            (cpp/SetShaderValue shader (int color-loc)
+                        (cpp/new cpp/Vector4 (cpp/float (nth color 0)) (cpp/float (nth color 1))
+                                             (cpp/float (nth color 2)) (cpp/float (nth color 3)))
+                        cpp/SHADER_UNIFORM_VEC4)
+            (cpp/SetShaderValue shader (int shadow-color-loc)
+                        (cpp/new cpp/Vector4 (cpp/float (nth shadow 0)) (cpp/float (nth shadow 1))
+                                             (cpp/float (nth shadow 2)) (cpp/float (nth shadow 3)))
+                        cpp/SHADER_UNIFORM_VEC4)
+            (cpp/SetShaderValue shader (int border-color-loc)
+                        (cpp/new cpp/Vector4 (cpp/float (nth border 0)) (cpp/float (nth border 1))
+                                             (cpp/float (nth border 2)) (cpp/float (nth border 3)))
+                        cpp/SHADER_UNIFORM_VEC4)
             (cpp/BeginShaderMode shader)
             (cpp/DrawRectangle 0 0 WIDTH HEIGHT cpp/WHITE)
             (cpp/EndShaderMode)))
