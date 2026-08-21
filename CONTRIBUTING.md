@@ -3,8 +3,10 @@
 Thanks for taking an interest. This is a suite of
 [raylib](https://github.com/raysan5/raylib) examples written in
 [jank](https://jank-lang.org) — a native Clojure dialect that compiles to
-native code through C++/LLVM. There is no JVM at runtime and no REPL; raylib
-is reached directly as C++ through jank's `cpp/` interop.
+native code through C++/LLVM. There is no JVM at runtime; raylib is reached
+directly as C++ through jank's `cpp/` interop. jank does have a REPL, and
+`lein repl` from `raylib-examples/` gives you a jank nREPL with `cpp/`
+interop live in it — see [Using the REPL](#using-the-repl).
 
 New examples are welcome — the suite is deliberately mechanical to grow, and
 `raylib-examples/README.md` keeps a queue of what is not ported yet.
@@ -71,6 +73,30 @@ revert before committing, and say so in the commit message. Both recipes:
 Please run the examples your change could plausibly affect, not only the one
 you added. `bb run-all [secs]` reels through the whole suite.
 
+## Using the REPL
+
+jank ships a REPL with nREPL support, and it works in this repo:
+
+```sh
+bb nrepl        # or: cd raylib-examples && lein repl
+```
+
+It is a genuine jank REPL, not a JVM Clojure one — `cpp/` interop evaluates
+in it:
+
+```clojure
+(println :interop (cpp/int 42))
+;; :interop 42
+```
+
+`lein` writes `raylib-examples/.nrepl-port`, which most editor tooling picks
+up on its own (CIDER and Conjure are both known to work with jank's nREPL).
+
+This matters because a jank compile costs 30–60s. The smoke-test loop above
+is still what proves an example, but the REPL is much the faster place to
+work out a formula or check what a raylib call returns before you commit to
+a rebuild.
+
 ## Adding an example
 
 Port from the **definitive C source** in
@@ -100,11 +126,17 @@ Two conventions:
 jank is native, so there is no Java interop — `Math/sin`, `rand-int`,
 `format`, and `.indexOf` do not exist. Before writing anything non-trivial,
 read [`docs/guide/native-value-lifetimes.md`](docs/guide/native-value-lifetimes.md).
-It covers the single rule most compile errors trace back to: **a native `cpp`
-value only stays native within the form that produced it.** A jank function
-cannot return a `Color`, and you cannot carry one in `loop`/`recur` state —
-thread a plain jank id instead and resolve the native value inline at the
-call.
+It covers what the jank/C++ boundary actually enforces, which is
+**convertibility, not scope**: trait-convertible types (integral types,
+bools, C strings, `std::string`) cross freely, while a type without a
+conversion trait — `Color`, `Vector2`, `Camera2D` — cannot cross a fn
+boundary *implicitly*.
+
+Most examples here thread a plain jank id and resolve the native value
+inline at the call, which is the right call for a per-frame draw. When a
+value genuinely needs to outlive the fn that made it, jank's opaque boxes
+(`cpp/new` + `cpp/box` + `cpp/unbox`) carry it through the runtime; run
+`bb opaque-boxes` for a worked example.
 
 The rest of [`docs/guide/`](docs/guide/index.md) covers the C-interop toolbox,
 int-vs-real coercion (`mod`/`quot` return reals; `cpp/float` wants a real),

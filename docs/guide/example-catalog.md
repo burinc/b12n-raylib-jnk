@@ -259,6 +259,16 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/amp-envelope.gif" width="80">](../demos/amp-envelope.gif) | `amp-envelope` | An ADSR amplitude envelope on a tone, with a live shape graph |
 | [<img src="../demos/spectrum-visualizer.gif" width="80">](../demos/spectrum-visualizer.gif) | `spectrum-visualizer` | A live FFT spectrum of the music through a shader |
 
+## interop — jank/C++ mechanics (1)
+
+Not raylib ports. These demonstrate the language boundary itself, and are
+counted separately so the raylib port totals above stay comparable with
+upstream.
+
+| `bb` name | What it shows |
+|---|---|
+| `opaque-boxes` | A native `Color` returned from a fn, kept in an immutable vector and captured in a closure, via `cpp/new` + `cpp/box` + `cpp/unbox`. See [`native-value-lifetimes.md`](native-value-lifetimes.md#getting-a-native-value-out-anyway). |
+
 ## Adding an example — the four touchpoints
 
 See [`porting-workflow.md`](porting-workflow.md) for the full end-to-end
