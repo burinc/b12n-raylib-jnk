@@ -45,8 +45,7 @@ If the `lein` on your `PATH` can't bootstrap, set `LEIN=/path/to/lein`.
 ## Manual usage (without `bb`)
 
 ```sh
-cd jank-raylib-sys && lein update-in :prep-tasks empty -- install
-cd raylib-examples  && lein with-profile +<example> run --disable-sandbox
+cd raylib-examples && lein with-profile +<example> run --disable-sandbox
 ```
 
 ## macOS
