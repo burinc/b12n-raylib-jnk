@@ -59,8 +59,7 @@ for you. See [`docs/guide/getting-started.md`](docs/guide/getting-started.md).
 ## Manual usage
 
 ```sh
-cd jank-raylib-sys && lein update-in :prep-tasks empty -- install
-cd raylib-examples  && lein with-profile +<example> run --disable-sandbox
+cd raylib-examples && lein with-profile +<example> run --disable-sandbox
 ```
 
 ## The examples

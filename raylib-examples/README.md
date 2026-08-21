@@ -276,7 +276,7 @@ raygui-marked ones with keyboard controls
 ### core, 2D-friendly candidates (portable now)
 
 The rest of `core` is mostly 3D free-look cameras, VR, web, and platform
-I/O, not reachable with the current wrappers. Static/inline-rebuilt 3D
+I/O, none of it ported yet. Static/inline-rebuilt 3D
 cameras DO work (`camera-3d`, `picking-3d`), as do the plain 2D input
 demos (`input-multitouch`, `input-virtual-controls`).
 `core_random_sequence`'s `int*` from `LoadRandomSequence` is now ported
@@ -309,7 +309,7 @@ end-to-end, writing a valid `.rae`). `core_input_gamepad` is ported too
 path smoke-tests here since this box has no pad; the button/axis
 branches are verbatim-C-in-shim). The genuinely remaining `core`
 blockers are web (emscripten), `core_screen_recording` (bundles the
-`msf_gif.h` encoder, which isn't on the wrapper's include path), and
+`msf_gif.h` encoder, which the `raylib-sys` package does not ship), and
 `core_custom_frame_control`, which needs raylib recompiled with
 `SUPPORT_CUSTOM_FRAME_CONTROL`.
 
@@ -345,9 +345,9 @@ container width each frame. Remaining leftovers:
   `strings-management` also ported, the text category is complete
   (16/16).
 
-### Blocked on new wrappers (future work)
+### Not ported yet (future work)
 
-These categories need capabilities the repo's `-sys` wrappers don't expose yet:
+What is left in each category, and why:
 
 - **textures** (3 left), NO LONGER fully blocked: `GenImage*` +
   `LoadTextureFromImage` (see `image-generation`), `LoadTexture` from a
@@ -431,5 +431,7 @@ These categories need capabilities the repo's `-sys` wrappers don't expose yet:
   port work.
 - most of **core**, 3D cameras, VR simulator, web target, gamepad, file I/O
 
-Adding one of these means first extending a `-sys` wrapper to link/expose the
-needed raylib functions, then porting the examples on top of it.
+The `raylib-sys` package links all of raylib, so most of these are ordinary
+port work rather than a packaging problem. The real exceptions are the ones
+named above: raygui, a web/emscripten target, and anything needing raylib
+recompiled with a non-default `SUPPORT_*` flag.

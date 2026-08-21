@@ -1,9 +1,10 @@
 # The missing JVM surface, and other odds and ends
 
-jank has no `Math/*`, `format`, `rand-int`, char literals, or `String`
-methods — this page covers what replaces them, what's actually available
-(more of `clojure.core`/`clojure.string` than it looks), and a few
-miscellaneous gotchas that save a recompile.
+> jank's own surface is documented in the
+> [jank book](https://book.jank-lang.org/); the authoritative list of what
+> exists is jank's
+> [`compiler+runtime/src/jank/clojure/`](https://github.com/jank-lang/jank/tree/main/compiler%2Bruntime/src/jank/clojure).
+> This page records what 209 raylib ports reached for and did not find.
 
 ## Filling the missing JVM surface
 
@@ -31,23 +32,23 @@ which can read as if the higher-level collection API is missing. It is not.
 jank's `clojure/core.jank` defines and self-uses `first`, `rest`, `next`,
 `seq`, `empty?`, `second`, `map`, `filter`, `reduce`, `into`, `concat`,
 `some`, `every?`, `mapv`, `range`, `repeat`, `partition`, `doseq`, `dotimes`,
-`when-let`/`if-let`, etc. — the ordinary Clojure surface. `clojure.string`
+`when-let`/`if-let`, etc.: the ordinary Clojure surface. `clojure.string`
 ships too (`split`, `split-lines`, `join`, `includes?`, `index-of`,
 `trim`, `upper-case`/`lower-case`, ...), backed by native C++.
 
 **Caveat: not every clojure.string / clojure.core fn is implemented yet.**
 The var exists (it's declared in `string.jank` / `core.jank`) but some native
-backers are stubs that throw at runtime — `str/replace` currently dies with
+backers are stubs that throw at runtime: `str/replace` currently dies with
 `TODO: port clojure.string/replace` (hit in `rectangle_bounds.jank`, worked
 around by baking the substitution into the source string), and core's
-`flush` dies with `TODO: port flesh` (sic; hit probing `compute_hash.jank` —
+`flush` dies with `TODO: port flesh` (sic; hit probing `compute_hash.jank`, where
 stdout is block-buffered when redirected, so `println` output can vanish if
 the process is killed; there is no working in-jank flush, shim
 `fflush(stdout)` via `cpp/raw` if a probe needs it). So a function being
 present in the source is not proof it runs; if in doubt, probe it, or grep
 its native impl for `TODO`. `split`/`split-lines`/`join` are confirmed
 working, as are `peek`/`pop`/`filterv`/`into` (`rectangle_bounds.jank`).
-Pull it in the normal way — `:require` coexists with a C++ `:include` in one
+Pull it in the normal way: `:require` coexists with a C++ `:include` in one
 `ns` form (jank's own `shell.jank` does exactly this):
 
 ```clojure
@@ -62,9 +63,9 @@ loops), but reach for the seq API / `clojure.string` when it reads better.
 `text_file_loading.jank` is the proof in this repo: it `(:require
 [clojure.string :as str])` beside `(:include "raylib.h")` and word-wraps
 with `str/split-lines`, `str/split line #"\s+"` (regex literals work) and
-`filterv` — compiled and ran clean.
+`filterv`, and it compiled and ran clean.
 Source of truth: jank's own [`compiler+runtime/src/jank/clojure/`](https://github.com/jank-lang/jank/tree/main/compiler%2Bruntime/src/jank/clojure)
-(`core.jank`, `string.jank`) — what is implemented there is what you can call.
+(`core.jank`, `string.jank`): what is implemented there is what you can call.
 
 **`const char *` returns fold into `str` directly** (from the core arc,
 2026-07-03). A raylib fn that returns a C string (`GetMonitorName`,
@@ -75,7 +76,7 @@ Source of truth: jank's own [`compiler+runtime/src/jank/clojure/`](https://githu
 (str "[" (cpp/GetMonitorName 0) "]")   ; => "[Built-in Retina Display]"
 ```
 
-Proven in `monitor_detector.jank`. No conversion helper needed — the native
+Proven in `monitor_detector.jank`. No conversion helper needed: the native
 `const char *` becomes a jank string at the `str` boundary. (You can also pass
 it straight to another C fn that wants `const char *`, e.g.
 `(cpp/DrawText (cpp/GetMonitorName 0) ...)`, since that's C->C.)
@@ -85,20 +86,20 @@ call.** `monitor_detector` cost real debugging over this. When `x` is already a
 jank int (e.g. destructured from a map), writing `(str "Position: " (int x))`
 made jank emit C++ that member-accesses an `i64`, and the WHOLE FILE failed to
 compile with the misleading `member reference base type 'i64' (aka 'long
-long') is not a structure or union` — reported at an unrelated generated line,
+long') is not a structure or union`, reported at an unrelated generated line,
 with no `.-` in the source at all. Dropping the redundant cast fixed it:
 
 ```clojure
-;; BAD  — redundant (int x) on an already-jank int inside str -> i64 codegen error
+;; BAD  - redundant (int x) on an already-jank int inside str -> i64 codegen error
 (cpp/DrawText (str "Position: " (int x) " x " (int y)) ...)
-;; GOOD — pass the boxed value directly
+;; GOOD - pass the boxed value directly
 (cpp/DrawText (str "Position: " x " x " y) ...)
 ```
 
 The plain `.-x` reads and the `const char *` fold in the same file were both
 fine; the cast-inside-`str` was the sole trigger. When a file fails with
 `member reference base type 'i64'` and you can't find a matching `.-` access,
-suspect an `(int ...)`/cast folded into a `str` (or other builder) call — the
+suspect an `(int ...)`/cast folded into a `str` (or other builder) call; the
 error line is generated-code position, not source, so don't trust it.
 
 ## Misc that saves a recompile
@@ -107,20 +108,20 @@ error line is generated-code position, not source, so don't trust it.
   `(if (cpp/IsKeyDown cpp/KEY_Q) ...)`.
 - C constants resolve as `cpp/NAME`: colors, keys, `cpp/MOUSE_CURSOR_IBEAM`,
   `cpp/TEXTURE_FILTER_BILINEAR`, gesture enums (compare as ints:
-  `(int (cpp/GetGestureDetected))`, values 1/2/4/.../512 —
+  `(int (cpp/GetGestureDetected))`, values 1/2/4/.../512; see
   `input_gestures.jank`).
 - Flag ORs aren't needed: `SetConfigFlags` ORs each call into its state, so
   call once per flag (`window_letterbox.jank`).
 - When camera rotation is 0, skip `GetWorldToScreen2D`/`GetScreenToWorld2D`
-  (native Vector2 returns) — the transforms reduce to
+  (native Vector2 returns), since the transforms reduce to
   `screen = (world - target)*zoom + offset` in jank math
   (`camera_2d_platformer.jank` does all five camera modes this way).
   When rotation matters, both `GetScreenToWorld2D` and `GetWorldToScreen`
-  (3D) DO work — bind the returned native Vector2 to a local and read
+  (3D) DO work: bind the returned native Vector2 to a local and read
   `.-x`/`.-y` (`camera_2d_mouse_zoom.jank`, `world_screen.jank`).
 - **A jank fn takes at most 10 parameters** (`analyze/invalid-fn-parameters:
   This function has too many parameters. The max is 10`). Bundle extra args
-  into a vector and destructure inside — `tiled_drawing.jank`'s tiling helper
+  into a vector and destructure inside; `tiled_drawing.jank`'s tiling helper
   passed source/dest as two 4-vectors instead of eight scalars. (Moot there
   in the end, since the native-`Texture2D`-param rule forced full inlining,
   but the cap is real and independent.)

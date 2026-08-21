@@ -1,7 +1,7 @@
 # raygui → keyboard
 
 Many official shapes examples build their UI with **raygui** sliders and
-checkboxes. `jank-raylib-sys` doesn't wrap raygui, so those examples get a
+checkboxes. raygui is not part of the `raylib-sys` package, so those examples get a
 keyboard-driven port: sliders become held-key adjustments, checkboxes become
 toggle keys, and the raygui panel becomes plain `DrawText` lines showing live
 values. The pattern was established by `easings_testbed.jank` and refined
@@ -53,7 +53,7 @@ current reading, and its keys:
 ```
 
 `fmt1`/`fmt2` are the small decimal formatters (there's no `format` in
-jank — see [jvm-surface-gaps.md](jvm-surface-gaps.md)). Keep derived
+jank; see [jvm-surface-gaps.md](jvm-surface-gaps.md)). Keep derived
 readouts from the C, like the MANUAL/AUTO segments mode, including its color
 switch: `(if (>= segs min-segs) cpp/MAROON cpp/DARKGRAY)`.
 
@@ -65,7 +65,7 @@ switch: `(if (>= segs min-segs) cpp/MAROON cpp/DARKGRAY)`.
   physical keyboard pair).
 - Single letters for toggles, echoing the raygui checkbox label
   (`[R] Draw Ring`, `[B] Bezier`).
-- Q quits — the repo-wide convention — UNLESS the example needs Q or types
+- Q quits (the repo-wide convention) UNLESS the example needs Q or types
   free text:
   - `easings_testbed.jank` keeps the C's Q/W duration keys, so only ESC
     quits there. Document that clearly in every registry surface.

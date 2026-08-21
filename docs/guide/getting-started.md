@@ -1,12 +1,12 @@
 # Getting started
 
-This mirrors the root README's Quick start section with a bit more context —
+This mirrors the root README's Quick start section with a bit more context;
 if you only need the commands, the README's shorter version is enough.
 
 ## Requirements
 
 - Recent install of the [`jank`](https://jank-lang.org) compiler and the
-  `lein-jank` Leiningen plugin (`2026.06-1` or newer — older versions lack
+  `lein-jank` Leiningen plugin (`2026.06-1` or newer; older versions lack
   the native-build middleware)
 - A C++ compiler
 - CMake
@@ -16,7 +16,7 @@ Verified on macOS with jank `0.1-alpha` and `lein-jank 2026.06-1`.
 
 ## Clone with the submodule
 
-`raylib` is vendored as a git submodule of the `jank-raylib-sys` wrapper, so
+`raylib` is vendored as a git submodule for the example assets, so
 clone with it:
 
 ```sh
@@ -45,8 +45,7 @@ If the `lein` on your `PATH` can't bootstrap, set `LEIN=/path/to/lein`.
 ## Manual usage (without `bb`)
 
 ```sh
-cd jank-raylib-sys && lein update-in :prep-tasks empty -- install
-cd raylib-examples  && lein with-profile +<example> run --disable-sandbox
+cd raylib-examples && lein with-profile +<example> run --disable-sandbox
 ```
 
 ## macOS
@@ -57,7 +56,7 @@ disabled. Every `bb`/`lein` invocation above already passes
 
 **Known limitation:** `rlgl-compute` needs OpenGL 4.3 compute-shader
 support that macOS's native GL backend cannot provide (capped at 4.1). This
-repo builds `jank-raylib-sys` at `OPENGL_VERSION "3.3"` by default — every
+official `raylib-sys` package builds raylib at OpenGL 3.3, so every
 other example works; `rlgl-compute` does not run out of the box on any
 platform against this build. See the root README's "Known limitations"
 section for the manual override recipe (which still won't work on macOS).
@@ -66,8 +65,8 @@ section for the manual override recipe (which still won't work on macOS).
 
 ### A handful of examples fail to compile, naming a raylib header you don't recognise
 
-If a compile error cites a header outside this repo — most often
-`/opt/homebrew/include/raylib.h` or `/usr/local/include/raylib.h` — you have
+If a compile error cites a header outside this repo (most often
+`/opt/homebrew/include/raylib.h` or `/usr/local/include/raylib.h`), you have
 a system-wide raylib installed that is shadowing the vendored one, and it is
 an older version than the 6.0 this repo pins.
 
@@ -91,15 +90,15 @@ brew link raylib        # restore it afterwards if you want it back
 jank's compiler has at least two C++ resolution pathways. The main one
 correctly honours the project's own `-I` flags (which the `raylib-sys`
 package emits as `jank-build::include-dir=` directives pointing at its
-raylib 6.0 headers). A secondary pathway — used for certain overload-resolution and
-diagnostic scenarios rather than for every call — does not inherit those
+raylib 6.0 headers). A secondary pathway, used for certain overload-resolution and
+diagnostic scenarios rather than for every call, does not inherit those
 flags and falls back to clang's default system include search, which finds
 the Homebrew header instead. jank exposes no flag or environment variable to
 control that second pathway's search order.
 
 This is why the failure looks so arbitrary: only examples that call a
 function which is new in 6.0 or changed signature since 5.5 can trip it. On
-one machine it hit 8 of 209 — `basic-shapes`, `top-down-lights` and
+one machine it hit 8 of 209: `basic-shapes`, `top-down-lights` and
 `shapes-textures-shader` (all call `DrawCircleGradient`, whose signature
 changed), `math-sine-cosine` (`DrawLineDashed`), `compute-hash`
 (`ComputeSHA256`), `strings-management`, `font-sdf` (`LoadFontData`), and
