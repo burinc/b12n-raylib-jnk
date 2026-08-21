@@ -7,10 +7,10 @@ body:
       value: |
         Most failures here come down to three things: which `jank` you have,
         which `lein-jank` you have, and whether a system-wide raylib is
-        shadowing the vendored one. Please fill those in — they turn a guess
+        shadowing the vendored one. Please fill those in, they turn a guess
         into a diagnosis.
 
-        **Please check these first — all three are known and expected:**
+        **Please check these first, all three are known and expected:**
 
         - **A few examples fail to compile, citing a raylib header outside
           this repo** (e.g. `/opt/homebrew/include/raylib.h`). A system-wide
@@ -23,7 +23,7 @@ body:
           [Documented in the
           README](https://github.com/burinc/b12n-raylib-jnk#known-limitations).
         - **`git status` shows `jank-raylib-sys/raylib` as modified.** That is
-          intentional — `bb` applies a patch to the submodule working tree on
+          intentional, `bb` applies a patch to the submodule working tree on
           every invocation. See `jank-raylib-sys/patches/README.md`.
 
   - type: input
@@ -50,13 +50,13 @@ body:
       value: |
         ```
         $ uname -sm
-        (paste here — OS and CPU architecture)
+        (paste here, OS and CPU architecture)
 
         $ jank --version
         (paste here)
 
         $ lein version
-        (paste here — and note if this lein is a mise/asdf shim rather than Homebrew's)
+        (paste here, and note if this lein is a mise/asdf shim rather than Homebrew's)
 
         $ bb --version
         (paste here)
@@ -71,9 +71,9 @@ body:
       description: |
         `brew list --versions raylib` on macOS, or your distro's package query.
         This is the single most common cause of a compile failure in a subset
-        of examples — see the note at the top.
+        of examples, see the note at the top.
       options:
-        - "No — nothing outside this repo's submodule"
+        - "No, nothing outside this repo's submodule"
         - "Yes, and I have unlinked/removed it and still see the problem"
         - "Yes, and it is still linked"
         - "Not sure"

@@ -2,13 +2,13 @@
 
 Thanks for taking an interest. This is a suite of
 [raylib](https://github.com/raysan5/raylib) examples written in
-[jank](https://jank-lang.org) — a native Clojure dialect that compiles to
+[jank](https://jank-lang.org), a native Clojure dialect that compiles to
 native code through C++/LLVM. There is no JVM at runtime; raylib is reached
 directly as C++ through jank's `cpp/` interop. jank does have a REPL, and
 `lein repl` from `raylib-examples/` gives you a jank nREPL with `cpp/`
-interop live in it — see [Using the REPL](#using-the-repl).
+interop live in it. See [Using the REPL](#using-the-repl).
 
-New examples are welcome — the suite is deliberately mechanical to grow, and
+New examples are welcome. The suite is deliberately mechanical to grow, and
 `raylib-examples/README.md` keeps a queue of what is not ported yet.
 
 ## Setting up
@@ -28,7 +28,7 @@ everything else. Full setup notes:
 Two environment gotchas worth knowing up front, because neither fails in an
 obvious way:
 
-- **Use a Homebrew `lein`.** A mise/asdf Leiningen shim can be broken — it
+- **Use a Homebrew `lein`.** A mise/asdf Leiningen shim can be broken: it
   tries to download a standalone jar that isn't there. `bb/helpers.clj`
   already prefers `/usr/local/bin/lein`, then `/opt/homebrew/bin/lein`;
   override with the `LEIN` environment variable. If you invoke `lein`
@@ -38,14 +38,24 @@ obvious way:
 
 ## Before you open a PR
 
-Run the offline checks. They take under a second and CI runs the same ones:
+Run the offline checks. They take a second or two and CI runs the same ones:
 
 ```sh
-bb check
+bb check          # syntax, registration, orphan sources, EDN
+bb lint           # clj-kondo over every .jank source
 ```
 
-That covers reader syntax on every `.jank` source, all four registration
-touchpoints per example, orphaned sources, and the EDN data files. It does
+`bb check` covers reader syntax on every `.jank` source, all four
+registration touchpoints per example, orphaned sources, and the EDN data
+files. `bb lint` runs clj-kondo; `bb lint:strict` is the CI form that exits
+non-zero on any finding.
+
+clj-kondo has no jank support, but it parses `.jank` as Clojure and that is
+enough once three linters are told about jank. See
+[`.clj-kondo/config.edn`](.clj-kondo/config.edn), which explains each. Two of
+them are muted because they are jank **false positives** whose "fixes" would
+change behaviour: `(int x)` coercions that jank needs, and `(+ 0.0 x)` boxing
+idioms that must not be flattened. It does
 **not** compile anything: jank publishes no current prebuilt binary, and its
 own CI builds the compiler from source, which is far beyond what a per-PR job
 can do.
@@ -65,7 +75,7 @@ grep -icE "error|exception|Mismatched|small_real|small_integer|invalid object" /
 window, and survived 25 s of the frame loop. The `grep` must print `0`. macOS
 has no `timeout`, hence the `perl` alarm.
 
-Check paren balance *before* the first compile — a jank compile costs 30–60 s
+Check paren balance *before* the first compile. A jank compile costs 30-60 s
 and a strict reader loop is instant. If your example's interesting path hides
 behind input (a hover, a key, a generation count), force the state, run, then
 revert before committing, and say so in the commit message. Both recipes:
@@ -82,7 +92,7 @@ jank ships a REPL with nREPL support, and it works in this repo:
 bb nrepl        # or: cd raylib-examples && lein repl
 ```
 
-It is a genuine jank REPL, not a JVM Clojure one — `cpp/` interop evaluates
+It is a genuine jank REPL, not a JVM Clojure one. `cpp/` interop evaluates
 in it:
 
 ```clojure
@@ -105,8 +115,8 @@ Port from the **definitive C source** in
 not from any intermediate binding. Keep the physics and formulas faithful, and
 note any deliberate simplification in the docstring.
 
-If your change is user-facing — a new example, a new `bb` task, a build step,
-a corrected claim in the guide — add a line to
+If your change is user-facing (a new example, a new `bb` task, a build step,
+a corrected claim in the guide), add a line to
 [`CHANGELOG.md`](CHANGELOG.md) under *Unreleased* in the same commit. This
 project does not do separate doc-sync commits.
 
@@ -129,13 +139,13 @@ Two conventions:
 
 ## Writing jank that compiles
 
-jank is native, so there is no Java interop — `Math/sin`, `rand-int`,
+jank is native, so there is no Java interop: `Math/sin`, `rand-int`,
 `format`, and `.indexOf` do not exist. Before writing anything non-trivial,
 read [`docs/guide/native-value-lifetimes.md`](docs/guide/native-value-lifetimes.md).
 It covers what the jank/C++ boundary actually enforces, which is
 **convertibility, not scope**: trait-convertible types (integral types,
 bools, C strings, `std::string`) cross freely, while a type without a
-conversion trait — `Color`, `Vector2`, `Camera2D` — cannot cross a fn
+conversion trait (`Color`, `Vector2`, `Camera2D`) cannot cross a fn
 boundary *implicitly*.
 
 Most examples here thread a plain jank id and resolve the native value
@@ -163,13 +173,13 @@ list, and call it with a map literal:
 (defn ellipses-collide? [c1x c1y rx1 ry1 c2x c2y rx2 ry2] ...)   ; easy to transpose
 ```
 
-Map destructuring compiles in jank — it's ordinary Clojure, not a native
+Map destructuring compiles in jank. It's ordinary Clojure, not a native
 feature. This is a soft preference, not a gate, and it has two exceptions:
 
 - **Not for `cpp/` interop calls.** C and C++ functions are positional-only.
   jank resolves overloads by argument position and type at compile time and
   has no named-argument call syntax, so `(cpp/DrawRectanglePro rec origin rot
-  color)` stays positional — there is no keyword form to reach for.
+  color)` stays positional, because there is no keyword form to reach for.
 - **Not for well-known positional math signatures.** The Penner easing
   convention `[t b c d]` (time, begin, change, duration) reads better
   positionally to anyone fluent in it; a map would be noise.
@@ -180,7 +190,7 @@ You don't need to record anything. Every GIF under `docs/demos/` is committed
 and `docs/demos/README.md` is generated from `scripts/demo_manifest.edn`.
 
 `bb record` drives a `screen-grab` capture CLI that is not publicly
-released, so recording is maintainer-only — the task will tell you so rather
+released, so recording is maintainer-only. The task will tell you so rather
 than failing obscurely.
 
 If your example would benefit from a particular input sequence in its demo,
@@ -189,16 +199,16 @@ a maintainer will record it and commit the GIF.
 
 Publishing the guide as a site is likewise maintainer-only (`bb docs-sync`,
 which needs a sibling checkout and AWS credentials), so a docs change in your
-PR goes live when a maintainer next syncs — you don't need to do anything.
+PR goes live when a maintainer next syncs. You don't need to do anything.
 
 ## Licensing
 
-This project is released under the zlib License — see [`LICENSE`](LICENSE).
+This project is released under the zlib License. See [`LICENSE`](LICENSE).
 That is the same license raylib itself uses. By contributing, you agree your
 contribution is licensed under those terms.
 
 If your example is a port of an upstream raylib example, **name the original
 C file in its docstring** (e.g.
 `Based on raylib/examples/shapes/shapes_bouncing_ball.c`) and in the README
-table, so the attribution stays traceable — that is what zlib asks for in
+table, so the attribution stays traceable. That is what zlib asks for in
 return. [`NOTICE`](NOTICE) records the rest.

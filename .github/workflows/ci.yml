@@ -5,9 +5,9 @@ name: CI
 # free for standard runners on public repositories, which this repo is.
 #
 # There is deliberately NO compile gate, and that is not an oversight. jank
-# publishes no current prebuilt binary — the only release asset is an
+# publishes no current prebuilt binary, the only release asset is an
 # ubuntu-24.04 tarball from 2025-01-27, older than the lein-jank this project
-# requires — and jank's own CI builds the compiler from source, which means
+# requires, and jank's own CI builds the compiler from source, which means
 # building Clang. That is far beyond what a per-PR job should do.
 #
 # So this gate covers everything that goes wrong BEFORE the compiler is
@@ -47,10 +47,15 @@ jobs:
       # minutes to a job whose real work takes under a second.
       - uses: actions/checkout@v4
 
-      - name: Install babashka
+      # clj-kondo has no jank support, but it parses .jank as Clojure, which is
+      # enough to be useful once three linters are told about jank in
+      # .clj-kondo/config.edn. Pinned so CI cannot disagree with a clean local
+      # run because clj-kondo changed a default.
+      - name: Install babashka and clj-kondo
         uses: DeLaGuardo/setup-clojure@13.6.1
         with:
           bb: 1.12.196
+          clj-kondo: "2026.05.25"
 
       # Loads bb.edn and bb/helpers.clj. Catches the two ways this repo's own
       # tooling has broken in practice: an EDN reader macro in a task body
@@ -64,3 +69,9 @@ jobs:
       # data files the tooling reads at runtime.
       - name: Offline checks
         run: bb check
+
+      # Non-zero on any finding. Note bb lint passes filenames explicitly:
+      # clj-kondo does not discover .jank files and a bare directory lint
+      # silently reports zero findings.
+      - name: clj-kondo
+        run: bb lint:strict

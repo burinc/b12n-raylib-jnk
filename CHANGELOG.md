@@ -11,21 +11,24 @@ example ports that preceded it are in the git history and in
 
 ### Added
 
-- `raylib-examples.shaders` — shader-uniform helpers in pure jank
+- `raylib-examples.shaders`, shader-uniform helpers in pure jank
   (`set-int!`, `set-float!`, `set-vec2!`/`3!`/`4!`, `set-shader-loc!`).
-- `raylib-examples.models` — Model material binding in pure jank
+- `raylib-examples.models`, Model material binding in pure jank
   (`set-texture!`, `set-map-texture!`, `set-shader!`, `set-shader-all!`,
   `set-map-color!`).
-- `raylib-examples.rlights` — raylib's `rlights.h` reimplemented as a jank
+- `raylib-examples.rlights`: raylib's `rlights.h` reimplemented as a jank
   namespace, replacing the C header the `-sys` wrapper used to ship.
 - `opaque-boxes` example, demonstrating a native `Color` returned from a fn,
   held in an immutable vector, and captured in a closure.
-- `bb check` — offline gates: reader syntax across every `.jank` source, the
+- `bb check` runs the offline gates: reader syntax across every `.jank` source, the
   four registration touchpoints per example, orphaned sources, and the EDN
   data files. Runs in well under a second.
-- `bb nrepl` — starts a jank nREPL for the examples project, with `cpp/`
+- `bb nrepl` starts a jank nREPL for the examples project, with `cpp/`
   interop live in it.
-- GitHub Actions CI running `bb check` on pull requests.
+- `bb lint` / `bb lint:strict` run clj-kondo over every `.jank` source, with a
+  `.clj-kondo/config.edn` that teaches it about jank. Without the config the
+  suite reports 644 warnings, of which 2 are genuine.
+- GitHub Actions CI running `bb check` and `bb lint:strict` on pull requests.
 - `CONTRIBUTING.md`, `NOTICE`, `.mailmap`, and issue/PR templates.
 
 ### Changed
@@ -44,7 +47,7 @@ example ports that preceded it are in the git history and in
 
 ### Removed
 
-- The vendored `jank-raylib-sys` wrapper — its `project.clj`,
+- The vendored `jank-raylib-sys` wrapper, including its `project.clj`,
   `jank-build.bb`, `jank_rlights.h`, and the macOS OpenGL forward-compat
   patch. The `raylib` submodule remains, but only as the source of example
   assets (shaders, models, textures, audio) that the published jar does not
@@ -63,7 +66,7 @@ example ports that preceded it are in the git history and in
 - **The guide said jank has no assignment form.** It has `cpp/=`, which takes
   an lvalue and writes both struct fields and array elements.
   `clojure.core/aset` is sugar for the latter. Note that `cpp/aset` does *not*
-  exist while `cpp/aget` does — guessing the symmetric partner is what made
+  exist while `cpp/aget` does. Guessing the symmetric partner is what made
   this look like a missing language feature.
 - **The guide said jank has no REPL.** It has both a REPL and nREPL support.
 - The example-registration recipe said a new example touches *five* places,
@@ -76,3 +79,5 @@ example ports that preceded it are in the git history and in
   the troubleshooting guide, with the closed-loop test that confirms it.
 - Machine-local `~/dev/` paths and links to private repositories removed from
   the published tree.
+- `decals` required `clojure.string` without using it; `undo_redo` had a
+  redundant `do` inside a `when`. Both found by the new lint gate.

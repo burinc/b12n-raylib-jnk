@@ -6,12 +6,12 @@ package on Clojars, declared in `raylib-examples/project.clj`.
 
 What remains here is the vendored `raylib` checkout, kept for one reason:
 **example assets**. 101 of the examples load shaders, models, textures, fonts
-and audio from `raylib/examples/*/resources/` — roughly 70 MB that the
+and audio from `raylib/examples/*/resources/`, roughly 70 MB that the
 published jar does not carry. `bb` fetches the submodule on first use.
 
 Nothing here is built, installed, or patched any more. The wrapper that used
-to live here — its `project.clj`, `jank-build.bb`, the `jank_rlights.h`
-helper header and a macOS OpenGL patch — is gone:
+to live here, its `project.clj`, `jank-build.bb`, the `jank_rlights.h`
+helper header and a macOS OpenGL patch, is gone:
 
 - the build is the official package's job now
 - `jank_rlights.h` was replaced by `raylib-examples/src/raylib_examples/rlights.jank`,

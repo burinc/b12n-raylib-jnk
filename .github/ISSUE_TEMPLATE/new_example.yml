@@ -5,12 +5,12 @@ body:
   - type: markdown
     attributes:
       value: |
-        `raylib-examples/README.md` keeps a queue of what is not ported yet —
+        `raylib-examples/README.md` keeps a queue of what is not ported yet -
         the "Not yet ported" section, grouped by raylib category. Please check
         there first; it also flags which ones are blocked on new wrapper
         support.
 
-        Adding an example touches four places and is deliberately mechanical —
+        Adding an example touches four places and is deliberately mechanical -
         see [the four
         touchpoints](https://github.com/burinc/b12n-raylib-jnk/blob/main/docs/guide/porting-workflow.md#3-register-in-all-four-places-same-commit).
         You're welcome to open a PR directly instead of an issue.
@@ -19,7 +19,7 @@ body:
     id: name
     attributes:
       label: Proposed name
-      description: The `bb` name, e.g. `shapes-easings` — lowercase, hyphenated.
+      description: The `bb` name, e.g. `shapes-easings`, lowercase, hyphenated.
     validations:
       required: true
 
@@ -34,7 +34,7 @@ body:
     attributes:
       label: What would it demonstrate?
       description: |
-        Ideally something the existing 209 don't already cover — a raylib call,
+        Ideally something the existing 209 don't already cover, a raylib call,
         a jank/C++ interop shape, or a drawing technique.
     validations:
       required: true
@@ -45,7 +45,7 @@ body:
       label: Does it need anything new from the wrapper?
       description: |
         Some raylib APIs aren't reachable from jank without a C-side helper,
-        because jank functions can neither take nor return native values —
+        because jank functions can neither take nor return native values -
         that's why `jank_rlights.h` exists. If your example needs a raylib call
         that takes or returns a struct **by value**, or needs an array of
         native structs, say so. Those need design thought rather than a

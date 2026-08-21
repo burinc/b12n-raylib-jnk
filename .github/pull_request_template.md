@@ -5,7 +5,7 @@
 
 ## Verification
 
-CI runs `bb check` — reader syntax, the four registration touchpoints, and
+CI runs `bb check`, reader syntax, the four registration touchpoints, and
 the EDN data files. It cannot compile anything (jank ships no current prebuilt
 binary), so the headless smoke run is still what proves an example works, and
 that part is on you. See [CONTRIBUTING.md](https://github.com/burinc/b12n-raylib-jnk/blob/main/CONTRIBUTING.md#before-you-open-a-pr).
@@ -41,7 +41,7 @@ failure-marker count=
 
 <!-- If the interesting path is behind input (a hover, a key, a generation
      count), a 25s headless run won't reach it. Force the state, run, revert
-     before committing — and say so below. -->
+     before committing, and say so below. -->
 
 ## Environment you tested on
 

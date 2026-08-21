@@ -34,7 +34,7 @@ logical 800x450.
 `shaders` (35/35), `audio` (11/11) and `text` (16/16) categories are
 **complete**, and `models` is at 29/30
 (the last one needs a raylib recompile - see below), plus `core` (46),
-`textures` (31) — 3D mode opened via `sound-positioning`,
+`textures` (31), 3D mode opened via `sound-positioning`,
 the rlgl matrix stack in 3D (`rlgl-solar-system`), and font loading
 (`font-loading`).
 
@@ -265,7 +265,7 @@ the rlgl matrix stack in 3D (`rlgl-solar-system`), and font loading
 
 ## Not yet ported
 
-### shapes — complete! 🎉
+### shapes, complete! 🎉
 
 All 41 `shapes` examples are ported: the pure-raylib ones directly, the
 raygui-marked ones with keyboard controls
@@ -273,10 +273,10 @@ raygui-marked ones with keyboard controls
 `LoadRenderTexture`, and the rlgl ones via a direct
 `(:include "rlgl.h")` (no wrapper changes were needed).
 
-### core — 2D-friendly candidates (portable now)
+### core, 2D-friendly candidates (portable now)
 
 The rest of `core` is mostly 3D free-look cameras, VR, web, and platform
-I/O — not reachable with the current wrappers. Static/inline-rebuilt 3D
+I/O, not reachable with the current wrappers. Static/inline-rebuilt 3D
 cameras DO work (`camera-3d`, `picking-3d`), as do the plain 2D input
 demos (`input-multitouch`, `input-virtual-controls`).
 `core_random_sequence`'s `int*` from `LoadRandomSequence` is now ported
@@ -313,7 +313,7 @@ blockers are web (emscripten), `core_screen_recording` (bundles the
 `core_custom_frame_control`, which needs raylib recompiled with
 `SUPPORT_CUSTOM_FRAME_CONTROL`.
 
-### text — COMPLETE (16/16)
+### text, COMPLETE (16/16)
 
 Font loading now works: `LoadFont` (BMFont .fnt + .png) and `LoadFontEx`
 (TTF rasterized at load) return a `Font` native struct held as an outer-let
@@ -338,9 +338,9 @@ container width each frame. Remaining leftovers:
   `text_font_sdf` is now ported too (`font-sdf`): the pointer-heavy
   Font assembly stays a C shim, the SDF shader is the ordinary
   BeginShaderMode wrap. `text_3d_drawing` is now ported too
-  (`text-3d-drawing`): the whole rlgl glyph-quad engine — native
+  (`text-3d-drawing`): the whole rlgl glyph-quad engine, native
   `Font`/`Color`/`WaveTextConfig`, `rlBegin(RL_QUADS)` per-glyph quads,
-  the two `SHOW_*_BOUNDRY` globals, drag-drop font swap and live typing —
+  the two `SHOW_*_BOUNDRY` globals, drag-drop font swap and live typing -
   rides in one `cpp/raw` shim that jank drives per frame. With
   `strings-management` also ported, the text category is complete
   (16/16).
@@ -349,7 +349,7 @@ container width each frame. Remaining leftovers:
 
 These categories need capabilities the repo's `-sys` wrappers don't expose yet:
 
-- **textures** (3 left) — NO LONGER fully blocked: `GenImage*` +
+- **textures** (3 left), NO LONGER fully blocked: `GenImage*` +
   `LoadTextureFromImage` (see `image-generation`), `LoadTexture` from a
   PNG file (see `logo-texture`), `LoadImage` from a file
   (`image-loading`), sprite-sheet sub-rectangle drawing
@@ -361,7 +361,7 @@ These categories need capabilities the repo's `-sys` wrappers don't expose yet:
   work. `Image` pixel manipulation is ALSO unblocked now (2026-07-03):
   the pointer-taking `ImageColor*` / `ImageDraw*` / `ImageFormat` /
   `UpdateTexture` APIs all work through jank's `(cpp/& img)` address-of on
-  a mutable let-local — no wrapper change (`image-processing`, see the
+  a mutable let-local, no wrapper change (`image-processing`, see the
   pointer-interop section of `docs/guide/cpp-interop-toolbox.md`). `int*`
   out-params are ALSO unblocked now (2026-07-03): `LoadImageAnim`'s
   `&frames` works via `(cpp/int 0)` + `(cpp/& frames)`, and streaming a
@@ -371,13 +371,13 @@ These categories need capabilities the repo's `-sys` wrappers don't expose yet:
   `textures_framebuffer_rendering` (now ported - see the ported table)
   and `textures_screen_buffer` (native
   `RL_CALLOC` buffers + a 90k-cell `aget`/`aset` palette blit).
-- **shaders** — COMPLETE (35/35, 2026-07-11) 🎉 The unlock history:
+- **shaders**, COMPLETE (35/35, 2026-07-11) 🎉 The unlock history:
   `LoadShader(cpp/nullptr, path)` + `BeginShaderMode`/`EndShaderMode`
   work with zero wrapper changes (`shapes-textures-shader`), and
   uniforms work too (`texture-outline`): `GetShaderLocation` returns a
   boxable int, and `SetShaderValue`'s `const void*` stages through a
   cpp/raw static `float[4]` + element-setter shim (double param, cast
-  to float inside) with a `jank_set_uniform(Shader, int, int)` wrapper —
+  to float inside) with a `jank_set_uniform(Shader, int, int)` wrapper -
   all shim calls confined to `-main` per the per-fn static rule. VEC4
   uniforms landed via per-type C setters that build the array from
   scalar args (`rounded-rectangle-shader`, which also loads a real vertex
@@ -400,7 +400,7 @@ These categories need capabilities the repo's `-sys` wrappers don't expose yet:
   `rlights` jank namespace - `cpp/new` for the uniform pointers, an
   opaque-boxed `Shader` - so fog / normalmap / cel-shading /
   mesh_instancing are now port work, not blocker work
-- **models** (19 left) — partially unblocked (2026-07-03): `Camera3D` +
+- **models** (19 left), partially unblocked (2026-07-03): `Camera3D` +
   `BeginMode3D` + the 3D primitives, `BoundingBox` collision checks
   (`box-collisions`) and billboards (`billboard-rendering`) all work.
   `UpdateCamera(&camera, ...)` is now proven via `(cpp/& camera)`
@@ -417,19 +417,19 @@ These categories need capabilities the repo's `-sys` wrappers don't expose yet:
   `models_animation_gpu_skinning` needs raylib recompiled with
   `SUPPORT_GPU_SKINNING` (off by default and EXCLUSIVE with the CPU
   skinning every other animation example uses), so it stays unported.
-- **audio** (9 left) — NO LONGER blocked on a wrapper: `InitAudioDevice` +
+- **audio** (9 left), NO LONGER blocked on a wrapper: `InitAudioDevice` +
   `LoadSound` + `PlaySound` work directly (miniaudio backend is compiled
-  into `libraylib` — see `sprite-button` and `sound-loading`, which also
+  into `libraylib`, see `sprite-button` and `sound-loading`, which also
   proves OGG decoding), and so do music streams: `LoadMusicStream` +
   `UpdateMusicStream` + pan/volume setters (`music-stream`, MP3).
   Raw streams and audio CALLBACKS are unblocked too (2026-07-11):
   `LoadAudioStream` + `UpdateAudioStream` work through a C-shim refill
   (`raw-stream`), and `AttachAudioMixedProcessor` accepts a callback
-  DEFINED in the example's `cpp/raw` block — jank can't form function
+  DEFINED in the example's `cpp/raw` block, jank can't form function
   pointers, but a C-defined callback attached by a sibling C wrapper
   is ordinary C (`mixed-processor`). The remaining audio examples are
   port work.
-- most of **core** — 3D cameras, VR simulator, web target, gamepad, file I/O
+- most of **core**, 3D cameras, VR simulator, web target, gamepad, file I/O
 
 Adding one of these means first extending a `-sys` wrapper to link/expose the
 needed raylib functions, then porting the examples on top of it.

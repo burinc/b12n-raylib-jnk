@@ -85,8 +85,8 @@
   (if (< first-idx cur-idx)
     (loop [i first-idx] (when (< i cur-idx) (draw-slot i :green) (recur (inc i))))
     (when (< cur-idx first-idx)
-      (do (loop [i first-idx] (when (< i MAX-UNDO) (draw-slot i :green) (recur (inc i))))
-          (loop [i 0] (when (< i cur-idx) (draw-slot i :green) (recur (inc i)))))))
+      (loop [i first-idx] (when (< i MAX-UNDO) (draw-slot i :green) (recur (inc i))))
+      (loop [i 0] (when (< i cur-idx) (draw-slot i :green) (recur (inc i))))))
 
   ;; current selected slot (gold)
   (cpp/DrawRectangle (int (+ UNDO-X (* CELL cur-idx))) (int UNDO-Y) CELL CELL cpp/GOLD)
