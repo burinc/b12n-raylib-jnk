@@ -87,13 +87,20 @@
        vec))
 
 (defn- orphan-errors
-  "A .jank source with no registry row is invisible: no task, no catalog
-   entry, and nothing runs it. Catches the reverse of registration-errors."
+  "A runnable .jank source with no registry row is invisible: no task, no
+   catalog entry, and nothing runs it. Catches the reverse of
+   registration-errors.
+
+   Runnable means it defines -main. Library namespaces that examples require
+   (rlights, say) legitimately have no registry row, and `-main` separates
+   the two exactly: every one of the registered examples defines it and no
+   library does."
   []
   (let [known (set (map (comp src-path :profile) h/examples))]
     (->> (sort (map str (fs/glob "raylib-examples/src" "**/*.jank")))
          (remove known)
-         (mapv (fn [f] (str f " — source file with no bb/helpers.clj registry row"))))))
+         (filter (fn [f] (re-find #"\(defn -main" (slurp f))))
+         (mapv (fn [f] (str f " — defines -main but has no bb/helpers.clj registry row"))))))
 
 (defn- report [label errs]
   (if (seq errs)

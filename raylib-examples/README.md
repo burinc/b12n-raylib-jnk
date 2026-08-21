@@ -229,8 +229,8 @@ the rlgl matrix stack in 3D (`rlgl-solar-system`), and font loading
 | `cubicmap-rendering` | `models/models_cubicmap_rendering` | a cube maze from a tiny black-and-white image via GenMeshCubicmap, atlas-textured; P pauses the orbit (a jank bool gating UpdateCamera) |
 | `mesh-generation`   | `models/models_mesh_generation`    | all nine GenMesh* generators as nine Model let-locals dispatched by a per-index cond (the postprocessing pattern); the hand-built triangle mesh stays a verbatim C shim |
 | `first-person-maze` | `models/models_first_person_maze`  | first-person maze walking with wall collision; the C's LoadImageColors Color* array becomes a jank 0/1 wall vector via a GetImageColor shim, collision reset via a camera-position write shim |
-| `basic-lighting`    | `shaders/shaders_basic_lighting`   | four toggleable point lights via jank_rlights.h - rlights.h adapted and SHIPPED WITH jank-raylib-sys (second include-dir directive), so the example has no cpp/raw block; first two-path LoadShader (lighting.vs + .fs) |
-| `fog-rendering`     | `shaders/shaders_fog_rendering`    | models dissolving into adjustable fog; second jank_rlights.h consumer - only per-file shims are the model helpers (material writes + a raymath MatrixMultiply transform spin) |
+| `basic-lighting`    | `shaders/shaders_basic_lighting`   | four toggleable point lights via the `rlights` namespace - rlights.h reimplemented in pure jank (cpp/new for the uniform pointers, an opaque-boxed Shader), so the example has no cpp/raw block; first two-path LoadShader (lighting.vs + .fs) |
+| `fog-rendering`     | `shaders/shaders_fog_rendering`    | models dissolving into adjustable fog; another `rlights` consumer - only per-file shims are the model helpers (material writes + a raymath MatrixMultiply transform spin) |
 | `cel-shading`       | `shaders/shaders_cel_shading`      | a toon-shaded GLB car (first GLB LoadModel) with an inverted-hull outline pass; the default material shader read back via a Shader-returning shim, rlSetCullFace direct, moving light via jank_rl_set_light_pos |
 | `normalmap-rendering` | `shaders/shaders_normalmap_rendering` | per-pixel normal-mapped lighting on a spinning plane; first MATERIAL_MAP_NORMAL (a map-slot setup shim doing assign + GenTextureMipmaps + trilinear filter), absolute transform set via MatrixRotateY |
 | `simple-mask`       | `shaders/shaders_simple_mask`      | an animated mask as a second sampler on the spare MATERIAL_MAP_EMISSION slot; MatrixRotateXYZ absolute set from three jank-threaded angles, DrawModelEx called directly |
@@ -396,10 +396,10 @@ These categories need capabilities the repo's `-sys` wrappers don't expose yet:
   wrapper changes, and material field writes
   (`materials[0].maps[..].texture`, `.shader`) go through a
   `(cpp/& model)` pointer-shim pair - and the lighting family is open
-  (2026-07-11, `basic-lighting`): rlights.h ships with jank-raylib-sys
-  as `jank_rlights.h` (index-based scalar wrappers around a C-side
-  Light array), so fog / normalmap / cel-shading / mesh_instancing
-  are now port work, not blocker work
+  (2026-07-11, `basic-lighting`): rlights.h is reimplemented as the
+  `rlights` jank namespace - `cpp/new` for the uniform pointers, an
+  opaque-boxed `Shader` - so fog / normalmap / cel-shading /
+  mesh_instancing are now port work, not blocker work
 - **models** (19 left) — partially unblocked (2026-07-03): `Camera3D` +
   `BeginMode3D` + the 3D primitives, `BoundingBox` collision checks
   (`box-collisions`) and billboards (`billboard-rendering`) all work.

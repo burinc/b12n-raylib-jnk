@@ -12,7 +12,7 @@
   - The PBR example ships its OWN light struct (with an intensity
     field - not rlights.h compatible), so its CreateLight/UpdateLight
     stay a per-file cpp/raw block behind index wrappers, while
-    jank_rlights.h still supplies the generic uniform setters.
+    rlights still supplies the generic uniform setters.
   - Material map .color / .value / .texture writes are map-slot
     shims; the per-model uniform values (tiling, emissive, metallic,
     roughness) are known jank constants re-sent per frame, matching
@@ -20,7 +20,9 @@
   - Teardown keeps the C's unbind dance (shader zeroed, material
     unloaded manually, maps NULLed) as a Model-by-value shim so the
     shared PBR shader isn't double-freed."
-  (:include "raylib.h" "jank_rlights.h"))
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
+  (:include "raylib.h"))
 
 ;; The PBR light array (type/enabled/pos/target/color/intensity + six
 ;; locations each) and the example's careful model teardown.
@@ -121,6 +123,8 @@ static void jank_pbr_unload_model(Model m) {
                              cpp/CAMERA_PERSPECTIVE)
         shader (cpp/LoadShader (str RES "shaders/glsl330/pbr.vs")
                                (str RES "shaders/glsl330/pbr.fs"))
+        ;; boxed here, where the shader is still native (see rlights ns)
+        sh-box (cpp/box (cpp/new cpp/Shader shader))
         view-loc (int (cpp/GetShaderLocation shader "viewPos"))
         metallic-loc (int (cpp/GetShaderLocation shader "metallicValue"))
         roughness-loc (int (cpp/GetShaderLocation shader "roughnessValue"))
@@ -131,24 +135,24 @@ static void jank_pbr_unload_model(Model m) {
         floor (cpp/LoadModel (str RES "models/plane.glb"))]
 
     ;; wire the packed texture maps into raylib's material slots
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_ALBEDO
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_ALBEDO
                                 (int (cpp/GetShaderLocation shader "albedoMap")))
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_METALNESS
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_METALNESS
                                 (int (cpp/GetShaderLocation shader "mraMap")))
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_NORMAL
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_NORMAL
                                 (int (cpp/GetShaderLocation shader "normalMap")))
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MAP_EMISSION
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_EMISSION
                                 (int (cpp/GetShaderLocation shader "emissiveMap")))
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_COLOR_DIFFUSE
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_COLOR_DIFFUSE
                                 (int (cpp/GetShaderLocation shader "albedoColor")))
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
 
-    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "numOfLights")) 4)
+    (sh/set-int! sh-box (int (cpp/GetShaderLocation shader "numOfLights")) 4)
 
     ;; ambient: Color(26 32 135) normalized + a low intensity
-    (cpp/jank_rl_set_vec3 shader (int (cpp/GetShaderLocation shader "ambientColor"))
+    (sh/set-vec3! sh-box (int (cpp/GetShaderLocation shader "ambientColor"))
                           (/ 26.0 255.0) (/ 32.0 255.0) (/ 135.0 255.0))
-    (cpp/jank_rl_set_float shader (int (cpp/GetShaderLocation shader "ambient")) 0.02)
+    (sh/set-float! sh-box (int (cpp/GetShaderLocation shader "ambient")) 0.02)
 
     ;; car: PBR maps + defaults
     (cpp/jank_model_set_shader (cpp/& car) shader)
@@ -188,17 +192,18 @@ static void jank_pbr_unload_model(Model m) {
         (recur (inc i))))
 
     ;; texture maps all in use
-    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "useTexAlbedo")) 1)
-    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "useTexNormal")) 1)
-    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "useTexMRA")) 1)
-    (cpp/jank_rl_set_int shader (int (cpp/GetShaderLocation shader "useTexEmissive")) 1)
+    (sh/set-int! sh-box (int (cpp/GetShaderLocation shader "useTexAlbedo")) 1)
+    (sh/set-int! sh-box (int (cpp/GetShaderLocation shader "useTexNormal")) 1)
+    (sh/set-int! sh-box (int (cpp/GetShaderLocation shader "useTexMRA")) 1)
+    (sh/set-int! sh-box (int (cpp/GetShaderLocation shader "useTexEmissive")) 1)
 
     (cpp/SetTargetFPS 60)
 
     (loop []
       (when (cpp/! (cpp/WindowShouldClose))
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
-        (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
+        (let [p (.-position camera)]
+          (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
 
         ;; the C toggles lights 2/1/3/0 on keys 1/2/3/4
         (when (cpp/IsKeyPressed cpp/KEY_ONE) (cpp/jank_pbr_toggle 2))
@@ -216,21 +221,21 @@ static void jank_pbr_unload_model(Model m) {
         (cpp/BeginMode3D camera)
 
         ;; floor: tiling 0.5, black emissive, metallic 0.8 / roughness 0.1
-        (cpp/jank_rl_set_vec2 shader tiling-loc 0.5 0.5)
-        (cpp/jank_rl_set_vec4 shader emissive-color-loc 0.0 0.0 0.0 1.0)
-        (cpp/jank_rl_set_float shader metallic-loc 0.8)
-        (cpp/jank_rl_set_float shader roughness-loc 0.1)
+        (sh/set-vec2! sh-box tiling-loc 0.5 0.5)
+        (sh/set-vec4! sh-box emissive-color-loc 0.0 0.0 0.0 1.0)
+        (sh/set-float! sh-box metallic-loc 0.8)
+        (sh/set-float! sh-box roughness-loc 0.1)
         (cpp/DrawModel floor
                        (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
                        (cpp/float 5.0) cpp/WHITE)
 
         ;; car: tiling 0.5, orange emissive, metallic 1.0 / roughness 0.0
-        (cpp/jank_rl_set_vec2 shader tiling-loc 0.5 0.5)
-        (cpp/jank_rl_set_vec4 shader emissive-color-loc
+        (sh/set-vec2! sh-box tiling-loc 0.5 0.5)
+        (sh/set-vec4! sh-box emissive-color-loc
                               1.0 (/ 162.0 255.0) 0.0 1.0)
-        (cpp/jank_rl_set_float shader emissive-power-loc 0.01)
-        (cpp/jank_rl_set_float shader metallic-loc 1.0)
-        (cpp/jank_rl_set_float shader roughness-loc 0.0)
+        (sh/set-float! sh-box emissive-power-loc 0.01)
+        (sh/set-float! sh-box metallic-loc 1.0)
+        (sh/set-float! sh-box roughness-loc 0.0)
         (cpp/DrawModel car
                        (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
                        (cpp/float 0.25) cpp/WHITE)

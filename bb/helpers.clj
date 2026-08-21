@@ -37,77 +37,32 @@
 (defn- lein! [dir & args]
   (apply p/shell {:dir dir} @lein args))
 
-(defn- m2-jar? [rel]
-  (fs/exists? (fs/path home ".m2" "repository" rel)))
+(defn ensure-submodules!
+  "Fetch the vendored raylib checkout if it is missing.
 
-(def ^:private raylib-patch
-  "jank-raylib-sys/patches/macos-opengl43-forward-compat.patch")
-
-;; `git apply --reverse --check` succeeds iff the patch's changes are
-;; already present in the working tree — used to decide whether applying
-;; it would error (git apply fails on an already-applied patch).
-(defn- raylib-patch-applied? []
-  (zero? (:exit (p/shell {:dir "jank-raylib-sys/raylib" :continue true
-                          :out :string :err :string}
-                         "git" "apply" "--reverse" "--check"
-                         (str (fs/absolutize raylib-patch))))))
-
-;; The submodule-fetch guard (CMakeLists.txt existence) and the
-;; patch-application decision are deliberately independent: README's own
-;; `git clone --recurse-submodules` (or a manual `git submodule update
-;; --init --recursive`) populates raylib's working tree, CMakeLists.txt
-;; included, before any `bb` command ever runs — so a single guard shared
-;; between "fetch" and "patch" would skip the patch forever on that path.
-;; Checking patch-applied? separately means the patch lands regardless of
-;; which path fetched the submodule content, and stays idempotent (a
-;; no-op once already applied).
-(defn ensure-submodules! []
-  (when-not (fs/exists? "jank-raylib-sys/raylib/CMakeLists.txt")
-    (info "Fetching git submodule (raylib)…")
-    (p/shell "git" "submodule" "update" "--init" "--recursive"))
-  (when-not (raylib-patch-applied?)
-    (info "Applying macOS OpenGL 4.3 forward-compat patch to raylib…")
-    (p/shell {:dir "jank-raylib-sys/raylib"}
-             "git" "apply" (str (fs/absolutize raylib-patch)))))
+  raylib itself now comes from org.jank-lang.commons/raylib-sys on Clojars.
+  This submodule is kept only as the ASSET source: 101 examples load shaders,
+  models, textures, fonts and audio from raylib/examples/*/resources/, about
+  70 MB that the published jar does not carry."
+  []
+  (when-not (fs/exists? "jank-raylib-sys/raylib/examples")
+    (info "Fetching git submodule (raylib example assets)…")
+    (p/shell "git" "submodule" "update" "--init" "--recursive")))
 
 ;; ---------------------------------------------------------------------------
 ;; Library installation (idempotent — skips when the jar is already in ~/.m2)
 ;; ---------------------------------------------------------------------------
-
-(def ^:private raylib-sys-jar
-  "net/b12n/jank-raylib-sys/6.0-SNAPSHOT/jank-raylib-sys-6.0-SNAPSHOT.jar")
-
-(defn- install-lib! [lib]
-  (info (str "Installing " lib " → ~/.m2"))
-  ;; `lein install` runs jank's native build via :prep-tasks (the `compile`
-  ;; alias), which needs the bwrap sandbox — absent on macOS. That build is
-  ;; redundant for these verbatim -sys/wrapper jars: the jar only packages
-  ;; source + headers + jank-build.bb, and consumers run the real native build
-  ;; at their own compile time (with --disable-sandbox). Empty :prep-tasks so
-  ;; the jar installs cleanly on a sandbox-less host.
-  (lein! lib "update-in" ":prep-tasks" "empty" "--" "install"))
-
-(defn ensure-raylib-sys! []
-  (when-not (m2-jar? raylib-sys-jar)
-    (ensure-submodules!)
-    (install-lib! "jank-raylib-sys")))
 
 (defn nrepl!
   "Start a jank nREPL server for the examples project.
 
   jank has nREPL support, so this is a real jank REPL - cpp/ interop
   evaluates in it, not just Clojure. lein writes raylib-examples/.nrepl-port
-  for editor tooling to pick up. Ensures jank-raylib-sys is installed first,
-  since the REPL needs the same native build any example does."
+  for editor tooling to pick up."
   []
-  (ensure-raylib-sys!)
+  (ensure-submodules!)
   (info "Starting jank nREPL in raylib-examples/ (Ctrl-D to quit)")
   (lein! "raylib-examples" "repl"))
-
-(defn install-all! []
-  (ensure-submodules!)
-  (install-lib! "jank-raylib-sys")
-  (ok "jank-raylib-sys installed."))
 
 ;; ---------------------------------------------------------------------------
 ;; Examples registry
@@ -335,7 +290,7 @@
 (defn run-example! [profile]
   (if-let [{:keys [desc controls]} (find-example profile)]
     (do
-      (ensure-raylib-sys!)
+      (ensure-submodules!)
       (header (str "▶ raylib-examples: " profile))
       (info desc)
       (when controls (info (str "Controls: " controls)))
@@ -363,7 +318,7 @@
   "Run every example for a few seconds each (a smoke-test / demo reel).
   Optional first arg = seconds per example (default 15)."
   [secs-arg]
-  (ensure-raylib-sys!)
+  (ensure-submodules!)
   (let [secs (or (some-> secs-arg parse-long) 15)]
     (header (str "▶ running all " (count examples) " examples · " secs "s each"))
     (info "Press Q or close a window to skip to the next one early.")
@@ -394,7 +349,7 @@
   (println)
   (info "Run one:      bb <name>        e.g.  bb starfield")
   (info "Or by arg:    bb run <name>")
-  (info "Also:         bb install · bb clean")
+  (info "Also:         bb check · bb nrepl · bb clean")
   (println))
 
 ;; ---------------------------------------------------------------------------
@@ -433,8 +388,7 @@
         (info-section (str "Examples: " title " (" (count rows) ")")
                       (map (juxt :profile :desc) rows)))))
   (info-section "Build"
-                [["install" "Install jank-raylib-sys into ~/.m2 (idempotent)"]
-                 ["clean" "Remove */target build dirs"]])
+                [["clean" "Remove */target build dirs"]])
   (info-section "Dev"
                 [["check" "Offline gates: syntax, registration, EDN (fast, no compile)"]
                  ["nrepl" "Start a jank nREPL (cpp/ interop works in it)"]])

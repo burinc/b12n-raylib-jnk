@@ -16,7 +16,7 @@ New examples are welcome — the suite is deliberately mechanical to grow, and
 ```sh
 git clone --recurse-submodules git@github.com:burinc/b12n-raylib-jnk.git
 cd b12n-raylib-jnk
-bb install          # builds raylib and installs jank-raylib-sys into ~/.m2
+bb check            # offline gates (fast)
 bb basic-window     # should open a window
 ```
 
@@ -35,15 +35,6 @@ obvious way:
   yourself, `export PATH="/usr/local/bin:$PATH"` first.
 - **`lein-jank` must be `2026.06-1` or newer** in every `project.clj`. 0.7
   lacks the native build middleware entirely.
-
-### The raylib submodule is meant to look dirty
-
-`git status` will permanently show `jank-raylib-sys/raylib` as modified. That
-is intentional, not something to clean up: every `bb` invocation applies
-`jank-raylib-sys/patches/macos-opengl43-forward-compat.patch` to the
-submodule working tree. See that directory's `README.md` for what the patch
-does and why it is a patch rather than a fork. Please don't commit the
-submodule pointer as part of an unrelated change.
 
 ## Before you open a PR
 
@@ -200,13 +191,6 @@ PR goes live when a maintainer next syncs — you don't need to do anything.
 This project is released under the zlib License — see [`LICENSE`](LICENSE).
 That is the same license raylib itself uses. By contributing, you agree your
 contribution is licensed under those terms.
-
-Two files under `jank-raylib-sys/` are the exception and remain MPL 2.0
-(`project.clj` and `jank-build.bb`, both derived from
-[`lein-jank-playground`](https://github.com/kylc/lein-jank-playground)). If
-your change touches either, it stays MPL — see
-[`jank-raylib-sys/README.md`](jank-raylib-sys/README.md). Everything else,
-including all the examples, is zlib.
 
 If your example is a port of an upstream raylib example, **name the original
 C file in its docstring** (e.g.

@@ -3,7 +3,7 @@
             :url  "https://opensource.org/license/zlib"}
   :plugins [[org.jank-lang/lein-jank "2026.06-1"]]
   :middleware [leiningen.jank/middleware]
-  :dependencies [[net.b12n/jank-raylib-sys "6.0-SNAPSHOT"]]
+  :dependencies [[org.jank-lang.commons/raylib-sys "2026.08-2"]]
   ;; Default entrypoint; select another example with a profile, e.g.
   ;;   lein with-profile +input-keys run --disable-sandbox
   :main raylib-examples.bouncing-ball

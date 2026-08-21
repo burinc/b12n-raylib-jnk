@@ -17,7 +17,9 @@
     exactly like the Model material pattern.
   - DrawMesh takes the Mesh, Material and an inline MatrixTranslate
     all by value - direct call."
-  (:include "raylib.h" "raymath.h" "jank_rlights.h"))
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
+  (:include "raylib.h" "raymath.h"))
 
 ;; The instance transforms + Material field writes.
 (cpp/raw "#define JANK_MAX_INSTANCES 10000
@@ -59,6 +61,8 @@ static void jank_mat_set_color(Material* m, int map, int r, int g, int b, int a)
         cube (cpp/GenMeshCube (cpp/float 1.0) (cpp/float 1.0) (cpp/float 1.0))
         shader (cpp/LoadShader (str RES "shaders/glsl330/lighting_instancing.vs")
                                (str RES "shaders/glsl330/lighting.fs"))
+        ;; boxed here, where the shader is still native (see rlights ns)
+        sh-box (cpp/box (cpp/new cpp/Shader shader))
         view-loc (int (cpp/GetShaderLocation shader "viewPos"))
         ambient-loc (int (cpp/GetShaderLocation shader "ambient"))
         mat-instances (cpp/LoadMaterialDefault)
@@ -66,15 +70,17 @@ static void jank_mat_set_color(Material* m, int map, int r, int g, int b, int a)
 
     (cpp/jank_build_transforms)
 
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_MATRIX_MVP
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MATRIX_MVP
                                 (int (cpp/GetShaderLocation shader "mvp")))
-    (cpp/jank_rl_shader_set_loc (cpp/& shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
-    (cpp/jank_rl_set_vec4 shader ambient-loc 0.2 0.2 0.2 1.0)
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (sh/set-vec4! sh-box ambient-loc 0.2 0.2 0.2 1.0)
 
     ;; one white directional light
-    (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_DIRECTIONAL)
-                              50.0 50.0 0.0 0.0 0.0 0.0
-                              255 255 255 255 shader)
+    (rl/create-light! {:type rl/LIGHT-DIRECTIONAL
+                                      :px 50.0 :py 50.0 :pz 0.0
+                                      :tx 0.0 :ty 0.0 :tz 0.0
+                                      :r 255 :g 255 :b 255 :a 255
+                                      :shader sh-box})
 
     ;; instanced cubes: RED + the instancing shader; plain cubes: BLUE default
     (cpp/jank_mat_set_shader (cpp/& mat-instances) shader)
@@ -88,7 +94,8 @@ static void jank_mat_set_color(Material* m, int map, int r, int g, int b, int a)
     (loop []
       (when (cpp/! (cpp/WindowShouldClose))
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
-        (cpp/jank_rl_push_view_pos shader view-loc (cpp/& camera))
+        (let [p (.-position camera)]
+          (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
 
         (cpp/BeginDrawing)
         (cpp/ClearBackground cpp/RAYWHITE)

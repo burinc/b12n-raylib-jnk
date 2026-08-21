@@ -23,7 +23,8 @@
     vars exchanged.
   - rlEnableShader / rlBindShaderBuffer / rlComputeShaderDispatch are
     direct rlgl calls with jank-int ids."
-  (:include "raylib.h" "rlgl.h" "jank_rlights.h"))
+  (:require [raylib-examples.shaders :as sh])
+  (:include "raylib.h" "rlgl.h"))
 
 ;; The C's GolUpdateSSBO (count + buffered draw commands) parked C-side;
 ;; jank talks to it through these wrappers. The flush uploads the staged
@@ -73,6 +74,8 @@ static void jank_gol_flush(int ssboTransfert, int program, int ssboA) {
 
   (let [gol-logic-prog (int (cpp/jank_gol_load_compute (str RES "shaders/glsl430/gol.glsl")))
         gol-render-shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl430/gol_render.glsl"))
+        ;; boxed here, where shader is still native (see rlights ns)
+        render-box (cpp/box (cpp/new cpp/Shader gol-render-shader))
         res-loc (int (cpp/GetShaderLocation gol-render-shader "resolution"))
         gol-transfert-prog (int (cpp/jank_gol_load_compute (str RES "shaders/glsl430/gol_transfert.glsl")))
         ;; two ping-ponged world buffers (768*768 u32 cells) + the command buffer
@@ -122,7 +125,7 @@ static void jank_gol_flush(int ssboTransfert, int program, int ssboA) {
                 ssbo-b' (if stepping? ssbo-a ssbo-b)]
 
             (cpp/rlBindShaderBuffer ssbo-a' 1)
-            (cpp/jank_rl_set_vec2 gol-render-shader res-loc
+            (sh/set-vec2! render-box res-loc
                                   (+ 0.0 GOL-WIDTH) (+ 0.0 GOL-WIDTH))
 
             (cpp/BeginDrawing)

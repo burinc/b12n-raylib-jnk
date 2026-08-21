@@ -3,28 +3,17 @@ Third-party attribution
 
 This project is released under the zlib License; see LICENSE. That is the
 same license raylib itself uses, chosen deliberately so that the original
-terms carry through the 209 example ports rather than being replaced by
+terms carry through the example ports rather than being replaced by
 something stricter.
+
+Every file here is under that license. An earlier version carved out two
+MPL 2.0 files inherited from a vendored -sys wrapper; that wrapper is gone,
+replaced by the official org.jank-lang.commons/raylib-sys package, so the
+carve-out went with it.
 
 zlib asks two things of an altered version: that the origin not be
 misrepresented, and that the alteration be plainly marked. This file is that
 marking.
-
-
-Exception: two files remain under the Mozilla Public License 2.0
-----------------------------------------------------------------
-  jank-raylib-sys/project.clj
-  jank-raylib-sys/jank-build.bb
-
-MPL 2.0 is a file-level copyleft, so these two cannot be relicensed to zlib
-by this project — only their original author could do that. MPL 2.0 section
-3.3 expressly permits distributing a Larger Work (this repository) under
-terms of your choice provided the covered files keep complying with the MPL,
-which is the arrangement here. Both files carry an MPL notice header, and a
-copy of the license sits beside them at jank-raylib-sys/LICENSE.
-
-Nothing else under jank-raylib-sys/ is MPL. include/jank_rlights.h and
-patches/ are covered by the root zlib License.
 
 
 raylib
@@ -33,18 +22,14 @@ raylib
   https://github.com/raysan5/raylib
   Licensed under the zlib/libpng license (the same license as this project).
 
-  raylib is not copied into this repository. It is referenced as a git
-  submodule (jank-raylib-sys/raylib) pinned to an upstream commit, fetched
-  from raysan5/raylib on first build and compiled from source by
-  jank-raylib-sys/jank-build.bb.
+  raylib is not copied into this repository, and is no longer built here.
+  The library comes from org.jank-lang.commons/raylib-sys on Clojars, which
+  pins the same upstream commit (tag 6.0, dbc56a87).
 
-  One patch is applied to that checkout at build time:
-  jank-raylib-sys/patches/macos-opengl43-forward-compat.patch. It adds the
-  "#if defined(__APPLE__)" GLFW forward-compatibility guard that raylib's own
-  RL_OPENGL_33 branch already has but its RL_OPENGL_43 branch is missing.
-  This is an alteration to raylib's source, applied only in a local working
-  tree and never redistributed; see that directory's README.md for the full
-  rationale.
+  A git submodule (jank-raylib-sys/raylib) is still fetched, but only as the
+  source of example ASSETS - the shaders, models, textures, fonts and audio
+  that 101 of the examples load from raylib/examples/*/resources/, which the
+  published jar does not carry. Nothing in it is compiled or patched.
 
 
 raylib examples
@@ -78,26 +63,17 @@ rlights.h
   header comment carries the same attribution.
 
 
-jank-raylib-sys and jank-build-cmake
-------------------------------------
+lein-jank-playground
+--------------------
   Copyright (c) Kyle Cesare (@kylc)
   https://github.com/kylc/lein-jank-playground
   Licensed under the Mozilla Public License 2.0.
 
-  The jank-raylib-sys wrapper and the overall lein-jank project layout
-  originate from Kyle Cesare's lein-jank-playground. This repository carries
-  them forward with modifications: lein-jank bumped to 2026.06-1, an "include"
-  verbatim-path added to ship the jank-helper headers, a second include-dir
-  build directive emitted for them, an explicit OPENGL_VERSION pin, and
-  lib/lib64 detection for cross-distro shared-library layout.
-
-  The cmake-build function in jank-raylib-sys/jank-build.bb is inlined from
-  that project's org.clojars.kylc/jank-build-cmake 0.1-SNAPSHOT
-  (jank/build/cmake.bb), behaviour unchanged. It is vendored rather than
-  depended on so a fresh clone builds without fetching a floating SNAPSHOT
-  from a third party's Clojars account.
-
-  These are the two MPL-covered files named at the top of this file.
+  This project's original -sys wrapper and lein-jank layout came from Kyle
+  Cesare's lein-jank-playground. No code from it remains: the wrapper was
+  replaced by the official org.jank-lang.commons/raylib-sys package and its
+  inlined cmake build helper by that package's own. Recorded here because the
+  project started from that work.
 
 
 jank

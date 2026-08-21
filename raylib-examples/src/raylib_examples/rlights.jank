@@ -1,0 +1,99 @@
+(ns raylib-examples.rlights
+  "raylib's examples/shaders/rlights.h, reimplemented in jank.
+
+  The original is C because the C examples are C. The jank port used to be
+  C too - a shipped jank_rlights.h keeping a static Light array behind
+  index-based scalar wrappers - on the belief that a jank fn could neither
+  take nor return a native value, so light state had to live C-side.
+
+  That belief was wrong. The only thing the C actually bought was taking the
+  address of a value to hand to SetShaderValue, and cpp/new produces exactly
+  that pointer. A Light is otherwise plain data plus five cached int uniform
+  locations, which an ordinary jank map holds fine.
+
+  Uniform pushing lives in raylib-examples.shaders; this ns is only the
+  light bookkeeping on top of it.
+
+  Callers box the shader themselves, INLINE, with
+
+    (cpp/box (cpp/new cpp/Shader shader))
+
+  and pass that box to everything here. It cannot be wrapped in a helper fn:
+  by the time a fn body runs, its Shader argument is already an object_ref
+  and cpp/new has nothing to copy from. The box has to be made where the
+  value is still native.
+
+  The shader crosses these fn boundaries as an OPAQUE BOX. A Shader has no
+  conversion trait, so passing one as a jank fn argument turns it into an
+  object_ref and the native call rejects it. cpp/new puts a copy on the heap,
+  cpp/box makes it travel, and cpp/unbox + cpp/* hands it back by value.
+
+  So there is no header, no cpp/raw, and nothing to install: a project that
+  wants lighting copies this file next to its example.
+
+  Based on raylib/examples/shaders/rlights.h"
+  (:require [raylib-examples.shaders :as sh])
+  (:include "raylib.h"))
+
+(def LIGHT-DIRECTIONAL 0)
+(def LIGHT-POINT 1)
+
+;; Lights live here, not in C. Each entry is a plain map: the light's own
+;; data plus the uniform locations looked up once at creation.
+(defonce ^:private lights (atom []))
+
+(defn create-light!
+  "Register a light and cache its uniform locations. Returns its index.
+
+  Mirrors CreateLight: the shader declares lights[i].{enabled,type,position,
+  target,color}, so the locations depend on the index and are looked up once."
+  [{:keys [type px py pz tx ty tz r g b a shader]}]
+  (let [i (count (deref lights))
+        s (cpp/unbox (:* cpp/Shader) shader)
+        at (fn [field] (int (cpp/GetShaderLocation (cpp/* s) (str "lights[" i "]." field))))
+        light {:enabled 1 :type type
+               :px px :py py :pz pz
+               :tx tx :ty ty :tz tz
+               :r r :g g :b b :a a
+               :enabled-loc (at "enabled") :type-loc (at "type")
+               :position-loc (at "position") :target-loc (at "target")
+               :color-loc (at "color")}]
+    (swap! lights conj light)
+    i))
+
+(defn update-light!
+  "Push light i's current state to the shader. Mirrors UpdateLightValues."
+  [sh-box i]
+  (let [{:keys [enabled type px py pz tx ty tz r g b a
+                enabled-loc type-loc position-loc target-loc color-loc]}
+        (nth (deref lights) i)]
+    (sh/set-int! sh-box enabled-loc enabled)
+    (sh/set-int! sh-box type-loc type)
+    (sh/set-vec3! sh-box position-loc px py pz)
+    (sh/set-vec3! sh-box target-loc tx ty tz)
+    ;; colors are 0-255 in raylib, 0-1 in GLSL
+    (sh/set-vec4! sh-box color-loc (/ r 255.0) (/ g 255.0) (/ b 255.0) (/ a 255.0))))
+
+(defn toggle-light!
+  [i]
+  (swap! lights update i (fn [l] (update l :enabled (fn [e] (if (= 1 e) 0 1))))))
+
+(defn set-light-pos!
+  "Move light i. The shader is updated on the next update-light!."
+  [i x y z]
+  (swap! lights update i (fn [l] (assoc l :px x :py y :pz z))))
+
+(defn light-enabled?
+  [i]
+  (= 1 (:enabled (nth (deref lights) i))))
+
+(defn push-view-pos!
+  "Per-frame viewPos uniform.
+
+  Takes the position as three scalars, not the Camera3D. Same reason the
+  shader is boxed: a Camera3D argument arrives as an object_ref and has no
+  readable members, so the caller destructures it while it is still native."
+  [sh-box loc x y z]
+  (sh/set-vec3! sh-box loc x y z))
+
+(defn reset-lights! [] (reset! lights []))

@@ -9,12 +9,11 @@ native code via C++/LLVM, not the JVM. Each example is one `.jank` namespace
 under `raylib-examples/src/raylib_examples/`; a Leiningen profile picks which
 `-main` runs.
 
-This repo is standalone: it vendors `jank-raylib-sys` (the raylib C-binding
-wrapper, with `raylib` itself as a git submodule) so it builds from a fresh
-clone with nothing else needed beyond the requirements below. No third-party
-Maven or Clojars artifacts are fetched for the build — the one build helper
-it used to pull from a Clojars snapshot is now inlined into
-`jank-raylib-sys/jank-build.bb`.
+raylib comes from the official
+[`org.jank-lang.commons/raylib-sys`](https://github.com/jank-lang/commons)
+package, so there is no wrapper to build or install here. A `raylib`
+submodule is still fetched, but only for the example assets — the shaders,
+models, textures and audio that many of the examples load.
 
 ## Requirements
 
@@ -39,12 +38,13 @@ git submodule update --init --recursive
 ```sh
 bb info              # grouped cheat-sheet of everything (start here)
 bb examples          # list every runnable example
-bb starfield         # run one (installs jank-raylib-sys on first use)
+bb starfield         # run one (fetches example assets on first use)
 bb run particles     # same, by argument
 bb run-all           # cycle through every example, ~15s each (a demo reel)
 bb run-all 40        # ...longer per example (also covers first-run compiles)
 
-bb install           # install jank-raylib-sys into ~/.m2
+bb check             # offline gates: syntax, registration, EDN
+bb nrepl             # a jank nREPL with cpp/ interop live in it
 bb clean             # remove */target build dirs
 ```
 
@@ -87,17 +87,13 @@ than failing obscurely. You never need to run it: every GIF under
 
 - **`rlgl-compute` does not run out of the box.** It needs OpenGL 4.3
   compute-shader support (`rlLoadShaderProgramCompute`, SSBOs,
-  `rlComputeShaderDispatch`). This repo builds `jank-raylib-sys` at
-  `OPENGL_VERSION "3.3"` by default — the version every other example
-  needs, and the version macOS's native GL backend actually supports
-  (Apple caps out at OpenGL 4.1; GLFW rejects a 4.3 context request
-  unconditionally on macOS, regardless of any compatibility hint). To try
-  `rlgl-compute` on a platform where OpenGL 4.3 is real (Linux, Windows),
-  change `OPENGL_VERSION` to `"4.3"` in `jank-raylib-sys/jank-build.bb`, then
-  `bb install` (consumers resolve `jank-build.bb` from the `~/.m2` jar, not
-  the working tree — `bb clean` alone won't pick up the edit), then
-  `bb clean` (or delete `raylib-examples/target`) and rebuild. This will not
-  work on macOS regardless.
+  `rlComputeShaderDispatch`). raylib is built by the official `raylib-sys`
+  package at OpenGL 3.3, which is what raylib's own Desktop default
+  resolves to — and 3.3 is the practical ceiling on macOS anyway (Apple
+  caps out at OpenGL 4.1; GLFW rejects a 4.3 context request
+  unconditionally there, regardless of any compatibility hint). Running it
+  on a platform where 4.3 is real would mean building raylib yourself with
+  `OPENGL_VERSION "4.3"` instead of taking the published package.
 
 ## Documentation
 
@@ -132,8 +128,5 @@ stands in for CI here, and the four places a new example has to be registered.
 [zlib](LICENSE) — the same license as raylib itself, so the original terms
 carry through the ports rather than being replaced by something stricter.
 
-Two files are the exception and remain MPL 2.0, since they are derived from
-[`lein-jank-playground`](https://github.com/kylc/lein-jank-playground) and
-MPL is a file-level copyleft: `jank-raylib-sys/project.clj` and
-`jank-raylib-sys/jank-build.bb`. Both carry a notice header.
-[`NOTICE`](NOTICE) records every attribution and what was altered in each.
+Every file is under that license. [`NOTICE`](NOTICE) records every
+attribution and what was altered in each.

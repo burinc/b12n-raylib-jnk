@@ -4,7 +4,6 @@
 ;;   bb examples          list the runnable raylib examples
 ;;   bb <name>            run one example, e.g. `bb starfield`
 ;;   bb run <name>        same, by argument (e.g. `bb run starfield`)
-;;   bb install           install jank-raylib-sys into ~/.m2
 ;;   bb clean             remove */target build dirs
 ;;
 ;; Library install is idempotent and happens automatically the first time
@@ -209,7 +208,7 @@
   cubicmap-rendering {:doc "▶ a cube maze generated from a tiny black-and-white image (GenMeshCubicmap)" :task (h/run-example! "cubicmap-rendering")}
   mesh-generation {:doc "▶ all nine procedural mesh generators in one checked-texture gallery" :task (h/run-example! "mesh-generation")}
   first-person-maze {:doc "▶ walk the cubicmap maze in first person with wall collision + radar" :task (h/run-example! "first-person-maze")}
-  basic-lighting  {:doc "▶ a plane + cube lit by four toggleable point lights (jank_rlights.h)" :task (h/run-example! "basic-lighting")}
+  basic-lighting  {:doc "▶ a plane + cube lit by four toggleable point lights" :task (h/run-example! "basic-lighting")}
   fog-rendering   {:doc "▶ torus/cube/sphere models fading into adjustable exponential fog" :task (h/run-example! "fog-rendering")}
   cel-shading     {:doc "▶ a GLB car toon-shaded with quantized bands + a silhouette outline" :task (h/run-example! "cel-shading")}
   normalmap-rendering {:doc "▶ a spinning plane lit per-pixel through a tangent-space normal map" :task (h/run-example! "normalmap-rendering")}
@@ -432,7 +431,5 @@
    :task (h/nrepl!)}
 
   ;; --- build ---
-  install {:doc "Install jank-raylib-sys into ~/.m2 (idempotent)"
-           :task (h/install-all!)}
   clean   {:doc "Remove */target build dirs"
            :task (h/clean!)}}}

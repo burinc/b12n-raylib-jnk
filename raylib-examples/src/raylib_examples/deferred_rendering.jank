@@ -17,9 +17,11 @@
     SAMPLER2D uniforms) are shims, the rest is direct rlgl.
   - The debug views draw a compound-literal Texture2D built from a
     raw GL id - a one-line C shim.
-  - Lights ride jank_rlights.h against the deferred shader; the 30
+  - Lights ride the rlights namespace against the deferred shader; the 30
     random cubes are a jank vector of maps drawn with DrawModelEx."
-  (:include "raylib.h" "rlgl.h" "jank_rlights.h"))
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
+  (:include "raylib.h" "rlgl.h"))
 
 ;; G-buffer (MRT framebuffer) + deferred-shader helpers.
 (cpp/raw "static unsigned int jank_gb_fbo = 0;
@@ -118,6 +120,8 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
                                        (str RES "shaders/glsl330/gbuffer.fs"))
         deferred-shader (cpp/LoadShader (str RES "shaders/glsl330/deferred_shading.vs")
                                         (str RES "shaders/glsl330/deferred_shading.fs"))
+        ;; boxed here, where the shader is still native (see rlights ns)
+        sh-box (cpp/box (cpp/new cpp/Shader deferred-shader))
         view-loc (int (cpp/GetShaderLocation deferred-shader "viewPosition"))
         ;; 30 random tumbling cubes, as jank data
         cubes (loop [i 0 acc []]
@@ -129,7 +133,7 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
                                     :rot (+ 0.0 (int (cpp/GetRandomValue 0 359)))}))
                   acc))]
 
-    (cpp/jank_rl_shader_set_loc (cpp/& deferred-shader) cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
 
     (cpp/jank_gbuffer_init WIDTH HEIGHT)
     (cpp/jank_deferred_init_samplers deferred-shader)
@@ -141,10 +145,11 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
     (loop [i 0]
       (when (< i 4)
         (let [{:keys [x y z r g b]} (nth LIGHTS i)]
-          (cpp/jank_rl_create_light (cpp/int cpp/LIGHT_POINT)
-                                    x y z 0.0 0.0 0.0
-                                    (int r) (int g) (int b) 255
-                                    deferred-shader))
+          (rl/create-light! {:type rl/LIGHT-POINT
+                                      :px x :py y :pz z
+                                      :tx 0.0 :ty 0.0 :tz 0.0
+                                      :r (int r) :g (int g) :b (int b) :a 255
+                                      :shader sh-box}))
         (recur (inc i))))
 
     (cpp/rlEnableDepthTest)
@@ -154,12 +159,13 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
     (loop [mode MODE-SHADING]
       (when (cpp/! (cpp/WindowShouldClose))
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
-        (cpp/jank_rl_push_view_pos deferred-shader view-loc (cpp/& camera))
+        (let [p (.-position camera)]
+          (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
 
-        (when (cpp/IsKeyPressed cpp/KEY_Y) (cpp/jank_rl_toggle_light 0))
-        (when (cpp/IsKeyPressed cpp/KEY_R) (cpp/jank_rl_toggle_light 1))
-        (when (cpp/IsKeyPressed cpp/KEY_G) (cpp/jank_rl_toggle_light 2))
-        (when (cpp/IsKeyPressed cpp/KEY_B) (cpp/jank_rl_toggle_light 3))
+        (when (cpp/IsKeyPressed cpp/KEY_Y) (rl/toggle-light! 0))
+        (when (cpp/IsKeyPressed cpp/KEY_R) (rl/toggle-light! 1))
+        (when (cpp/IsKeyPressed cpp/KEY_G) (rl/toggle-light! 2))
+        (when (cpp/IsKeyPressed cpp/KEY_B) (rl/toggle-light! 3))
 
         (let [mode (cond (cpp/IsKeyPressed cpp/KEY_ONE) 0
                          (cpp/IsKeyPressed cpp/KEY_TWO) 1
@@ -169,7 +175,7 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
 
           (loop [i 0]
             (when (< i 4)
-              (cpp/jank_rl_update_light deferred-shader (int i))
+              (rl/update-light! sh-box (int i))
               (recur (inc i))))
 
           (cpp/BeginDrawing)
@@ -233,7 +239,7 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
               (loop [i 0]
                 (when (< i 4)
                   (let [{:keys [x y z] :as light} (nth LIGHTS i)]
-                    (if (= 1 (int (cpp/jank_rl_light_enabled (int i))))
+                    (if (rl/light-enabled? (int i))
                       (cpp/DrawSphereEx (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
                                         (cpp/float 0.2) 8 8
                                         (cpp/GetColor (light-color light)))

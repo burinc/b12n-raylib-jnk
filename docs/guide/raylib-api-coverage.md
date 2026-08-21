@@ -73,7 +73,7 @@ kept in a path-taking C shim), SSBOs (`rlLoadShaderBuffer` with
 Prerequisites and patterns:
 
 - **jank-raylib-sys must be built with `OPENGL_VERSION "4.3"`** (set in
-  its jank-build.bb since 2026-07-11): under the default 3.3 the rlgl
+  the official raylib-sys package): under the default 3.3 the rlgl
   compute functions compile to no-ops. 4.3 is the same GL 3.3 feature
   set plus compute, so the GLSL-330 examples are unaffected (regression
   checked). Proof line: `GL: Compute shaders supported`.
