@@ -15,19 +15,6 @@
     frame wraps by the CURRENT animation's keyframe count."
   (:include "raylib.h"))
 
-;; Animation array behind C statics (the shadowmap-rendering shims + name).
-(cpp/raw "static ModelAnimation *jank_anims = NULL;
-static int jank_anims_count = 0;
-static int jank_load_anims(const char* path) {
-  jank_anims = LoadModelAnimations(path, &jank_anims_count);
-  return jank_anims_count;
-}
-static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
-static const char* jank_anim_name(int i) { return jank_anims[i].name; }
-static void jank_update_anim(Model m, int i, int frame) {
-  UpdateModelAnimation(m, jank_anims[i], frame);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/models/resources/")
@@ -42,7 +29,12 @@ static void jank_update_anim(Model m, int i, int frame) {
                              (cpp/float 45.0)
                              cpp/CAMERA_PERSPECTIVE)
         model (cpp/LoadModel (str RES "models/gltf/robot.glb"))
-        anim-count (int (cpp/jank_load_anims (str RES "models/gltf/robot.glb")))]
+        ;; LoadModelAnimations writes the count through an int* out-param and
+        ;; returns the array. Both live in this outer let and are captured by
+        ;; the frame loop, so no cpp/raw static is needed to hold them.
+        anim-n (cpp/int 0)
+        anims (cpp/LoadModelAnimations (str RES "models/gltf/robot.glb") (cpp/& anim-n))
+        anim-count (int (+ 0.0 anim-n))]
 
     (cpp/SetTargetFPS 60)
 
@@ -58,9 +50,10 @@ static void jank_update_anim(Model m, int i, int frame) {
                                (int (mod (+ anim-index (dec anim-count)) anim-count))
                                :else anim-index)
               anim-frame (int (mod (inc anim-frame)
-                                   (int (cpp/jank_anim_keyframes (int anim-index)))))]
+                                   (int (+ 0.0 (.-keyframeCount (cpp/aget anims (cpp/int (int anim-index))))))))]
 
-          (cpp/jank_update_anim model (int anim-index) (int anim-frame))
+          (cpp/UpdateModelAnimation model (cpp/aget anims (cpp/int (int anim-index)))
+                                    (cpp/float (+ 0.0 (int anim-frame))))
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)
@@ -72,7 +65,7 @@ static void jank_update_anim(Model m, int i, int frame) {
           (cpp/DrawGrid 10 (cpp/float 1.0))
           (cpp/EndMode3D)
 
-          (cpp/DrawText (str "Current animation: " (cpp/jank_anim_name (int anim-index)))
+          (cpp/DrawText (str "Current animation: " (str (.-name (cpp/aget anims (cpp/int (int anim-index))))))
                         10 40 20 cpp/MAROON)
           (cpp/DrawText "Use the LEFT/RIGHT keys to switch animation" 10 10 20 cpp/GRAY)
 
