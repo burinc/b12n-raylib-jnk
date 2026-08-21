@@ -21,42 +21,39 @@
     DrawTexturePro."
   (:include "raylib.h" "raymath.h"))
 
-;; The C example's DrawCameraPrism, verbatim (example-defined C, not
-;; raylib API): unproject the NDC far plane at the target distance and
-;; draw the frustum edges. Plus the R-key re-target field write.
-(cpp/raw "static void jank_draw_camera_prism(Camera3D* cam, double aspect) {
-  Camera3D camera = *cam;
-  Color color = GREEN;
-  float length = Vector3Distance(camera.position, camera.target);
-  Vector3 planeNDC[4] = {
-    { -1.0f, -1.0f, 1.0f }, { 1.0f, -1.0f, 1.0f },
-    { 1.0f, 1.0f, 1.0f }, { -1.0f, 1.0f, 1.0f }
-  };
-  Matrix view = GetCameraMatrix(camera);
-  Matrix proj = MatrixPerspective(camera.fovy*DEG2RAD, (float)aspect, 0.05f, length);
-  Matrix viewProj = MatrixMultiply(view, proj);
-  Matrix inv = MatrixInvert(viewProj);
-  Vector3 corners[4];
-  for (int i = 0; i < 4; i++) {
-    float x = planeNDC[i].x, y = planeNDC[i].y, z = planeNDC[i].z;
-    float vx = inv.m0*x + inv.m4*y + inv.m8*z + inv.m12;
-    float vy = inv.m1*x + inv.m5*y + inv.m9*z + inv.m13;
-    float vz = inv.m2*x + inv.m6*y + inv.m10*z + inv.m14;
-    float vw = inv.m3*x + inv.m7*y + inv.m11*z + inv.m15;
-    corners[i] = (Vector3){ vx/vw, vy/vw, vz/vw };
-  }
-  DrawLine3D(corners[0], corners[1], color);
-  DrawLine3D(corners[1], corners[2], color);
-  DrawLine3D(corners[2], corners[3], color);
-  DrawLine3D(corners[3], corners[0], color);
-  for (int i = 0; i < 4; i++) DrawLine3D(camera.position, corners[i], color);
-}
-static void jank_cam_retarget(Camera3D* c) { c->target = (Vector3){ 0.0f, 0.0f, 0.0f }; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def SPLIT 400)
 (def CAPTURE 128.0)
+
+(def ^:private PLANE-NDC
+  "The far plane's four corners in normalised device coordinates."
+  [[-1.0 -1.0 1.0] [1.0 -1.0 1.0] [1.0 1.0 1.0] [-1.0 1.0 1.0]])
+
+(defn- prism-corners
+  "Unproject PLANE-NDC through the camera's inverse view-projection.
+
+  Returns plain jank [x y z] vectors. The corners are only reals, so they
+  need no native array: the C's `Vector3 corners[4]` exists because C had
+  nowhere else to put them.
+
+  Takes the camera BOXED: a Camera3D has no conversion trait, so a bare one
+  arrives as an object_ref and its members cannot be read."
+  [cam-box aspect]
+  (let [camera (cpp/* (cpp/unbox (:* cpp/Camera3D) cam-box))
+        len (+ 0.0 (cpp/Vector3Distance (.-position camera) (.-target camera)))
+        view (cpp/GetCameraMatrix camera)
+        proj (cpp/MatrixPerspective (cpp/float (* (+ 0.0 (.-fovy camera)) cpp/DEG2RAD))
+                                    (cpp/float aspect) (cpp/float 0.05) (cpp/float len))
+        inv (cpp/MatrixInvert (cpp/MatrixMultiply view proj))
+        m (fn [f] (+ 0.0 f))]
+    (mapv (fn [[x y z]]
+            (let [vx (+ (* (m (.-m0 inv)) x) (* (m (.-m4 inv)) y) (* (m (.-m8 inv)) z) (m (.-m12 inv)))
+                  vy (+ (* (m (.-m1 inv)) x) (* (m (.-m5 inv)) y) (* (m (.-m9 inv)) z) (m (.-m13 inv)))
+                  vz (+ (* (m (.-m2 inv)) x) (* (m (.-m6 inv)) y) (* (m (.-m10 inv)) z) (m (.-m14 inv)))
+                  vw (+ (* (m (.-m3 inv)) x) (* (m (.-m7 inv)) y) (* (m (.-m11 inv)) z) (m (.-m15 inv)))]
+              [(/ vx vw) (/ vy vw) (/ vz vw)]))
+          PLANE-NDC)))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -82,7 +79,9 @@ static void jank_cam_retarget(Camera3D* c) { c->target = (Vector3){ 0.0f, 0.0f, 
         (cpp/UpdateCamera (cpp/& subject) cpp/CAMERA_ORBITAL)
 
         (when (cpp/IsKeyPressed cpp/KEY_R)
-          (cpp/jank_cam_retarget (cpp/& observer)))
+          (cpp/= (.-target observer)
+                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0)))
+          nil)
 
         ;; left half: the observer watching the world + the subject frustum
         (cpp/BeginTextureMode observer-rt)
@@ -93,7 +92,21 @@ static void jank_cam_retarget(Camera3D* c) { c->target = (Vector3){ 0.0f, 0.0f, 
                       (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/GOLD)
         (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
                            (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/PINK)
-        (cpp/jank_draw_camera_prism (cpp/& subject) aspect)
+        ;; the subject's view frustum: the far plane, then edges back to the eye
+        (let [cs (prism-corners (cpp/box (cpp/new cpp/Camera3D subject)) aspect)]
+          ;; Vector3 is built INLINE at each call: a fn returning one fails
+          ;; with "returning a native object of type 'Vector3'".
+          (loop [i 0]
+            (when (< i 4)
+              (let [[ax ay az] (nth cs i)
+                    [bx by bz] (nth cs (int (mod (inc i) 4)))]
+                (cpp/DrawLine3D (cpp/Vector3 (cpp/float ax) (cpp/float ay) (cpp/float az))
+                                (cpp/Vector3 (cpp/float bx) (cpp/float by) (cpp/float bz))
+                                cpp/GREEN)
+                (cpp/DrawLine3D (.-position subject)
+                                (cpp/Vector3 (cpp/float ax) (cpp/float ay) (cpp/float az))
+                                cpp/GREEN))
+              (recur (inc i)))))
         (cpp/EndMode3D)
         (cpp/DrawText "Observer View" 10 (- HEIGHT 30) 20 cpp/BLACK)
         (cpp/DrawText "WASD + Mouse to Move" 10 10 20 cpp/DARKGRAY)
