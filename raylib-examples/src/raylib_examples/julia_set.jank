@@ -9,20 +9,12 @@
 
   jank-native notes:
   - All fractal state (c, zoom, offset, speed) threads as jank reals;
-    the three uniforms are re-sent every frame through the cpp/raw
-    static float buffer + jank_set_uniform wrapper (the texture-outline
-    pattern, calls confined to -main). The C only re-sends zoom/offset
+    the three uniforms are re-sent every frame as plain SetShaderValue
+    calls over cpp/new Vector2/float. The C only re-sends zoom/offset
     on change - re-sending every frame is visually identical and
     simpler.
   - The C's pointsOfInterest float[6][2] is a jank vector of pairs."
   (:include "raylib.h"))
-
-;; Uniform staging (see texture-outline); only -main touches these.
-(cpp/raw "static float jank_uf_buf[4] = { 0 };
-static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
-static void jank_set_uniform(Shader s, int loc, int type) {
-  SetShaderValue(s, loc, jank_uf_buf, type);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -91,14 +83,14 @@ static void jank_set_uniform(Shader s, int loc, int type) {
               cy (+ cy dc)]
 
           ;; re-send all three uniforms
-          (cpp/jank_uf_set 0 cx)
-          (cpp/jank_uf_set 1 cy)
-          (cpp/jank_set_uniform shader c-loc cpp/SHADER_UNIFORM_VEC2)
-          (cpp/jank_uf_set 0 zoom)
-          (cpp/jank_set_uniform shader zoom-loc cpp/SHADER_UNIFORM_FLOAT)
-          (cpp/jank_uf_set 0 ox)
-          (cpp/jank_uf_set 1 oy)
-          (cpp/jank_set_uniform shader offset-loc cpp/SHADER_UNIFORM_VEC2)
+          (cpp/SetShaderValue shader (int c-loc)
+                              (cpp/new cpp/Vector2 (cpp/float cx) (cpp/float cy))
+                              cpp/SHADER_UNIFORM_VEC2)
+          (cpp/SetShaderValue shader (int zoom-loc)
+                              (cpp/new cpp/float (cpp/float zoom)) cpp/SHADER_UNIFORM_FLOAT)
+          (cpp/SetShaderValue shader (int offset-loc)
+                              (cpp/new cpp/Vector2 (cpp/float ox) (cpp/float oy))
+                              cpp/SHADER_UNIFORM_VEC2)
 
           ;; black canvas in the render texture; the fractal comes from the
           ;; shader when the texture is drawn

@@ -9,11 +9,13 @@
 
   jank-native notes:
   - The C's LoadImageColors Color* collision array becomes a jank
-    vector of 0/1 wall flags snapshotted at init through a one-line
-    GetImageColor shim (walls never change, so the pixel array need
+    vector of 0/1 wall flags snapshotted at init with an inline
+    GetImageColor read (walls never change, so the pixel array need
     not stay native).
-  - The collision response (camera.position = oldCamPos) is a
-    Camera3D-pointer shim; the old position is read field-by-field
+  - The collision response (camera.position = oldCamPos) is a cpp/=
+    with an explicit trailing nil, since a cpp/= in tail position of a
+    when clashes with the when's nil branch. The old position is read
+    field-by-field
     off (.-position camera) into jank reals before UpdateCamera.
   - Native bools stay out of and-chains: the CheckCollisionCircleRec
     test nests in its own when (rule 1)."

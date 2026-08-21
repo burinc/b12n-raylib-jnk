@@ -8,8 +8,8 @@
 
   jank-native notes:
   - Pitch/yaw/roll thread as jank reals with the C's ease-back-to-
-    level decay branches as conds; the transform is simple-mask's
-    MatrixRotateXYZ absolute-set shim fed DEG2RAD-scaled angles.
+    level decay branches as conds; the transform is an absolute
+    cpp/= of MatrixRotateXYZ fed DEG2RAD-scaled angles.
   - OBJ model + material texture write are proven ground."
   (:require [raylib-examples.models :as md])
   (:include "raylib.h" "raymath.h"))

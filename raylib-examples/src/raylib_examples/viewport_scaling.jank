@@ -28,16 +28,6 @@
   (:require [clojure.string :as str])
   (:include "raylib.h"))
 
-;; The render target parked as a C static so it survives across frames
-;; without living in jank loop state (rule 2). UnloadRenderTexture guards
-;; id 0 internally, so the first resize call is safe.
-(cpp/raw "static RenderTexture2D jank_target = { 0 };
-static void jank_resize_target(int w, int h) {
-  UnloadRenderTexture(jank_target);
-  jank_target = LoadRenderTexture(w, h);
-}
-static RenderTexture2D jank_get_target(void) { return jank_target; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RESOLUTIONS [[64 64] [256 240] [320 180] [3840 2160]])
@@ -105,6 +95,25 @@ static RenderTexture2D jank_get_target(void) { return jank_target; }")
        (cpp/Rectangle (cpp/float bx) (cpp/float by) (cpp/float 10.0) (cpp/float 10.0)))
     true false))
 
+(defn- resize-target!
+  "Unload the RenderTexture the atom holds, if any, and put a freshly
+  allocated one in its place.
+
+  The atom holds an OPAQUE BOX around a heap-allocated RenderTexture2D.
+  This is what a cpp/raw static used to be for: the resource must both
+  persist across frames and be recreated at runtime with computed sizes,
+  and loop/recur state cannot carry a native value. A box can, because it
+  is an ordinary jank object.
+
+  cpp/new is what makes it safe: a let-local would be destroyed at the end
+  of its scope and leave the box dangling."
+  [box-atom w h]
+  (when-let [old @box-atom]
+    (cpp/UnloadRenderTexture (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) old))))
+  (reset! box-atom
+          (cpp/box (cpp/new cpp/RenderTexture2D (cpp/LoadRenderTexture (cpp/int w) (cpp/int h)))))
+  nil)
+
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_RESIZABLE)
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -112,8 +121,9 @@ static RenderTexture2D jank_get_target(void) { return jank_target; }")
   (cpp/SetTargetFPS 60)
 
   ;; initial target for the starting 64x64 KEEP_ASPECT_INTEGER state
-  (let [r0 (compute-rects 0 (int (cpp/GetScreenWidth)) (int (cpp/GetScreenHeight)) 64 64)]
-    (cpp/jank_resize_target (int (:sw r0)) (int (- (:sh r0))))
+  (let [r0 (compute-rects 0 (int (cpp/GetScreenWidth)) (int (cpp/GetScreenHeight)) 64 64)
+        target-box (atom nil)]
+    (resize-target! target-box (int (:sw r0)) (int (- (:sh r0))))
 
     ;; Thread [resolution-index game-w game-h viewport-type rects-map].
     (loop [ri 0 gw 64 gh 64 vtype 0 rects r0]
@@ -152,10 +162,10 @@ static RenderTexture2D jank_get_target(void) { return jank_target; }")
               scale-y (- 0.0 (/ (:dh rects) (:sh rects)))]
 
           (when dirty?
-            (cpp/jank_resize_target (int (:sw rects)) (int (- (:sh rects)))))
+            (resize-target! target-box (int (:sw rects)) (int (- (:sh rects)))))
 
           ;; draw the scene at game resolution into the render texture
-          (let [target (cpp/jank_get_target)]
+          (let [target (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) @target-box))]
             (cpp/BeginTextureMode target)
             (cpp/ClearBackground cpp/WHITE)
             (cpp/DrawCircleV (cpp/Vector2 (cpp/float tmx) (cpp/float tmy))

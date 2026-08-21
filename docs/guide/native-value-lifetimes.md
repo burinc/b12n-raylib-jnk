@@ -84,28 +84,49 @@ consumer (`shaders.jank`, `models.jank`, `rlights.jank`).
 
 ## Frame-crossing mutable native state
 
-> **This section predates opaque boxes and may be obsolete.** A box held in
-> an atom should carry recreated native state across frames. That has **not**
-> been probed; three examples still use the static pattern
-> (`viewport_scaling`, `game_of_life`, `hot_reloading`).
-
 When a native resource must persist across frames AND be recreated at runtime
-with computed sizes, neither usual home works: `loop`/`recur` can't carry it,
-and a create-once outer-`let` local can't be rebound. Park it in a `cpp/raw`
-static behind accessor fns (`viewport_scaling.jank`).
+with computed sizes, neither usual home works: `loop`/`recur` cannot carry a
+native value, and a create-once outer-`let` local cannot be rebound.
 
-**CRITICAL: `cpp/raw` statics are duplicated PER JANK FN.** Every jank fn
-referencing the shims gets its OWN copy. A helper fn writing the "same"
-static writes a private copy the others never see. Probe evidence
-(2026-07-04): after `-main` called a load-into-static shim, `-main` read
-`.glyphCount` 95 from its copy while a helper `defn-` read 0 from its own.
-Failure modes are nasty: state silently "resets" across fn boundaries, and
-reading through a zeroed struct's pointer field segfaults.
+**Hold an opaque box in a jank atom.** The box is an ordinary jank object, so
+the atom carries it freely; `cpp/new` keeps the value alive past the scope
+that made it.
 
-Rule: route EVERY read/write of a mutable raw static through ONE jank fn (in
-practice `-main`), inlining helper logic there. `unicode_ranges.jank` inlines
-the C's `AddCodepointRange` into `-main` for exactly this reason. Pure-jank
-helpers (no shim calls) stay safe to factor out.
+```clojure
+(defn- resize-target! [box-atom w h]
+  (when-let [old @box-atom]
+    (cpp/UnloadRenderTexture (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) old))))
+  (reset! box-atom
+          (cpp/box (cpp/new cpp/RenderTexture2D (cpp/LoadRenderTexture (cpp/int w) (cpp/int h)))))
+  nil)
+
+;; per frame
+(let [target (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) @target-box))]
+  (cpp/BeginTextureMode target) ...)
+```
+
+`viewport_scaling.jank` is the proof, and recreation specifically was measured
+rather than assumed: with the resize forced on a timer, a 25s run logged **16
+framebuffer create/unload cycles and zero errors**. Creation, per-frame reads
+and mid-run reallocation all work.
+
+### The `cpp/raw` static this replaces
+
+Earlier ports parked such values in a `cpp/raw` static behind accessor fns.
+Prefer the box; the static carries a trap that cost real debugging time.
+
+**`cpp/raw` statics are duplicated PER JANK FN.** Every jank fn referencing
+the shims gets its OWN copy. A helper fn writing the "same" static writes a
+private copy the others never see. Probe evidence (2026-07-04): after `-main`
+called a load-into-static shim, `-main` read `.glyphCount` 95 from its copy
+while a helper `defn-` read 0 from its own. Failure modes are nasty: state
+silently "resets" across fn boundaries, and reading through a zeroed struct's
+pointer field segfaults.
+
+If you must use one, route EVERY read/write through ONE jank fn (in practice
+`-main`), inlining helper logic there. `unicode_ranges.jank` inlines the C's
+`AddCodepointRange` into `-main` for exactly this reason. Pure-jank helpers
+(no shim calls) stay safe to factor out.
 
 ## Create-once native resources
 

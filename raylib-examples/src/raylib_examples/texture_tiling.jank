@@ -12,11 +12,9 @@
     structs (pointers inside and all) bind as outer-let locals exactly
     like Font did in font-loading.
   - The C's model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture and
-    .shader field writes have no jank spelling; a pointer-shim pair
-    does them through (cpp/& model) (the image-processing address-of
-    pattern).
-  - The Z camera re-target reuses camera-3d-free's jank_cam_retarget
-    shim shape."
+    .shader field writes go through models.jank, which spells both
+    with cpp/=.
+  - The Z camera re-target is the same cpp/= camera-3d-free uses."
   (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
 

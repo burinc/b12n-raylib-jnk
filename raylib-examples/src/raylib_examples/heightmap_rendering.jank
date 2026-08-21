@@ -10,7 +10,7 @@
   - GenMeshHeightmap(image, size) is the third GenMesh* proven after
     the model unblock: the Image goes in by value, the Vector3 size
     inline, and the resulting Mesh feeds LoadModelFromMesh as a call
-    argument. Material texture write via the (cpp/& model) shim."
+    argument. Material texture write via models.jank."
   (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
 

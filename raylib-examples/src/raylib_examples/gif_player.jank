@@ -11,11 +11,11 @@
   - LoadImageAnim writes the frame count through an `int *frames`
     out-param. jank makes a native int (`(cpp/int 0)`), passes its
     address with `(cpp/& frames)`, then boxes it back for the loop.
-  - The next frame's pixels live at `image.data + w*h*4*frame`. jank's
-    `cpp/cast` can't reinterpret `void*` -> `unsigned char*` (it uses
-    `convert`, not `reinterpret_cast`), so a tiny `cpp/raw` shim does the
-    C pointer cast + arithmetic and returns the frame pointer straight to
-    UpdateTexture - the documented cpp/raw escape hatch."
+  - The next frame's pixels live at `image.data + w*h*4*frame`. `cpp/cast`
+    cannot reinterpret `void*` -> `unsigned char*` (it goes through
+    `convert`), but `cpp/unsafe-cast` is C-style casting and can, so the
+    cast and the arithmetic are both plain jank and the frame pointer goes
+    straight to UpdateTexture."
   (:include "raylib.h"))
 
 ;; jank's cpp/cast won't reinterpret void*->unsigned char*; do the pointer

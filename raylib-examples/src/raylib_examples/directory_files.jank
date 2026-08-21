@@ -13,7 +13,7 @@
     across frames (rule 2), so each load is snapshotted into a jank vector
     of `{:path :name :dir?}` maps right away and the native list is
     unloaded; the frame loop then reads only jank data. `.paths[i]` is
-    indexed through a one-line `cpp/raw` shim (`jank_path_at`, the same
+    indexed with `cpp/aget` (proven on `char**`, the same
     subscript trick random-sequence uses for int*), and each path string is
     copied out with `str` before UnloadDirectoryFiles frees it.
   - The C is a raygui showcase (GuiListViewEx / GuiButton / GuiLabel); per

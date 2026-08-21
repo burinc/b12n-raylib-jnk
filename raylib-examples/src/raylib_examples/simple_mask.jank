@@ -8,11 +8,11 @@
   Based on raylib/examples/shaders/shaders_simple_mask.c
 
   jank-native notes:
-  - MATERIAL_MAP_EMISSION as a second texture slot: the map-slot
-    parameterized texture-write shim (no mipmap setup here, unlike
+  - MATERIAL_MAP_EMISSION as a second texture slot, via models.jank's
+    set-map-texture! (no mipmap setup here, unlike
     normalmap-rendering's).
-  - model1.transform = MatrixRotateXYZ(rotation) is an absolute set
-    from three jank-threaded angles (a 3-angle shim); DrawModelEx's
+  - model1.transform = MatrixRotateXYZ(rotation) is an absolute cpp/=
+    from three jank-threaded angles; DrawModelEx's
     axis/angle/scale args are all by-value and call directly.
   - The frame counter is a jank int re-sent as an INT uniform each
     frame through the rlights setter toolbox."

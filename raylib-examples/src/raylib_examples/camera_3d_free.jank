@@ -11,8 +11,10 @@
     outer-let Camera3D forms the pointer (the image-processing address-of
     pattern) and the mutation PERSISTS across frames - the let-local is
     the same storage every loop iteration.
-  - The C's 'camera.target = {0,0,0}' field write has no jank syntax;
-    a one-line pointer shim does it (jank_cam_retarget)."
+  - The C's 'camera.target = {0,0,0}' field write is cpp/=, jank's
+    assignment form, which takes an lvalue. The when-branch ends in an
+    explicit nil, since cpp/= yields the assigned lvalue and a native
+    reference cannot be returned."
   (:include "raylib.h"))
 
 ;; jank can't assign struct fields; re-target through a pointer.

@@ -17,8 +17,10 @@
   - GetClipboardText returns a native `const char *` that jank's `str` folds
     straight into a jank string (proven in monitor-detector); a jank string
     passes straight back to SetClipboardText's `const char *` param. The
-    pointer can be NULL on an empty/unset clipboard, so a one-line cpp/raw
-    shim (`jank_clip`) coalesces NULL to \"\" before it reaches `str`."
+    pointer can be NULL on an empty/unset clipboard, so an `if` coalesces
+    it first. Note `(cpp/!= s cpp/nullptr)` does NOT compile (\"Binary
+    operator != is not supported for 'const char *' and 'std::nullptr_t'\");
+    `(cpp/bool s)` does."
   (:include "raylib.h"))
 
 ;; GetClipboardText can return NULL; fold NULL to \"\" so `str` never sees it.

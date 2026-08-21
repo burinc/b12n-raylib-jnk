@@ -13,16 +13,9 @@
     resets the extra texture units.
   - The C's (Color){255,0,0,255} literals become cpp/GetColor with a
     packed RGBA int (cpp/Color's unsigned-char ctor rejects jank ints).
-  - The divider FLOAT uniform goes through the static-float-buffer
-    jank_set_uniform shim (the texture-outline pattern)."
+  - The divider FLOAT uniform is a plain SetShaderValue over a
+    cpp/new float."
   (:include "raylib.h"))
-
-;; Uniform staging (see texture-outline); only -main touches these.
-(cpp/raw "static float jank_uf_buf[4] = { 0 };
-static void jank_uf_set(int i, double v) { jank_uf_buf[i] = (float)v; }
-static void jank_set_uniform(Shader s, int loc, int type) {
-  SetShaderValue(s, loc, jank_uf_buf, type);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -52,8 +45,8 @@ static void jank_set_uniform(Shader s, int loc, int type) {
                             :else divider)
               divider (min 1.0 (max 0.0 divider))]
 
-          (cpp/jank_uf_set 0 divider)
-          (cpp/jank_set_uniform shader divider-loc cpp/SHADER_UNIFORM_FLOAT)
+          (cpp/SetShaderValue shader (int divider-loc)
+                              (cpp/new cpp/float (cpp/float divider)) cpp/SHADER_UNIFORM_FLOAT)
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)

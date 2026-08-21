@@ -9,8 +9,9 @@
   Based on raylib/examples/models/models_animation_blending.c
 
   jank-native notes:
-  - First UpdateModelAnimationEx: a shim taking both animation
-    indices, both (fractional) frames and the blend factor.
+  - First UpdateModelAnimationEx: both animations are cpp/aget off the
+    ModelAnimation array, with both fractional frames and the blend
+    factor as cpp/floats.
   - The raygui dropdowns/sliders/progress bars become keyboard
     controls + hand-drawn bars (the animation-timing pattern).
   - The C's SUPPORT_GPU_SKINNING block is compiled out by default
@@ -18,24 +19,6 @@
     styling is simplified to a single left-to-right bar."
   (:require [clojure.string :as string])
   (:include "raylib.h"))
-
-(cpp/raw "static ModelAnimation *jank_anims = NULL;
-static int jank_anims_count = 0;
-static int jank_load_anims(const char* path) {
-  jank_anims = LoadModelAnimations(path, &jank_anims_count);
-  return jank_anims_count;
-}
-static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
-static const char* jank_anim_name(int i) { return jank_anims[i].name; }
-static void jank_update_anim_f(Model m, int i, double frame) {
-  UpdateModelAnimation(m, jank_anims[i], (float)frame);
-}
-/* blend two animation poses: 0.0 = all first, 1.0 = all second */
-static void jank_update_anim_blend(Model m, int i0, double f0,
-                                   int i1, double f1, double blend) {
-  UpdateModelAnimationEx(m, jank_anims[i0], (float)f0,
-                         jank_anims[i1], (float)f1, (float)blend);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -81,7 +64,12 @@ static void jank_update_anim_blend(Model m, int i0, double f0,
                              (cpp/float 45.0)
                              cpp/CAMERA_PERSPECTIVE)
         model (cpp/LoadModel (str RES "models/gltf/robot.glb"))
-        anim-count (int (cpp/jank_load_anims (str RES "models/gltf/robot.glb")))]
+        ;; LoadModelAnimations writes the count through an int* out-param and
+        ;; returns the array. Both live in this outer let and are captured by
+        ;; the frame loop, so no cpp/raw static is needed to hold them.
+        anim-n (cpp/int 0)
+        anims (cpp/LoadModelAnimations (str RES "models/gltf/robot.glb") (cpp/& anim-n))
+        anim-count (int (+ 0.0 anim-n))]
 
     (cpp/SetTargetFPS 60)
 
@@ -116,8 +104,8 @@ static void jank_update_anim_blend(Model m, int i0, double f0,
                            (cpp/IsKeyPressed cpp/KEY_N) (- speed1 0.1)
                            :else speed1)
               speed1 (if (> speed1 2.0) 2.0 (if (< speed1 0.1) 0.1 speed1))
-              keyframes0 (int (cpp/jank_anim_keyframes (int idx0)))
-              keyframes1 (int (cpp/jank_anim_keyframes (int idx1)))
+              keyframes0 (int (+ 0.0 (.-keyframeCount (cpp/aget anims (cpp/int (int idx0))))))
+              keyframes1 (int (+ 0.0 (.-keyframeCount (cpp/aget anims (cpp/int (int idx1))))))
 
               ;; SPACE starts a transition to the other animation
               start? (and (not paused?)
@@ -136,12 +124,16 @@ static void jank_update_anim_blend(Model m, int i0, double f0,
               (let [f0 (advance frame0 speed0 keyframes0)
                     f1 (advance frame1 speed1 keyframes1)]
                 (if (= next-anim 1)
-                  (cpp/jank_update_anim_blend model (int idx0) f0 (int idx1) f1 blend)
-                  (cpp/jank_update_anim_blend model (int idx1) f1 (int idx0) f0 blend)))
+                  (cpp/UpdateModelAnimationEx model (cpp/aget anims (cpp/int (int idx0))) (cpp/float f0)
+                                              (cpp/aget anims (cpp/int (int idx1))) (cpp/float f1) (cpp/float blend))
+                  (cpp/UpdateModelAnimationEx model (cpp/aget anims (cpp/int (int idx1))) (cpp/float f1)
+                                              (cpp/aget anims (cpp/int (int idx0))) (cpp/float f0) (cpp/float blend))))
               ;; only the current animation plays
               (if (= playing 0)
-                (cpp/jank_update_anim_f model (int idx0) (advance frame0 speed0 keyframes0))
-                (cpp/jank_update_anim_f model (int idx1) (advance frame1 speed1 keyframes1)))))
+                (cpp/UpdateModelAnimation model (cpp/aget anims (cpp/int (int idx0)))
+                                          (cpp/float (advance frame0 speed0 keyframes0)))
+                (cpp/UpdateModelAnimation model (cpp/aget anims (cpp/int (int idx1)))
+                                          (cpp/float (advance frame1 speed1 keyframes1))))))
 
           ;; recompute the state the branches produced (pure jank mirror)
           (let [frame0 (if paused?
@@ -178,10 +170,10 @@ static void jank_update_anim_blend(Model m, int i0, double f0,
               (cpp/DrawText "ANIM TRANSITION BLENDING!" 170 50 30 cpp/BLUE))
 
             ;; the two selected animations + speeds (raygui, keyboardized)
-            (cpp/DrawText (str "A: " (cpp/jank_anim_name (int idx0))
+            (cpp/DrawText (str "A: " (str (.-name (cpp/aget anims (cpp/int (int idx0)))))
                                " x" (fmt speed0 1) "  (LEFT/RIGHT, Z/X)")
                           10 10 10 (if (= playing 0) cpp/DARKGREEN cpp/GRAY))
-            (cpp/DrawText (str "B: " (cpp/jank_anim_name (int idx1))
+            (cpp/DrawText (str "B: " (str (.-name (cpp/aget anims (cpp/int (int idx1)))))
                                " x" (fmt speed1 1) "  (UP/DOWN, N/M)")
                           (- WIDTH 260) 10 10 (if (= playing 1) cpp/DARKGREEN cpp/GRAY))
 

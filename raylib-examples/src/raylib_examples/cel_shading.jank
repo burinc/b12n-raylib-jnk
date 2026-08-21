@@ -9,9 +9,10 @@
 
   jank-native notes:
   - First GLB LoadModel (the format beyond OBJ). The model's default
-    shader is read back through a Shader-returning shim so Z can
-    restore it; swapping shaders on the material reuses the
-    (cpp/& model) write shim per press and per outline pass.
+    shader is boxed as an explicit COPY so Z can restore it: reading
+    .-shader gives a Shader& INTO the model, which would alias every
+    later write. Swapping shaders goes through models.jank per press
+    and per outline pass.
   - The spinning light uses rlights' set-light-pos! + update-light!;
     its indicator sphere position is the same
     sin/cos math on the jank side.

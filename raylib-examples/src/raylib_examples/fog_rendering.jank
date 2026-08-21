@@ -9,9 +9,9 @@
   jank-native notes:
   - Lights come from the rlights namespace: light
     creation, viewPos push, shader.locs writes and all uniforms come
-    from the header. The only per-file shims are the model helpers:
-    material texture/shader writes plus the torus's per-frame
-    transform spin (MatrixMultiply/MatrixRotate via raymath.h).
+    from the header. Material texture/shader writes go through
+    models.jank; the torus's per-frame transform spin is a cpp/=
+    read-modify-write (MatrixMultiply/MatrixRotate via raymath.h).
   - ColorNormalize(GRAY) reduces to (/ 130.0 255.0) components sent
     with sh/set-vec4!; fog density threads through recur as a
     jank real, clamped in jank."

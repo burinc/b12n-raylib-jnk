@@ -11,12 +11,12 @@
   jank-native notes:
   - The capstone of the postprocess family: the scene renders once into
     a RenderTexture, then the selected shader draws the whole texture to
-    screen (y-flipped) via a jank_draw_postpro C shim. Like the C, NO
+    screen (y-flipped) in plain jank. Like the C, NO
     per-shader uniforms are set - each shader carries its own defaults.
   - Twelve native Shader values can't live in a jank vector, so they are
-    twelve outer-let locals; the active one is chosen by a cond on the
-    jank-int index, each branch calling the shim with its own shader
-    (the color-correction per-index-draw pattern, scaled to shaders).
+    twelve outer-let locals; the active one is chosen by NESTED IFS on
+    the jank-int index, then drawn once. A cond cannot do this: its
+    implicit trailing nil would clash with the native Shader type.
     Only the index + effect name thread through recur - no native value
     crosses the loop.
   - Intentional simplification: the C loads church.obj (the blocked

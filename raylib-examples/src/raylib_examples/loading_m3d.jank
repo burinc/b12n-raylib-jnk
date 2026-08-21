@@ -14,28 +14,6 @@
     taking the model, animation index and frame."
   (:include "raylib.h"))
 
-(cpp/raw "static ModelAnimation *jank_anims = NULL;
-static int jank_anims_count = 0;
-static int jank_load_anims(const char* path) {
-  jank_anims = LoadModelAnimations(path, &jank_anims_count);
-  return jank_anims_count;
-}
-static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
-static const char* jank_anim_name(int i) { return jank_anims[i].name; }
-static void jank_update_anim(Model m, int i, int frame) {
-  UpdateModelAnimation(m, jank_anims[i], frame);
-}
-/* the C's DrawModelSkeleton, verbatim: cubes at the bones, lines to parents */
-static void jank_draw_skeleton(Model m, int animIdx, int frame, float scale) {
-  ModelSkeleton skeleton = m.skeleton;
-  ModelAnimPose pose = jank_anims[animIdx].keyframePoses[frame];
-  for (int i = 0; i < skeleton.boneCount - 1; i++) {
-    DrawCube(pose[i].translation, scale*0.05f, scale*0.05f, scale*0.05f, RED);
-    if (skeleton.bones[i].parent >= 0)
-      DrawLine3D(pose[i].translation, pose[skeleton.bones[i].parent].translation, RED);
-  }
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/models/resources/")
@@ -50,7 +28,11 @@ static void jank_draw_skeleton(Model m, int animIdx, int frame, float scale) {
                              (cpp/float 45.0)
                              cpp/CAMERA_PERSPECTIVE)
         model (cpp/LoadModel (str RES "models/m3d/cesium_man.m3d"))
-        anim-count (int (cpp/jank_load_anims (str RES "models/m3d/cesium_man.m3d")))]
+        ;; the array outlives this call by living in the outer let, not in a
+        ;; cpp/raw static; the count comes back through an int* out-param
+        anim-n (cpp/int 0)
+        anims (cpp/LoadModelAnimations (str RES "models/m3d/cesium_man.m3d") (cpp/& anim-n))
+        anim-count (int (+ 0.0 anim-n))]
 
     (cpp/SetTargetFPS 60)
 
@@ -66,9 +48,10 @@ static void jank_draw_skeleton(Model m, int animIdx, int frame, float scale) {
                                (int (mod (+ anim-index (dec anim-count)) anim-count))
                                :else anim-index)
               frame (inc frame)
-              frame (if (>= frame (int (cpp/jank_anim_keyframes (int anim-index)))) 0 frame)]
+              frame (if (>= frame (int (+ 0.0 (.-keyframeCount (cpp/aget anims (cpp/int (int anim-index))))))) 0 frame)]
 
-          (cpp/jank_update_anim model (int anim-index) (int frame))
+          (cpp/UpdateModelAnimation model (cpp/aget anims (cpp/int (int anim-index)))
+                                    (cpp/float (+ 0.0 (int frame))))
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)
@@ -76,14 +59,27 @@ static void jank_draw_skeleton(Model m, int animIdx, int frame, float scale) {
           (cpp/BeginMode3D camera)
           (if (cpp/IsKeyDown cpp/KEY_SPACE)
             ;; the animated skeleton instead of the mesh
-            (cpp/jank_draw_skeleton model (int anim-index) (int frame) (cpp/float 1.0))
+            ;; the C's DrawModelSkeleton, inline: a cube per bone and a line to
+            ;; its parent. The pose array is Transform*, walked with cpp/aget.
+            (let [skel (.-skeleton model)
+                  pose (cpp/aget (.-keyframePoses (cpp/aget anims (cpp/int (int anim-index)))) (cpp/int (int frame)))
+                  bones (int (+ 0.0 (.-boneCount skel)))]
+              (loop [i 0]
+                (when (< i (dec bones))
+                  (let [tr (.-translation (cpp/aget pose (cpp/int i)))
+                        parent (int (+ 0.0 (.-parent (cpp/aget (.-bones skel) (cpp/int i)))))]
+                    (cpp/DrawCube tr (cpp/float 0.05) (cpp/float 0.05) (cpp/float 0.05) cpp/RED)
+                    (when (>= parent 0)
+                      (cpp/DrawLine3D tr (.-translation (cpp/aget pose (cpp/int parent))) cpp/RED)))
+                  (recur (inc i))))
+              nil)
             (cpp/DrawModel model
                            (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
                            (cpp/float 1.0) cpp/WHITE))
           (cpp/DrawGrid 10 (cpp/float 1.0))
           (cpp/EndMode3D)
 
-          (cpp/DrawText (str "Current animation: " (cpp/jank_anim_name (int anim-index)))
+          (cpp/DrawText (str "Current animation: " (str (.-name (cpp/aget anims (cpp/int (int anim-index))))))
                         10 10 20 cpp/LIGHTGRAY)
           (cpp/DrawText "Press SPACE to draw skeleton" 10 40 20 cpp/MAROON)
           (cpp/DrawText "(c) CesiumMan model by KhronosGroup" (- WIDTH 210) (- HEIGHT 20) 10 cpp/GRAY)
