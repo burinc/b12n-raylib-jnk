@@ -1,16 +1,34 @@
 # Native value lifetimes
 
-jank is **native** Clojure (C++/LLVM) — no JVM, no Java interop, no REPL.
-The compiler statically type-checks the boundary between jank objects and
-native C++ values, and this page is about the single rule that boundary
-enforces: **a native cpp value only stays native within the form that
-produced it.** Every lesson below is a consequence of that rule. Each
-lesson names the committed example that proves it — those files are the
+jank is **native** Clojure (C++/LLVM) — no JVM and no Java interop. The
+compiler statically type-checks the boundary between jank objects and native
+C++ values, and this page is about what that boundary actually enforces.
+Each lesson names the committed example that proves it — those files are the
 running test suite for this document.
 
-## The one rule that explains most crashes
+## The rule that explains most crashes
 
-**A native cpp value only stays native within the form that produced it.**
+The boundary is about **convertibility**, not about scope. C++ has no common
+base class for all types, so jank cannot type-erase an arbitrary C++ value
+into a runtime object the way the JVM can. What follows from that:
+
+- **Trait-convertible types cross freely.** C++ intrinsic integral types,
+  bools, C strings and some standard-library types such as `std::string`
+  have conversion traits, so jank converts them to and from runtime objects
+  automatically. Passing and returning those costs a conversion, not an
+  error.
+- **Everything else cannot cross *implicitly*.** A `Color`, `Vector2`,
+  `Rectangle` or `Camera2D` has no such trait, so returning one from a jank
+  fn is a compile error: `returning a native object of type 'Color', which
+  is not convertible to a jank runtime object`.
+
+That second case is the one this repo lives in, and the rest of this page is
+about it. **It is a restriction on implicit conversion, not a life sentence
+for the value** — see [Getting a native value out anyway](#getting-a-native-value-out-anyway)
+below, which is the supported way through.
+
+### Where a non-convertible value works without any ceremony
+
 A `Color`, `Vector2`, `Rectangle`, `Camera2D`, ... may be:
 
 - constructed inline as a call argument — `(cpp/DrawCircleV (cpp/Vector2 ...) ...)` ✅
@@ -19,7 +37,7 @@ A `Color`, `Vector2`, `Rectangle`, `Camera2D`, ... may be:
   capture) ✅ — this is how create-once GPU resources live
   (`lines_drawing.jank`'s RenderTexture, `words_alignment.jank`'s Font)
 
-But it may NOT cross a jank fn boundary:
+### Where it fails, if you do nothing about it
 
 - returned from a fn ❌ — `returning a native object of type 'Color', which
   is not convertible to a jank runtime object`. Even via nested `if`
@@ -32,11 +50,57 @@ But it may NOT cross a jank fn boundary:
   the texture stayed a captured `let`-local).
 - carried through `loop`/`recur` state ❌ (`input_mouse.jank`).
 
-**Fix:** thread plain jank data (ints, reals, keywords, maps) and resolve the
-native value inline at the use site. `camera_2d_platformer.jank` threads the
-camera as five scalars and rebuilds `(cpp/Camera2D ...)` each frame;
-`input_mouse.jank` threads a `color-id` int and picks the `Color` with a
-nested `if` at draw time.
+**The pattern this repo uses:** thread plain jank data (ints, reals,
+keywords, maps) and resolve the native value inline at the use site.
+`camera_2d_platformer.jank` threads the camera as five scalars and rebuilds
+`(cpp/Camera2D ...)` each frame; `input_mouse.jank` threads a `color-id` int
+and picks the `Color` with a nested `if` at draw time.
+
+That is a **performance choice, not the only option**. These are per-frame
+draw calls at 60 FPS, where the alternative costs a heap allocation per
+value. When the value is a long-lived resource rather than a per-frame
+scalar, box it instead.
+
+## Getting a native value out anyway
+
+jank has opaque boxes for exactly this. `cpp/box` puts a raw pointer into an
+ordinary jank object that can then travel anywhere in the runtime;
+`cpp/unbox` takes it back out, and jank checks the type you ask for against
+the one that went in. Because the box can outlive the call, the value it
+points at must be heap-allocated with `cpp/new` — a `let`-local would be
+destroyed at the end of its scope, leaving the box dangling.
+
+```clojure
+(defn make-color [r g b]
+  (cpp/box (cpp/new cpp/Color (cpp/cast cpp/uint8_t r)
+                              (cpp/cast cpp/uint8_t g)
+                              (cpp/cast cpp/uint8_t b)
+                              (cpp/cast cpp/uint8_t 255))))
+
+(defn swatch-text [box]
+  (let [c (cpp/unbox (:* cpp/Color) box)]
+    (str "rgb(" (.-r c) "," (.-g c) "," (.-b c) ")")))
+```
+
+`opaque_boxes.jank` is the proof, and it demonstrates the three things the
+list above says are impossible for a bare `Color`: a jank fn **returns** one,
+several sit in a plain immutable jank vector built with `mapv`, and one is
+**captured in a closure**. Run it with `bb opaque-boxes`.
+
+Unboxing as the wrong type is a runtime error that names both types rather
+than corrupting memory:
+
+```
+error: This opaque box holds a 'Color*', but it was unboxed as a 'Vector2*'.
+```
+
+The other way through is to teach jank the type: implementing
+`jank::runtime::convert<T>` for it makes the type trait-convertible, after
+which it crosses implicitly like `std::string` does. That is C++ template
+work and only worth it for a type you cross the boundary with constantly.
+See the jank book's
+[Working with native values](https://book.jank-lang.org/cpp-interop/native-values.html)
+for both mechanisms.
 
 ## Frame-crossing mutable native state: park it in a cpp/raw static
 

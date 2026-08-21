@@ -37,6 +37,7 @@
              :random-values   {:main raylib-examples.random-values}
              :camera-2d       {:main raylib-examples.camera-2d}
              :basic-window    {:main raylib-examples.basic-window}
+             :opaque-boxes    {:main raylib-examples.opaque-boxes}
              :scissor-test    {:main raylib-examples.scissor-test}
              :window-should-close {:main raylib-examples.window-should-close}
              :digital-clock   {:main raylib-examples.digital-clock}

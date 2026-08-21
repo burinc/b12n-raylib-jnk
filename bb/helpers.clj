@@ -92,6 +92,18 @@
     (ensure-submodules!)
     (install-lib! "jank-raylib-sys")))
 
+(defn nrepl!
+  "Start a jank nREPL server for the examples project.
+
+  jank has nREPL support, so this is a real jank REPL - cpp/ interop
+  evaluates in it, not just Clojure. lein writes raylib-examples/.nrepl-port
+  for editor tooling to pick up. Ensures jank-raylib-sys is installed first,
+  since the REPL needs the same native build any example does."
+  []
+  (ensure-raylib-sys!)
+  (info "Starting jank nREPL in raylib-examples/ (Ctrl-D to quit)")
+  (lein! "raylib-examples" "repl"))
+
 (defn install-all! []
   (ensure-submodules!)
   (install-lib! "jank-raylib-sys")
@@ -130,6 +142,7 @@
    {:profile "random-values" :cat :core   :desc "A new random value every two seconds"     :controls "Q quit"}
    {:profile "camera-2d" :cat :core       :desc "A free 2D camera over a skyline"          :controls "arrows move · WHEEL zoom · A/S rotate · R reset · Q"}
    {:profile "basic-window" :cat :core    :desc "The minimal raylib window + text"         :controls "Q quit"}
+   {:profile "opaque-boxes" :cat :interop :desc "Native Colors carried across fns in opaque boxes" :controls "SPACE cycles · Q quit"}
    {:profile "scissor-test" :cat :core    :desc "A scissor rectangle reveals text"         :controls "mouse · S toggle · Q quit"}
    {:profile "window-should-close" :cat :core :desc "Confirm-before-exit on window close"  :controls "ESC/X then Y/N · Q"}
    {:profile "digital-clock" :cat :shapes   :desc "A live clock (digital + analogue modes)"  :controls "SPACE mode · Q quit"}
@@ -396,7 +409,10 @@
    [:textures "textures — images, sprites, render textures"]
    [:models   "models — meshes, 3D, OBJ/GLB"]
    [:shaders  "shaders — GLSL, uniforms, postprocess, lighting"]
-   [:audio    "audio — sounds, music streams"]])
+   [:audio    "audio — sounds, music streams"]
+   ;; Not a raylib category: original examples demonstrating jank/C++ interop
+   ;; itself. Kept separate so the raylib port counts stay comparable upstream.
+   [:interop  "interop — jank/C++ mechanics, not raylib ports"]])
 
 (defn- truncate [s n]
   (if (> (count s) n) (str (subs s 0 (- n 1)) "…") s))
@@ -419,6 +435,8 @@
   (info-section "Build"
                 [["install" "Install jank-raylib-sys into ~/.m2 (idempotent)"]
                  ["clean" "Remove */target build dirs"]])
+  (info-section "Dev"
+                [["nrepl" "Start a jank nREPL (cpp/ interop works in it)"]])
   (info-section "Docs (maintainer)"
                 [["record" "Batch-record a demo GIF per example (needs screen-grab)"]
                  ["docs-sync" "Rebuild + republish the guide and site (bb docs-sync [--no-push])"]])

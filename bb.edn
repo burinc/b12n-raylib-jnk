@@ -60,6 +60,7 @@
   random-values   {:doc "▶ a new random value every two seconds"    :task (h/run-example! "random-values")}
   camera-2d       {:doc "▶ a free 2D camera over a skyline"         :task (h/run-example! "camera-2d")}
   basic-window    {:doc "▶ the minimal raylib window + text"        :task (h/run-example! "basic-window")}
+  opaque-boxes    {:doc "▶ native Colors carried across fns in opaque boxes" :task (h/run-example! "opaque-boxes")}
   scissor-test    {:doc "▶ a scissor rectangle reveals text"        :task (h/run-example! "scissor-test")}
   window-should-close {:doc "▶ confirm-before-exit on window close" :task (h/run-example! "window-should-close")}
   digital-clock   {:doc "▶ a live clock (digital + analogue modes)"  :task (h/run-example! "digital-clock")}
@@ -443,6 +444,10 @@
                                               :sync-failed :invalidation-failed} r))
                          [site-result wiki-result deploy-result])
                (System/exit 1)))))))}
+
+  nrepl
+  {:doc "Start a jank nREPL for the examples project (writes .nrepl-port)"
+   :task (h/nrepl!)}
 
   ;; --- build ---
   install {:doc "Install jank-raylib-sys into ~/.m2 (idempotent)"

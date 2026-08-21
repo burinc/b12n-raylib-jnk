@@ -100,8 +100,10 @@ has no `cpp/raw` block at all — just
 
 Design constraints for such headers:
 
-- **jank fns can neither take nor return native values**, so a "shared
-  jank namespace" wrapping lights is impossible; the reusable unit is a
+- **A `Light` has no conversion trait**, so a jank fn cannot take or
+  return one implicitly, and a "shared jank namespace" wrapping lights
+  would need every crossing boxed. For state the shaders read every
+  frame that is the wrong trade, so the reusable unit is a
   C header whose state (the `Light` array) is module-local and whose
   API is index-based with scalar parameters
   (`jank_rl_create_light(type, px, py, pz, ..., shader) -> int`).

@@ -1,0 +1,90 @@
+(ns raylib-examples.opaque-boxes
+  "jank [interop] example - opaque boxes, carrying native values across fns.
+
+  A jank fn cannot return a raylib Color directly: Color has no conversion
+  trait, so the compiler rejects it as 'not convertible to a jank runtime
+  object'. That does NOT mean the value is stuck. cpp/new allocates it,
+  cpp/box wraps the pointer in an ordinary jank object, and cpp/unbox takes
+  it back out with the type jank checks for you.
+
+  This example proves three things the boxed swatches on screen depend on:
+  make-color RETURNS a native Color from a fn, the boxes sit in a plain
+  immutable jank vector, and one is captured in a closure.
+
+  SPACE cycles the highlighted swatch, Q quits. Original example, not a
+  port. See docs/guide/native-value-lifetimes.md"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+;; Returns a jank object, not a Color - so it is free to leave this fn.
+;; cpp/new (not a let-local) because the box outlives the call: a let-local
+;; Color would be destroyed at the end of the let, leaving a dangling pointer.
+(defn make-color
+  [r g b]
+  (cpp/box (cpp/new cpp/Color (cpp/cast cpp/uint8_t r)
+                              (cpp/cast cpp/uint8_t g)
+                              (cpp/cast cpp/uint8_t b)
+                              (cpp/cast cpp/uint8_t 255))))
+
+;; The type in cpp/unbox is checked: unboxing this as some other pointer
+;; type is a runtime error naming both types, not silent memory corruption.
+(defn draw-swatch!
+  [{:keys [box x y w h label highlight?]}]
+  (let [c (cpp/unbox (:* cpp/Color) box)]
+    (cpp/DrawRectangle x y w h (cpp/* c))
+    (when highlight?
+      (cpp/DrawRectangleLines (- x 3) (- y 3) (+ w 6) (+ h 6) cpp/BLACK))
+    (cpp/DrawText label x (+ y h 6) 10 cpp/DARKGRAY)))
+
+(defn swatch-text
+  [box]
+  (let [c (cpp/unbox (:* cpp/Color) box)]
+    (str "rgb(" (.-r c) "," (.-g c) "," (.-b c) ")")))
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI)
+  (cpp/InitWindow WIDTH HEIGHT "jank [interop] example - opaque boxes (jank)")
+  (cpp/SetTargetFPS 60)
+
+  ;; Boxes in an ordinary immutable jank vector, built with mapv.
+  (let [palette (mapv (fn [spec]
+                        {:label (nth spec 0)
+                         :box   (make-color (nth spec 1) (nth spec 2) (nth spec 3))})
+                      [["RAYWHITE" 245 245 245]
+                       ["MAROON"   190 33  55]
+                       ["SKYBLUE"  102 191 255]
+                       ["LIME"     0   158 47]
+                       ["GOLD"     255 203 0]
+                       ["VIOLET"   135 60  190]])
+        ;; ...and one captured in a closure, resolved only when called.
+        describe-first (let [b (:box (nth palette 0))]
+                         (fn [] (swatch-text b)))]
+    (loop [sel 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/DrawText "Opaque boxes: native Colors that outlived the fn that made them" 40 40 20 cpp/DARKGRAY)
+        (cpp/DrawText "cpp/new allocates - cpp/box wraps the pointer - cpp/unbox checks the type" 40 68 10 cpp/GRAY)
+
+        (loop [i 0]
+          (when (< i (count palette))
+            (let [entry (nth palette i)]
+              (draw-swatch! {:box (:box entry)
+                             :x (+ 40 (* i 125)) :y 120 :w 100 :h 100
+                             :label (:label entry)
+                             :highlight? (= i sel)}))
+            (recur (inc i))))
+
+        (cpp/DrawText (str "selected: " (swatch-text (:box (nth palette sel)))) 40 270 20 cpp/DARKGRAY)
+        (cpp/DrawText (str "from a closure: " (describe-first)) 40 300 10 cpp/GRAY)
+        (cpp/DrawText "SPACE cycles the selection - Q quits" 40 400 10 cpp/GRAY)
+        (cpp/EndDrawing)
+
+        (when-not (cpp/IsKeyDown cpp/KEY_Q)
+          (recur (if (cpp/IsKeyPressed cpp/KEY_SPACE)
+                   (mod (inc sel) (count palette))
+                   sel))))))
+
+  (cpp/CloseWindow))
