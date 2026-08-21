@@ -1246,3 +1246,11 @@ A live FFT spectrum of the music through a shader
 
 ![spectrum-visualizer](spectrum-visualizer.gif)
 
+## Other
+
+### opaque-boxes
+
+Native Colors carried across fns in opaque boxes
+
+![opaque-boxes](opaque-boxes.gif)
+
