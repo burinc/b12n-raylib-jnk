@@ -26,22 +26,6 @@
     reals, re-int before use)."
   (:include "raylib.h"))
 
-;; Cast jank's const char* to the unsigned char* the hash APIs want, read
-;; the returned static u32 arrays element-wise, and own EncodeDataBase64's
-;; malloc'd text + int* out-param.
-(cpp/raw "static long long jank_crc32(const char* s, int n) { return (long long)ComputeCRC32((unsigned char*)s, n); }
-static unsigned int* jank_md5(const char* s, int n) { return ComputeMD5((unsigned char*)s, n); }
-static unsigned int* jank_sha1(const char* s, int n) { return ComputeSHA1((unsigned char*)s, n); }
-static unsigned int* jank_sha256(const char* s, int n) { return ComputeSHA256((unsigned char*)s, n); }
-static const char* jank_b64(const char* s, int n) {
-  static char buf[256] = {0};
-  int outSize = 0;
-  char* b = EncodeDataBase64((const unsigned char*)s, n, &outSize);
-  buf[0] = 0;
-  if (b != NULL) { if (outSize <= 256) TextCopy(buf, b); MemFree(b); }
-  return buf;
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def MAX-CHARS 95)                     ; the C's char[96] buffer
@@ -64,7 +48,13 @@ static const char* jank_b64(const char* s, int n) {
 (defn- crc32-hex
   "Hex string of the CRC32 of `s`."
   [s]
-  (hex8 (cpp/jank_crc32 s (int (count s)))))
+  ;; Two casts, and both are needed. cpp/cast performs the TRAIT conversion
+  ;; from a jank string to const char* (which a C call would have done for
+  ;; free at the boundary); cpp/unsafe-cast then REINTERPRETS that to the
+  ;; unsigned char* the raylib hashes want. cpp/unsafe-cast alone fails
+  ;; with "Invalid unsafe-cast from 'jank::runtime::object_ref'".
+  (hex8 (+ 0.0 (cpp/ComputeCRC32 (cpp/unsafe-cast (:* (:unsigned cpp/char))
+                                   (cpp/cast (:* (:const cpp/char)) s)) (cpp/int (int (count s)))))))
 
 (defn- hash-hex
   "Concatenated %08X words of the static u32 array the raylib hash fn for
@@ -73,9 +63,13 @@ static const char* jank_b64(const char* s, int n) {
   [algo s]
   (let [nw (if (= algo :md5) 4 (if (= algo :sha1) 5 8))
         n (int (count s))
+        raw (cpp/unsafe-cast (:* (:unsigned cpp/char))
+                                   (cpp/cast (:* (:const cpp/char)) s))
         p (if (= algo :md5)
-            (cpp/jank_md5 s n)
-            (if (= algo :sha1) (cpp/jank_sha1 s n) (cpp/jank_sha256 s n)))]
+            (cpp/ComputeMD5 raw (cpp/int n))
+            (if (= algo :sha1)
+              (cpp/ComputeSHA1 raw (cpp/int n))
+              (cpp/ComputeSHA256 raw (cpp/int n))))]
     (loop [i 0 out ""]
       (if (< i nw)
         (recur (inc i) (str out (hex8 (cpp/aget p (cpp/int i)))))
@@ -84,7 +78,18 @@ static const char* jank_b64(const char* s, int n) {
 (defn- b64-str
   "Base64 encoding of `s` folded into a jank string."
   [s]
-  (str (cpp/jank_b64 s (int (count s)))))
+  ;; EncodeDataBase64 mallocs its result and reports the size through an
+  ;; int* out-param. str folds it to a jank string, then MemFree releases
+  ;; it; the C shim's static char[256] buffer is not needed.
+  (let [out-size (cpp/int 0)
+        b (cpp/EncodeDataBase64 (cpp/unsafe-cast (:* (:unsigned cpp/char))
+                                   (cpp/cast (:* (:const cpp/char)) s)) (cpp/int (int (count s)))
+                                (cpp/& out-size))]
+    (if (cpp/bool b)
+      (let [encoded (str b)]
+        (cpp/MemFree b)
+        encoded)
+      "")))
 
 (defn- draw-row
   "One label + read-only value box row (the C's GuiLabel + GuiTextBox)."
