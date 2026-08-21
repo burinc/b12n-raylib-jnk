@@ -24,7 +24,7 @@ The authoritative originals are raylib's own example programs, under
 [`examples/{core,shapes,text,...}/`](https://github.com/raysan5/raylib/tree/master/examples)
 (easing functions in `examples/shapes/reasings.h`). You already have a
 checkout: the vendored submodule at `jank-raylib-sys/raylib/examples/` is
-pinned to the same raylib this repo builds against, so it is the copy whose
+pinned to the same raylib commit the `raylib-sys` package builds, so it is the copy whose
 API actually matches.
 
 Port from the C, never from an intermediate binding. Ports-of-ports drift;

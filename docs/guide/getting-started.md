@@ -16,7 +16,7 @@ Verified on macOS with jank `0.1-alpha` and `lein-jank 2026.06-1`.
 
 ## Clone with the submodule
 
-`raylib` is vendored as a git submodule of the `jank-raylib-sys` wrapper, so
+`raylib` is vendored as a git submodule for the example assets, so
 clone with it:
 
 ```sh
@@ -56,7 +56,7 @@ disabled. Every `bb`/`lein` invocation above already passes
 
 **Known limitation:** `rlgl-compute` needs OpenGL 4.3 compute-shader
 support that macOS's native GL backend cannot provide (capped at 4.1). This
-repo builds `jank-raylib-sys` at `OPENGL_VERSION "3.3"` by default, so every
+official `raylib-sys` package builds raylib at OpenGL 3.3, so every
 other example works; `rlgl-compute` does not run out of the box on any
 platform against this build. See the root README's "Known limitations"
 section for the manual override recipe (which still won't work on macOS).

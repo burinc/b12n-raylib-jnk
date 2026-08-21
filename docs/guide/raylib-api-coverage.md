@@ -63,7 +63,7 @@ handle it. The ASCII-only restriction is about COMMENTS (the em-dash
   (`loading_vox`, which also proves `UpdateCameraPro` with inline
   movement/rotation Vector3s and `GetModelBoundingBox`).
 
-## Compute shaders work (GL 4.3 wrapper build, 2026-07-11)
+## Compute shaders work (GL 4.3 build, 2026-07-11)
 
 `rlgl_compute.jank` proves the whole compute pipeline: compile
 (`rlLoadShader src RL_COMPUTE_SHADER` + `rlLoadShaderProgramCompute`,
@@ -72,8 +72,8 @@ kept in a path-taking C shim), SSBOs (`rlLoadShaderBuffer` with
 `rlComputeShaderDispatch`, all direct rlgl calls with jank-int ids.
 Prerequisites and patterns:
 
-- **jank-raylib-sys must be built with `OPENGL_VERSION "4.3"`** (set in
-  the official raylib-sys package): under the default 3.3 the rlgl
+- **raylib must be built with `OPENGL_VERSION "4.3"`**, which the
+  published `raylib-sys` package does not do: under its default 3.3 the rlgl
   compute functions compile to no-ops. 4.3 is the same GL 3.3 feature
   set plus compute, so the GLSL-330 examples are unaffected (regression
   checked). Proof line: `GL: Compute shaders supported`.

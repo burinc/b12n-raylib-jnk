@@ -1,7 +1,7 @@
 # raygui → keyboard
 
 Many official shapes examples build their UI with **raygui** sliders and
-checkboxes. `jank-raylib-sys` doesn't wrap raygui, so those examples get a
+checkboxes. raygui is not part of the `raylib-sys` package, so those examples get a
 keyboard-driven port: sliders become held-key adjustments, checkboxes become
 toggle keys, and the raygui panel becomes plain `DrawText` lines showing live
 values. The pattern was established by `easings_testbed.jank` and refined

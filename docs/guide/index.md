@@ -18,8 +18,8 @@ does not have to rediscover it by bisecting a failing draw loop.
 
 209 of the official raylib examples (shapes, core, text, textures, shaders,
 models, and audio), each a small jank namespace under
-`raylib-examples/src/raylib_examples/`, sharing one C-binding wrapper,
-`jank-raylib-sys`, that exposes raylib's C API directly.
+`raylib-examples/src/raylib_examples/`, each calling raylib's C API directly
+through `(:include "raylib.h")`.
 
 It is the **native-Clojure sibling** of [`b12n-raylib-jlt`](https://github.com/burinc/b12n-raylib-jlt)
 (raylib in Jolt/Chez Scheme) and of an unreleased JVM-Clojure port over
@@ -47,7 +47,7 @@ Four things follow from it:
    ([`type-checking-and-coercion.md`](type-checking-and-coercion.md))
 3. **A C-interop toolbox reaches everything the rule seems to block**:
    pointer interop (`cpp/&`, `cpp/aget`, `cpp/new`), out-params, callbacks
-   defined inside `cpp/raw`, and shared C headers shipped by a wrapper.
+   defined inside `cpp/raw`, and shared jank helper namespaces.
    ([`cpp-interop-toolbox.md`](cpp-interop-toolbox.md))
 4. **The full raylib surface is reachable despite the rule**: fonts,
    models and animations, audio, 3D mode, rlgl, and (platform-permitting)
@@ -72,8 +72,8 @@ against one real, struct-heavy graphics API across 209 examples.
   structs from jank data.
 - [`cpp-interop-toolbox.md`](cpp-interop-toolbox.md): pointer interop
   (`cpp/&`, `cpp/aget`, `cpp/new`, `cpp/raw`), `int *` out-params,
-  callback-taking APIs, shared C headers shipped by a wrapper
-  (the `rlights` namespace), shader-uniform shims, and current limitations
+  callback-taking APIs, shared jank helper namespaces (`rlights`,
+  `shaders`, `models`), shader-uniform shims, and current limitations
   (known-blocked constructs).
 
 ### What's proven to work

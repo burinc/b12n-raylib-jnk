@@ -1,9 +1,10 @@
 # The missing JVM surface, and other odds and ends
 
-jank has no `Math/*`, `format`, `rand-int`, char literals, or `String`
-methods. This page covers what replaces them, what's actually available
-(more of `clojure.core`/`clojure.string` than it looks), and a few
-miscellaneous gotchas that save a recompile.
+> jank's own surface is documented in the
+> [jank book](https://book.jank-lang.org/); the authoritative list of what
+> exists is jank's
+> [`compiler+runtime/src/jank/clojure/`](https://github.com/jank-lang/jank/tree/main/compiler%2Bruntime/src/jank/clojure).
+> This page records what 209 raylib ports reached for and did not find.
 
 ## Filling the missing JVM surface
 

@@ -1,11 +1,10 @@
 # Type-checking and coercion
 
-jank's compiler enforces the native-value-lifetime rule
-([`native-value-lifetimes.md`](native-value-lifetimes.md)) strictly at
-compile time. This page covers the sharp edges that fall out of that
-strictness: `if`/`cond` branch type-checking, numeric coercion between
-jank and native number types, and constructing native structs from jank
-data. Each lesson names the committed example that proves it.
+> **Cast and type semantics live in the jank book**:
+> [Casting between native types](https://book.jank-lang.org/cpp-interop/cast.html)
+> and [Working with native types](https://book.jank-lang.org/cpp-interop/native-types.html).
+> Below are the coercion traps 209 raylib ports actually hit, each naming
+> the example that proves it.
 
 ## if/cond branch type-checking
 
@@ -25,12 +24,10 @@ bool.** `(and native-bool jank-bool)` expands to
 `jank-bool` (plain `bool`) and `native-bool`. A struct-field read like
 `(.-hit collision)` types as `bool &` (a reference), not `bool`, so the
 combined form errors with `Mismatched 'if' branch types 'bool' and 'bool &'`.
-The read is *only* a problem when a boolean-combining macro forces the two
-types to unify; using `(.-hit c)` straight as an `if`/`when` condition is
-fine (`picking_3d.jank`). Fix: don't `and` a native field bool with a jank
-bool; hand-nest the `if`s so the native bool is always just a condition,
-never a returned branch value (`basic_voxel.jank`'s ray-pick loop:
-`(if (.-hit coll) (if (< d best-d) ...) ...)`).
+Only a boolean-combining macro forces the unify; `(.-hit c)` straight as an
+`if`/`when` condition is fine (`picking_3d.jank`). Fix: hand-nest the `if`s so
+the native bool is only ever a condition, never a returned branch value
+(`basic_voxel.jank`: `(if (.-hit coll) (if (< d best-d) ...) ...)`).
 
 ## Numeric traps
 
@@ -49,16 +46,12 @@ Boxing idiom: `(+ 0.0 x)` turns a raw C int/float/double into a jank real;
 `(int x)` truncates to a jank integer. `cpp/GetFrameTime`, `cpp/GetTime`,
 `cpp/GetMouseWheelMove` returns are routinely boxed at the binding site.
 
-The all-native chain trap is the subtle cousin of the `expected real`
-one: `(+ 0.0 expr)` only *boxes* when at least one input is already a
-jank object. When every value in the chain derives from literals and
-native reads (`(.-height tex)`, if-of-literals), jank keeps the whole
-expression as an unboxed native `f64`, and `cpp/float`'s generated
-`from_object` call cannot take it. The same shape compiles fine when a
-`loop`/`recur` variable feeds the chain (loop vars are boxed), which is
-why `sprite_animation.jank`'s near-identical frame math never hit it.
-Any jank collection operation re-boxes: `nth` on a vector of the
-possible offsets is the cheapest escape hatch.
+The all-native chain trap: `(+ 0.0 expr)` only *boxes* when some input is
+already a jank object. If every value derives from literals and native reads
+(`(.-height tex)`), the chain stays an unboxed `f64` and `cpp/float`'s
+generated `from_object` cannot take it. A `loop`/`recur` variable feeding the
+chain boxes it, which is why `sprite_animation.jank`'s near-identical frame
+math never hit this. Any collection op re-boxes; `nth` is the cheapest.
 
 ## Constructing colors and structs from data
 
@@ -74,18 +67,14 @@ possible offsets is the cheapest escape hatch.
 - Struct ctors compose inline: `cpp/Camera2D` takes two nested `cpp/Vector2`
   plus two `cpp/float` args, passed straight to `cpp/BeginMode2D`
   (`camera_2d.jank`).
-- **Struct `int` fields need `(cpp/int n)` casts**: the same "struct ctors
-  demand exact native types" rule that bites `cpp/Color` also bites `int`
-  fields, but here there IS a cast helper (unlike `unsigned char`). A jank
-  int literal reaches the ctor as `small_integer_ref`, which doesn't convert
-  to native `int` in the generated braced-init: `No matching call to
-  'NPatchInfo' constructor ... argument 1 having type ...small_integer_ref`.
-  Wrap each int field in `(cpp/int n)` (mirror of `cpp/float` for reals):
+- **Struct `int` fields need `(cpp/int n)` casts.** A jank int literal reaches
+  the ctor as `small_integer_ref` and fails the braced-init: `No matching call
+  to 'NPatchInfo' constructor ... argument 1 having type ...small_integer_ref`.
+  Wrap each one (`npatch_drawing.jank`):
   `(cpp/NPatchInfo (cpp/Rectangle ...) (cpp/int 12) (cpp/int 40) (cpp/int 12)
-  (cpp/int 12) cpp/NPATCH_NINE_PATCH)` (`npatch_drawing.jank`). The trailing
-  enum constant (`cpp/NPATCH_NINE_PATCH`) converts to the `int` layout field
-  on its own. Note the asymmetry vs `cpp/Color`: int-field structs get the
-  `cpp/int` escape hatch, so no GetColor-style function detour is needed.
+  (cpp/int 12) cpp/NPATCH_NINE_PATCH)`. The trailing enum converts on its own.
+  Unlike `unsigned char`, `int` fields have this escape hatch, so they need no
+  `GetColor`-style function detour.
 - Field access works with `.-`: `(.-texture render-texture)`,
   `(.-x measured-vec2)`, and on pointer returns `(.-tm_hour lt)`
   (`lines_drawing.jank`, `words_alignment.jank`, `digital_clock.jank`).
