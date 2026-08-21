@@ -23,82 +23,104 @@
     thread as jank loop vars / shim calls instead of C statics."
   (:include "raylib.h" "math.h"))
 
-;; Draw-mode Image machinery + preset loaders (pointer-heavy, C-static).
-(cpp/raw "static Image jank_draw_image = { 0 };
-static int jank_draw_active = 0;
-static int jank_first_color = -1;
+(defn- paint-free!
+  "Drop the paint snapshot, if there is one."
+  [img-atom]
+  (when-let [b @img-atom]
+    (cpp/UnloadImage (cpp/* (cpp/unbox (:* cpp/Image) b)))
+    (reset! img-atom nil))
+  nil)
 
-static void jank_draw_free(void) {
-  if (jank_draw_active) { UnloadImage(jank_draw_image); jank_draw_active = 0; }
-}
-/* snapshot the visible world region into the paint image (once per entry) */
-static void jank_draw_ensure(RenderTexture2D world, double offX, double offY,
-                             int sizeX, int sizeY) {
-  if (!jank_draw_active) {
-    RenderTexture2D worldOnScreen = LoadRenderTexture(sizeX, sizeY);
-    BeginTextureMode(worldOnScreen);
-    DrawTexturePro(world.texture,
-                   (Rectangle){ floorf((float)offX), floorf((float)offY), (float)sizeX, -(float)sizeY },
-                   (Rectangle){ 0, 0, (float)sizeX, (float)sizeY },
-                   (Vector2){ 0, 0 }, 0.0f, WHITE);
-    EndTextureMode();
-    jank_draw_image = LoadImageFromTexture(worldOnScreen.texture);
-    UnloadRenderTexture(worldOnScreen);
-    jank_draw_active = 1;
-  }
-}
-static void jank_draw_reset_color(void) { jank_first_color = -1; }
-/* paint one pixel; the stroke's first pixel locks the paint color */
-static void jank_draw_paint(RenderTexture2D world, double offX, double offY,
-                            int sizeX, int sizeY, int mouseX, int mouseY) {
-  if (!jank_draw_active) return;
-  if (mouseX >= sizeX) mouseX = sizeX - 1;
-  if (mouseY >= sizeY) mouseY = sizeY - 1;
-  if (mouseX < 0) mouseX = 0;
-  if (mouseY < 0) mouseY = 0;
-  if (jank_first_color == -1)
-    jank_first_color = (GetImageColor(jank_draw_image, mouseX, mouseY).r < 5) ? 0 : 1;
-  int prevColor = (GetImageColor(jank_draw_image, mouseX, mouseY).r < 5) ? 0 : 1;
-  ImageDrawPixel(&jank_draw_image, mouseX, mouseY, jank_first_color ? BLACK : RAYWHITE);
-  if (prevColor != jank_first_color)
-    UpdateTextureRec(world.texture,
-                     (Rectangle){ floorf((float)offX), floorf((float)offY), (float)sizeX, (float)sizeY },
-                     jank_draw_image.data);
-}
-/* clear the world white and stamp a pattern image centered at (fx, fy) */
-static void jank_load_pattern(RenderTexture2D world, const char* path,
-                              double fx, double fy, int worldW, int worldH) {
-  Image pattern = LoadImage(path);
-  BeginTextureMode(world);
-  ClearBackground(RAYWHITE);
-  EndTextureMode();
-  UpdateTextureRec(world.texture,
-                   (Rectangle){ worldW*(float)fx - pattern.width/2.0f,
-                                worldH*(float)fy - pattern.height/2.0f,
-                                (float)pattern.width, (float)pattern.height },
-                   pattern.data);
-  UnloadImage(pattern);
-}
-/* fill the world with ~15% random live cells, tile by tile */
-static void jank_load_random(RenderTexture2D world, int worldW, int worldH, int tiles) {
-  Image pattern = GenImageColor(worldW/tiles, worldH/tiles, RAYWHITE);
-  for (int i = 0; i < tiles; i++)
-    for (int j = 0; j < tiles; j++) {
-      ImageClearBackground(&pattern, RAYWHITE);
-      for (int x = 0; x < pattern.width; x++)
-        for (int y = 0; y < pattern.height; y++)
-          if (GetRandomValue(0, 100) < 15) ImageDrawPixel(&pattern, x, y, BLACK);
-      UpdateTextureRec(world.texture,
-                       (Rectangle){ (float)(pattern.width*i), (float)(pattern.height*j),
-                                    (float)pattern.width, (float)pattern.height },
-                       pattern.data);
-    }
-  UnloadImage(pattern);
-}
-static void jank_set_resolution(Shader s, int loc, double w, double h) {
-  float v[2] = { (float)w, (float)h };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
-}")
+(defn- paint-ensure!
+  "Snapshot the visible world region into a paint image, once per entry.
+
+  The image must survive between frames while the user drags, so it lives
+  as an opaque box in an atom. The world arrives boxed too: RenderTexture2D
+  has no conversion trait, and its fields are plain GPU ids, so the boxed
+  copy addresses the same texture."
+  [img-atom world-box offx offy sx sy]
+  (when (nil? @img-atom)
+    (let [w (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) world-box))
+          on-screen (cpp/LoadRenderTexture (cpp/int sx) (cpp/int sy))]
+      (cpp/BeginTextureMode on-screen)
+      (cpp/DrawTexturePro (.-texture w)
+                          (cpp/Rectangle (cpp/float (cpp/floor (+ 0.0 offx)))
+                                         (cpp/float (cpp/floor (+ 0.0 offy)))
+                                         (cpp/float (+ 0.0 sx)) (cpp/float (- 0.0 (+ 0.0 sy))))
+                          (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                         (cpp/float (+ 0.0 sx)) (cpp/float (+ 0.0 sy)))
+                          (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                          (cpp/float 0.0) cpp/WHITE)
+      (cpp/EndTextureMode)
+      (reset! img-atom (cpp/box (cpp/new cpp/Image
+                                         (cpp/LoadImageFromTexture (.-texture on-screen)))))
+      (cpp/UnloadRenderTexture on-screen)))
+  nil)
+
+(defn- paint-pixel!
+  "Paint one pixel; the stroke's first pixel locks the paint colour."
+  [img-atom colour-atom world-box offx offy sx sy mx my]
+  (when-let [b @img-atom]
+    (let [img (cpp/unbox (:* cpp/Image) b)
+          px (cond (>= mx sx) (dec sx) (< mx 0) 0 :else mx)
+          py (cond (>= my sy) (dec sy) (< my 0) 0 :else my)
+          here (if (< (int (+ 0.0 (.-r (cpp/GetImageColor (cpp/* img) (cpp/int px) (cpp/int py))))) 5)
+                 0 1)
+          locked (or @colour-atom (do (reset! colour-atom here) here))]
+      (cpp/ImageDrawPixel img (cpp/int px) (cpp/int py)
+                          (if (= locked 1) cpp/BLACK cpp/RAYWHITE))
+      (when (not= here locked)
+        (let [w (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) world-box))]
+          (cpp/UpdateTextureRec (.-texture w)
+                                (cpp/Rectangle (cpp/float (cpp/floor (+ 0.0 offx)))
+                                               (cpp/float (cpp/floor (+ 0.0 offy)))
+                                               (cpp/float (+ 0.0 sx)) (cpp/float (+ 0.0 sy)))
+                                (.-data (cpp/* img)))))))
+  nil)
+
+(defn- load-pattern!
+  "Clear the world white and stamp a pattern image centred at (fx, fy)."
+  [world-box path fx fy world-w world-h]
+  (let [w (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) world-box))
+        pattern (cpp/LoadImage path)]
+    (cpp/BeginTextureMode w)
+    (cpp/ClearBackground cpp/RAYWHITE)
+    (cpp/EndTextureMode)
+    (cpp/UpdateTextureRec (.-texture w)
+                          (cpp/Rectangle
+                           (cpp/float (- (* world-w fx) (/ (+ 0.0 (.-width pattern)) 2.0)))
+                           (cpp/float (- (* world-h fy) (/ (+ 0.0 (.-height pattern)) 2.0)))
+                           (cpp/float (+ 0.0 (.-width pattern)))
+                           (cpp/float (+ 0.0 (.-height pattern))))
+                          (.-data pattern))
+    (cpp/UnloadImage pattern))
+  nil)
+
+(defn- load-random!
+  "Fill the world with ~15% live cells, tile by tile.
+
+  The C hand-rolled the per-pixel randomisation; GenImageWhiteNoise is the
+  same thing in one call. It paints WHITE with probability `factor` and
+  BLACK otherwise, so 0.85 gives the C's 15% black. That keeps a 4.2M-pixel
+  loop out of jank without changing what lands on screen."
+  [world-box world-w world-h tiles]
+  (let [w (cpp/* (cpp/unbox (:* cpp/RenderTexture2D) world-box))
+        pw (quot world-w tiles)
+        ph (quot world-h tiles)]
+    (loop [i 0]
+      (when (< i tiles)
+        (loop [j 0]
+          (when (< j tiles)
+            (let [pattern (cpp/GenImageWhiteNoise (cpp/int pw) (cpp/int ph) (cpp/float 0.85))]
+              (cpp/UpdateTextureRec (.-texture w)
+                                    (cpp/Rectangle (cpp/float (+ 0.0 (* pw i)))
+                                                   (cpp/float (+ 0.0 (* ph j)))
+                                                   (cpp/float (+ 0.0 pw)) (cpp/float (+ 0.0 ph)))
+                                    (.-data pattern))
+              (cpp/UnloadImage pattern))
+            (recur (inc j))))
+        (recur (inc i)))))
+  nil)
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -144,13 +166,18 @@ static void jank_set_resolution(Shader s, int loc, double w, double h) {
   (let [shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/game_of_life.fs"))
         res-loc (int (cpp/GetShaderLocation shader "resolution"))
         world1 (cpp/LoadRenderTexture WORLD WORLD)
-        world2 (cpp/LoadRenderTexture WORLD WORLD)]
+        world2 (cpp/LoadRenderTexture WORLD WORLD)
+        ;; the paint snapshot must live between frames while the user drags
+        paint-img (atom nil)
+        paint-colour (atom nil)]
 
-    (cpp/jank_set_resolution shader res-loc (+ 0.0 WORLD) (+ 0.0 WORLD))
+    (cpp/SetShaderValue shader (int res-loc)
+                        (cpp/new cpp/Vector2 (cpp/float (+ 0.0 WORLD)) (cpp/float (+ 0.0 WORLD)))
+                        cpp/SHADER_UNIFORM_VEC2)
 
     ;; start with the R-pentomino centered in world2 (the initial current)
-    (cpp/jank_load_pattern world2 (str RES "game_of_life/r_pentomino.png")
-                           0.5 0.5 WORLD WORLD)
+    (load-pattern! (cpp/box (cpp/new cpp/RenderTexture2D world2)) (str RES "game_of_life/r_pentomino.png")
+                   0.5 0.5 WORLD WORLD)
 
     (cpp/SetTargetFPS 60)
 
@@ -177,7 +204,7 @@ static void jank_set_resolution(Shader s, int loc, double w, double h) {
 
               ;; zoom around the window centre, freeing the paint image
               zoomed? (or zoom-in? zoom-out?)
-              _ (when zoomed? (cpp/jank_draw_free))
+              _ (when zoomed? (paint-free! paint-img))
               cx (+ offx (/ (/ WIN-W 2.0) zoom))
               cy (+ offy (/ (/ HEIGHT 2.0) zoom))
               zoom (cond zoom-in? (* zoom 2)
@@ -214,14 +241,14 @@ static void jank_set_resolution(Shader s, int loc, double w, double h) {
                         size-y0 (int (cpp/ceil (/ (+ HEIGHT (* ody zoom)) (+ 0.0 zoom))))
                         size-x (if (>= (+ offx size-x0) WORLD) (- WORLD (int offx)) size-x0)
                         size-y (if (>= (+ offy size-y0) WORLD) (- WORLD (int offy)) size-y0)]
-                    (cpp/jank_draw_ensure cur0 offx offy size-x size-y)
+                    (paint-ensure! paint-img (cpp/box (cpp/new cpp/RenderTexture2D cur0)) offx offy size-x size-y)
                     (if (and down? in-window?)
-                      (cpp/jank_draw_paint cur0 offx offy size-x size-y
-                                           (int (/ (+ mx (* odx zoom)) zoom))
-                                           (int (/ (+ my (* ody zoom)) zoom)))
-                      (cpp/jank_draw_reset_color)))
-                  (do (cpp/jank_draw_free)
-                      (cpp/jank_draw_reset_color)))
+                      (paint-pixel! paint-img paint-colour (cpp/box (cpp/new cpp/RenderTexture2D cur0)) offx offy size-x size-y
+                                    (int (/ (+ mx (* odx zoom)) zoom))
+                                    (int (/ (+ my (* ody zoom)) zoom)))
+                      (reset! paint-colour nil)))
+                  (do (paint-free! paint-img)
+                      (reset! paint-colour nil)))
 
               ;; preset keys load a pattern and pause, recentered on it
               preset (pressed-preset)
@@ -229,9 +256,9 @@ static void jank_set_resolution(Shader s, int loc, double w, double h) {
               _ (when loaded?
                   (let [{:keys [file fx fy]} (nth PRESETS preset)]
                     (if file
-                      (cpp/jank_load_pattern cur0 (str RES "game_of_life/" file)
-                                             fx fy WORLD WORLD)
-                      (cpp/jank_load_random cur0 WORLD WORLD RANDOM-TILES))))
+                      (load-pattern! (cpp/box (cpp/new cpp/RenderTexture2D cur0)) (str RES "game_of_life/" file)
+                                     fx fy WORLD WORLD)
+                      (load-random! (cpp/box (cpp/new cpp/RenderTexture2D cur0)) WORLD WORLD RANDOM-TILES))))
               mode (if loaded? 1 mode)
               offx (if loaded?
                      (- (* WORLD (:fx (nth PRESETS preset))) (/ (/ (+ 0.0 WIN-W) zoom) 2.0))
@@ -315,6 +342,6 @@ static void jank_set_resolution(Shader s, int loc, double w, double h) {
     (cpp/UnloadShader shader)
     (cpp/UnloadRenderTexture world1)
     (cpp/UnloadRenderTexture world2)
-    (cpp/jank_draw_free))
+    (paint-free! paint-img))
 
   (cpp/CloseWindow))
