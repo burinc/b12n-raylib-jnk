@@ -23,7 +23,7 @@
     vars exchanged.
   - rlEnableShader / rlBindShaderBuffer / rlComputeShaderDispatch are
     direct rlgl calls with jank-int ids."
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h"))
 
 ;; The C's GolUpdateSSBO (count + buffered draw commands) parked C-side;
@@ -125,7 +125,7 @@ static void jank_gol_flush(int ssboTransfert, int program, int ssboA) {
                 ssbo-b' (if stepping? ssbo-a ssbo-b)]
 
             (cpp/rlBindShaderBuffer ssbo-a' 1)
-            (rl/set-vec2! render-box res-loc
+            (sh/set-vec2! render-box res-loc
                                   (+ 0.0 GOL-WIDTH) (+ 0.0 GOL-WIDTH))
 
             (cpp/BeginDrawing)

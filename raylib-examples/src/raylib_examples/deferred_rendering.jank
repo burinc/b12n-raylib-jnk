@@ -19,7 +19,8 @@
     raw GL id - a one-line C shim.
   - Lights ride the rlights namespace against the deferred shader; the 30
     random cubes are a jank vector of maps drawn with DrawModelEx."
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h"))
 
 ;; G-buffer (MRT framebuffer) + deferred-shader helpers.
@@ -132,7 +133,7 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
                                     :rot (+ 0.0 (int (cpp/GetRandomValue 0 359)))}))
                   acc))]
 
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
 
     (cpp/jank_gbuffer_init WIDTH HEIGHT)
     (cpp/jank_deferred_init_samplers deferred-shader)

@@ -1,0 +1,72 @@
+(ns raylib-examples.shaders
+  "Shader-uniform helpers in pure jank.
+
+  SetShaderValue takes a POINTER to the value. That is the whole reason
+  examples used to carry a per-file cpp/raw block with a C setter: jank had
+  no obvious way to produce one. cpp/new does, directly:
+
+    (cpp/new cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+
+  The shader itself crosses these fn boundaries as an OPAQUE BOX. A Shader
+  has no conversion trait, so passing one as a jank fn argument turns it into
+  an object_ref and the native call rejects it. Callers box it themselves,
+  INLINE, where the value is still native:
+
+    (cpp/box (cpp/new cpp/Shader shader))
+
+  It cannot be wrapped in a helper fn - by the time a fn body runs, its
+  Shader argument is already an object_ref and cpp/new has nothing to copy
+  from.
+
+  There is no cpp/raw anywhere in this namespace. Assignment is spelled
+  cpp/=, which takes an lvalue, so writing a struct field or an array
+  element needs no C shim.
+
+  See docs/guide/native-value-lifetimes.md."
+  (:include "raylib.h"))
+
+(defn set-int!
+  [sh-box loc v]
+  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
+    (cpp/SetShaderValue (cpp/* s) (int loc)
+                        (cpp/new cpp/int (cpp/int v))
+                        cpp/SHADER_UNIFORM_INT)))
+
+(defn set-float!
+  [sh-box loc v]
+  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
+    (cpp/SetShaderValue (cpp/* s) (int loc)
+                        (cpp/new cpp/float (cpp/float v))
+                        cpp/SHADER_UNIFORM_FLOAT)))
+
+(defn set-vec2!
+  [sh-box loc x y]
+  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
+    (cpp/SetShaderValue (cpp/* s) (int loc)
+                        (cpp/new cpp/Vector2 (cpp/float x) (cpp/float y))
+                        cpp/SHADER_UNIFORM_VEC2)))
+
+(defn set-vec3!
+  [sh-box loc x y z]
+  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
+    (cpp/SetShaderValue (cpp/* s) (int loc)
+                        (cpp/new cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+                        cpp/SHADER_UNIFORM_VEC3)))
+
+(defn set-vec4!
+  [sh-box loc x y z w]
+  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
+    (cpp/SetShaderValue (cpp/* s) (int loc)
+                        (cpp/new cpp/Vector4 (cpp/float x) (cpp/float y)
+                                             (cpp/float z) (cpp/float w))
+                        cpp/SHADER_UNIFORM_VEC4)))
+
+(defn set-shader-loc!
+  "shader.locs[idx] = loc, in pure jank.
+
+  cpp/= is jank's assignment form and it takes an lvalue, so an array
+  element reached through cpp/aget can be written directly. This is what
+  clojure.core/aset expands to."
+  [sh-box idx loc]
+  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
+    (cpp/= (cpp/aget (.-locs (cpp/* s)) (cpp/int idx)) (cpp/int loc))))

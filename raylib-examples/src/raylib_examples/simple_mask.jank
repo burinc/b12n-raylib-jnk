@@ -16,7 +16,7 @@
     axis/angle/scale args are all by-value and call directly.
   - The frame counter is a jank int re-sent as an INT uniform each
     frame through the rlights setter toolbox."
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h"))
 
 ;; Material writes + the absolute XYZ-rotation transform set.
@@ -59,7 +59,7 @@ static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz)
     ;; the mask rides the spare EMISSION slot (cube-map slots won't do)
     (cpp/jank_model_set_map_texture (cpp/& model1) (cpp/int cpp/MATERIAL_MAP_EMISSION) tex-mask)
     (cpp/jank_model_set_map_texture (cpp/& model2) (cpp/int cpp/MATERIAL_MAP_EMISSION) tex-mask)
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_EMISSION
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_EMISSION
                                 (int (cpp/GetShaderLocation shader "mask")))
 
     (cpp/jank_model_set_shader (cpp/& model1) shader)
@@ -81,7 +81,7 @@ static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz)
               ry (+ ry 0.005)
               rz (- rz 0.0025)]
 
-          (rl/set-int! sh-box frame-loc (int frames))
+          (sh/set-int! sh-box frame-loc (int frames))
           (cpp/jank_model_set_rotate_xyz (cpp/& model1) rx ry rz)
 
           (cpp/BeginDrawing)

@@ -17,7 +17,8 @@
     exactly like the Model material pattern.
   - DrawMesh takes the Mesh, Material and an inline MatrixTranslate
     all by value - direct call."
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h"))
 
 ;; The instance transforms + Material field writes.
@@ -69,10 +70,10 @@ static void jank_mat_set_color(Material* m, int map, int r, int g, int b, int a)
 
     (cpp/jank_build_transforms)
 
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_MATRIX_MVP
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MATRIX_MVP
                                 (int (cpp/GetShaderLocation shader "mvp")))
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
-    (rl/set-vec4! sh-box ambient-loc 0.2 0.2 0.2 1.0)
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (sh/set-vec4! sh-box ambient-loc 0.2 0.2 0.2 1.0)
 
     ;; one white directional light
     (rl/create-light! {:type rl/LIGHT-DIRECTIONAL

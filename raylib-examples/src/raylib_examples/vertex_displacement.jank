@@ -16,7 +16,7 @@
     the usual (cpp/& model) shim; the time FLOAT uniform rides the
     rlights setter toolbox (location hoisted out of the loop,
     unlike the C's per-frame lookup)."
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h"))
 
 (cpp/raw "static void jank_model_set_shader(Model* m, Shader s) {
@@ -63,7 +63,7 @@
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FREE)
 
         (let [time (+ time (+ 0.0 (cpp/GetFrameTime)))]
-          (rl/set-float! sh-box time-loc time)
+          (sh/set-float! sh-box time-loc time)
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)

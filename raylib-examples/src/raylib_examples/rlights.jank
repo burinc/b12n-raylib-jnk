@@ -11,6 +11,9 @@
   that pointer. A Light is otherwise plain data plus five cached int uniform
   locations, which an ordinary jank map holds fine.
 
+  Uniform pushing lives in raylib-examples.shaders; this ns is only the
+  light bookkeeping on top of it.
+
   Callers box the shader themselves, INLINE, with
 
     (cpp/box (cpp/new cpp/Shader shader))
@@ -29,20 +32,8 @@
   wants lighting copies this file next to its example.
 
   Based on raylib/examples/shaders/rlights.h"
+  (:require [raylib-examples.shaders :as sh])
   (:include "raylib.h"))
-
-;; The ONE thing jank cannot express today: shader.locs[idx] = loc.
-;;
-;; There is no assignment form at all - no set!, no cpp/aset, no member
-;; write - so a three-line C shim is the only way to set a shader location
-;; slot. It is kept HERE, once, rather than repeated in the nine examples
-;; that need it. If jank grows an assignment form this disappears.
-;;
-;; Writing through the boxed copy is visible on the caller's Shader because
-;; Shader is {unsigned int id; int *locs;} - a copy shares the same locs
-;; array. Verified, not assumed.
-(cpp/raw "static void jank_set_shader_loc(Shader* s, int idx, int loc)
-          { s->locs[idx] = loc; }")
 
 (def LIGHT-DIRECTIONAL 0)
 (def LIGHT-POINT 1)
@@ -50,54 +41,6 @@
 ;; Lights live here, not in C. Each entry is a plain map: the light's own
 ;; data plus the uniform locations looked up once at creation.
 (defonce ^:private lights (atom []))
-
-;; --- pointer staging -------------------------------------------------------
-;; SetShaderValue wants a pointer to the value. cpp/new gives us one directly,
-;; which is the whole reason the C helpers existed.
-
-(defn set-int!
-  [sh-box loc v]
-  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
-    (cpp/SetShaderValue (cpp/* s) (int loc)
-                        (cpp/new cpp/int (cpp/int v))
-                        cpp/SHADER_UNIFORM_INT)))
-
-(defn set-float!
-  [sh-box loc v]
-  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
-    (cpp/SetShaderValue (cpp/* s) (int loc)
-                        (cpp/new cpp/float (cpp/float v))
-                        cpp/SHADER_UNIFORM_FLOAT)))
-
-(defn set-vec2!
-  [sh-box loc x y]
-  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
-    (cpp/SetShaderValue (cpp/* s) (int loc)
-                        (cpp/new cpp/Vector2 (cpp/float x) (cpp/float y))
-                        cpp/SHADER_UNIFORM_VEC2)))
-
-(defn set-vec3!
-  [sh-box loc x y z]
-  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
-    (cpp/SetShaderValue (cpp/* s) (int loc)
-                        (cpp/new cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
-                        cpp/SHADER_UNIFORM_VEC3)))
-
-(defn set-vec4!
-  [sh-box loc x y z w]
-  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
-    (cpp/SetShaderValue (cpp/* s) (int loc)
-                        (cpp/new cpp/Vector4 (cpp/float x) (cpp/float y)
-                                             (cpp/float z) (cpp/float w))
-                        cpp/SHADER_UNIFORM_VEC4)))
-
-;; --- lights ----------------------------------------------------------------
-
-(defn set-shader-loc!
-  "shader.locs[idx] = loc. See the cpp/raw note at the top of this ns."
-  [sh-box idx loc]
-  (let [s (cpp/unbox (:* cpp/Shader) sh-box)]
-    (cpp/jank_set_shader_loc s (cpp/int idx) (cpp/int loc))))
 
 (defn create-light!
   "Register a light and cache its uniform locations. Returns its index.
@@ -124,12 +67,12 @@
   (let [{:keys [enabled type px py pz tx ty tz r g b a
                 enabled-loc type-loc position-loc target-loc color-loc]}
         (nth (deref lights) i)]
-    (set-int! sh-box enabled-loc enabled)
-    (set-int! sh-box type-loc type)
-    (set-vec3! sh-box position-loc px py pz)
-    (set-vec3! sh-box target-loc tx ty tz)
+    (sh/set-int! sh-box enabled-loc enabled)
+    (sh/set-int! sh-box type-loc type)
+    (sh/set-vec3! sh-box position-loc px py pz)
+    (sh/set-vec3! sh-box target-loc tx ty tz)
     ;; colors are 0-255 in raylib, 0-1 in GLSL
-    (set-vec4! sh-box color-loc (/ r 255.0) (/ g 255.0) (/ b 255.0) (/ a 255.0))))
+    (sh/set-vec4! sh-box color-loc (/ r 255.0) (/ g 255.0) (/ b 255.0) (/ a 255.0))))
 
 (defn toggle-light!
   [i]
@@ -151,6 +94,6 @@
   shader is boxed: a Camera3D argument arrives as an object_ref and has no
   readable members, so the caller destructures it while it is still native."
   [sh-box loc x y z]
-  (set-vec3! sh-box loc x y z))
+  (sh/set-vec3! sh-box loc x y z))
 
 (defn reset-lights! [] (reset! lights []))

@@ -19,7 +19,8 @@
     example creates no lights - the header doubles as the shared
     uniform toolbox."
   (:require [clojure.string :as string])
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h" "math.h"))
 
 ;; Material map setup + absolute Y-rotation transform set.
@@ -66,9 +67,9 @@ static void jank_model_set_rotate_y(Model* m, double angle) {
         use-nm-loc (int (cpp/GetShaderLocation shader "useNormalMap"))
         plane (cpp/LoadModel (str RES "models/plane.glb"))]
 
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_NORMAL
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MAP_NORMAL
                                 (int (cpp/GetShaderLocation shader "normalMap")))
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
 
     (cpp/jank_model_set_shader (cpp/& plane) shader)
     (cpp/jank_model_setup_map (cpp/& plane) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
@@ -103,11 +104,11 @@ static void jank_model_set_rotate_y(Model* m, double angle) {
           ;; spin the plane at a constant rate (absolute transform set)
           (cpp/jank_model_set_rotate_y (cpp/& plane) (* (+ 0.0 (cpp/GetTime)) 0.5))
 
-          (rl/set-vec3! sh-box light-pos-loc lx 1.0 lz)
+          (sh/set-vec3! sh-box light-pos-loc lx 1.0 lz)
           (let [p (.-position camera)]
             (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
-          (rl/set-float! sh-box specular-loc specular)
-          (rl/set-int! sh-box use-nm-loc (if use-nm? 1 0))
+          (sh/set-float! sh-box specular-loc specular)
+          (sh/set-int! sh-box use-nm-loc (if use-nm? 1 0))
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)

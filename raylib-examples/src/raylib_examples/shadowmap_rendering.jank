@@ -23,7 +23,8 @@
   - Pass-boundary matrices (rlGetMatrixModelview/Projection,
     MatrixMultiply) are frame-local native let-locals handed to
     SetShaderValueMatrix by value."
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h" "raymath.h" "math.h"))
 
 ;; Depth-only shadowmap FBO + scene + model/animation helpers.
@@ -108,11 +109,11 @@ static void jank_draw_scene(Model cube, Model robot) {
         ly0 (/ -1.0 len0)
         lz0 (/ -0.35 len0)]
 
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
-    (rl/set-vec3! sh-box light-dir-loc lx0 ly0 lz0)
-    (rl/set-vec4! sh-box light-col-loc 1.0 1.0 1.0 1.0)
-    (rl/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
-    (rl/set-int! sh-box res-loc SHADOWMAP-RES)
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (sh/set-vec3! sh-box light-dir-loc lx0 ly0 lz0)
+    (sh/set-vec4! sh-box light-col-loc 1.0 1.0 1.0 1.0)
+    (sh/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
+    (sh/set-int! sh-box res-loc SHADOWMAP-RES)
 
     (cpp/jank_model_set_shader_all (cpp/& cube) shadow-shader)
     (cpp/jank_model_set_shader_all (cpp/& robot) shadow-shader)
@@ -158,7 +159,7 @@ static void jank_draw_scene(Model cube, Model robot) {
                                            (cpp/float 20.0)
                                            cpp/CAMERA_ORTHOGRAPHIC)]
 
-            (rl/set-vec3! sh-box light-dir-loc lx ly lz)
+            (sh/set-vec3! sh-box light-dir-loc lx ly lz)
 
             ;; PASS 1: depth from the light's point of view
             (cpp/BeginTextureMode shadow-map)
@@ -180,7 +181,7 @@ static void jank_draw_scene(Model cube, Model robot) {
               (cpp/rlActiveTextureSlot 10)
               (let [depth-tex (.-depth shadow-map)]
                 (cpp/rlEnableTexture (.-id depth-tex)))
-              (rl/set-int! sh-box shadow-map-loc 10)
+              (sh/set-int! sh-box shadow-map-loc 10)
 
               (cpp/BeginMode3D camera)
               (cpp/jank_draw_scene cube robot)

@@ -15,7 +15,7 @@
   - Simplifications vs the C (both off by default there): the HDR
     panorama->cubemap path (GenTextureCubemap render-to-cubemap) and
     the drag&drop skybox swap are dropped."
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h"))
 
 (cpp/raw "static void jank_model_set_shader(Model* m, Shader s) {
@@ -45,10 +45,10 @@ static void jank_model_set_map_texture(Model* m, int map, Texture2D tex) {
         sh-box (cpp/box (cpp/new cpp/Shader shader))]
 
     ;; the skybox samples its cubemap from the CUBEMAP material slot
-    (rl/set-int! sh-box (int (cpp/GetShaderLocation shader "environmentMap"))
+    (sh/set-int! sh-box (int (cpp/GetShaderLocation shader "environmentMap"))
                          (cpp/int cpp/MATERIAL_MAP_CUBEMAP))
-    (rl/set-int! sh-box (int (cpp/GetShaderLocation shader "doGamma")) 0)
-    (rl/set-int! sh-box (int (cpp/GetShaderLocation shader "vflipped")) 0)
+    (sh/set-int! sh-box (int (cpp/GetShaderLocation shader "doGamma")) 0)
+    (sh/set-int! sh-box (int (cpp/GetShaderLocation shader "vflipped")) 0)
     (cpp/jank_model_set_shader (cpp/& skybox) shader)
 
     ;; six-face layout image -> cubemap texture

@@ -16,7 +16,8 @@
   - First UpdateCameraPro: movement/rotation Vector3s built inline
     from jank-computed key/mouse values, called on (cpp/& camera).
   - Lights + uniforms ride the rlights namespace."
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h"))
 
 ;; Center a model on its bounding-box XZ middle + shader-all-materials.
@@ -67,8 +68,8 @@ static void jank_model_set_shader_all(Model* m, Shader s) {
     (cpp/jank_model_center_xz (cpp/& m2))
     (cpp/jank_model_center_xz (cpp/& m3))
 
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
-    (rl/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (sh/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
 
     (cpp/jank_model_set_shader_all (cpp/& m0) shader)
     (cpp/jank_model_set_shader_all (cpp/& m1) shader)

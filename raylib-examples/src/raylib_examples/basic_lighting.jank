@@ -16,7 +16,8 @@
     back each frame. That is the example's own bookkeeping - raylib never
     reads that slot itself - so this keeps the location in a jank local
     and skips the write, which jank has no syntax for anyway."
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
   (:include "raylib.h"))
 
 (def WIDTH 800)
@@ -53,7 +54,7 @@
         view-loc (int (cpp/GetShaderLocation shader "viewPos"))
         ambient-loc (int (cpp/GetShaderLocation shader "ambient"))]
 
-    (rl/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
+    (sh/set-vec4! sh-box ambient-loc 0.1 0.1 0.1 1.0)
 
     ;; create the four point lights (indices 0-3)
     (loop [i 0]

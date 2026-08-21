@@ -13,10 +13,11 @@
     material texture/shader writes plus the torus's per-frame
     transform spin (MatrixMultiply/MatrixRotate via raymath.h).
   - ColorNormalize(GRAY) reduces to (/ 130.0 255.0) components sent
-    with rl/set-vec4!; fog density threads through recur as a
+    with sh/set-vec4!; fog density threads through recur as a
     jank real, clamped in jank."
   (:require [clojure.string :as string])
-  (:require [raylib-examples.rlights :as rl])
+  (:require [raylib-examples.rlights :as rl]
+            [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h"))
 
 ;; Model helpers: material field writes + the torus spin.
@@ -69,14 +70,14 @@ static void jank_model_spin(Model* m, double rx, double rz) {
     (cpp/jank_model_set_texture (cpp/& model-b) texture)
     (cpp/jank_model_set_texture (cpp/& model-c) texture)
 
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_MATRIX_MODEL
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MATRIX_MODEL
                                 (int (cpp/GetShaderLocation shader "matModel")))
-    (rl/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
+    (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
 
-    (rl/set-vec4! sh-box ambient-loc 0.2 0.2 0.2 1.0)
+    (sh/set-vec4! sh-box ambient-loc 0.2 0.2 0.2 1.0)
     ;; ColorNormalize(GRAY) = 130/255 per channel
     (let [g (/ 130.0 255.0)]
-      (rl/set-vec4! sh-box fog-color-loc g g g 1.0))
+      (sh/set-vec4! sh-box fog-color-loc g g g 1.0))
 
     (cpp/jank_model_set_shader (cpp/& model-a) shader)
     (cpp/jank_model_set_shader (cpp/& model-b) shader)
@@ -101,7 +102,7 @@ static void jank_model_spin(Model* m, double rx, double rz) {
                                 :else fog-density)
               fog-density (if (> fog-density 1.0) 1.0 (if (< fog-density 0.0) 0.0 fog-density))]
 
-          (rl/set-float! sh-box fog-density-loc fog-density)
+          (sh/set-float! sh-box fog-density-loc fog-density)
           (cpp/jank_model_spin (cpp/& model-a) -0.025 0.012)
           (let [p (.-position camera)]
             (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
