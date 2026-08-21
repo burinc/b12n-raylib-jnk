@@ -19,70 +19,10 @@
     raw GL id - a one-line C shim.
   - Lights ride the rlights namespace against the deferred shader; the 30
     random cubes are a jank vector of maps drawn with DrawModelEx."
+  (:require [raylib-examples.models :as md])
   (:require [raylib-examples.rlights :as rl]
             [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h"))
-
-;; G-buffer (MRT framebuffer) + deferred-shader helpers.
-(cpp/raw "static unsigned int jank_gb_fbo = 0;
-static unsigned int jank_gb_position = 0;
-static unsigned int jank_gb_normal = 0;
-static unsigned int jank_gb_albedo = 0;
-static unsigned int jank_gb_depth = 0;
-
-static void jank_gbuffer_init(int width, int height) {
-  jank_gb_fbo = rlLoadFramebuffer();
-  if (jank_gb_fbo == 0) TraceLog(LOG_WARNING, \"Failed to create framebuffer\");
-  rlEnableFramebuffer(jank_gb_fbo);
-  /* 16-bit position + normal targets, 8-bit albedo+specular */
-  jank_gb_position = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16, 1);
-  jank_gb_normal = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16, 1);
-  jank_gb_albedo = rlLoadTexture(NULL, width, height, RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
-  rlActiveDrawBuffers(3);
-  rlFramebufferAttach(jank_gb_fbo, jank_gb_position, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
-  rlFramebufferAttach(jank_gb_fbo, jank_gb_normal, RL_ATTACHMENT_COLOR_CHANNEL1, RL_ATTACHMENT_TEXTURE2D, 0);
-  rlFramebufferAttach(jank_gb_fbo, jank_gb_albedo, RL_ATTACHMENT_COLOR_CHANNEL2, RL_ATTACHMENT_TEXTURE2D, 0);
-  jank_gb_depth = rlLoadTextureDepth(width, height, true);
-  rlFramebufferAttach(jank_gb_fbo, jank_gb_depth, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_RENDERBUFFER, 0);
-  if (!rlFramebufferComplete(jank_gb_fbo)) TraceLog(LOG_WARNING, \"Framebuffer is not complete\");
-}
-static int jank_gb_get_fbo(void) { return (int)jank_gb_fbo; }
-static int jank_gb_get_position(void) { return (int)jank_gb_position; }
-static int jank_gb_get_normal(void) { return (int)jank_gb_normal; }
-static int jank_gb_get_albedo(void) { return (int)jank_gb_albedo; }
-static void jank_gbuffer_unload(void) {
-  rlUnloadFramebuffer(jank_gb_fbo);
-  rlUnloadTexture(jank_gb_position);
-  rlUnloadTexture(jank_gb_normal);
-  rlUnloadTexture(jank_gb_albedo);
-  rlUnloadTexture(jank_gb_depth);
-}
-/* point the deferred shader's sampler2D uniforms at texture units 0/1/2 */
-static void jank_deferred_init_samplers(Shader s) {
-  rlEnableShader(s.id);
-  int unit0 = 0, unit1 = 1, unit2 = 2;
-  SetShaderValue(s, rlGetLocationUniform(s.id, \"gPosition\"), &unit0, RL_SHADER_UNIFORM_SAMPLER2D);
-  SetShaderValue(s, rlGetLocationUniform(s.id, \"gNormal\"), &unit1, RL_SHADER_UNIFORM_SAMPLER2D);
-  SetShaderValue(s, rlGetLocationUniform(s.id, \"gAlbedoSpec\"), &unit2, RL_SHADER_UNIFORM_SAMPLER2D);
-  rlDisableShader();
-}
-/* draw a raw G-buffer texture id full-screen, y-flipped (debug views) */
-static void jank_draw_gbuffer_tex(int id, int width, int height) {
-  Texture2D tex = { 0 };
-  tex.id = (unsigned int)id;
-  tex.width = width;
-  tex.height = height;
-  DrawTextureRec(tex, (Rectangle){ 0, 0, (float)width, (float)-height },
-                 (Vector2){ 0, 0 }, RAYWHITE);
-}
-/* copy the G-buffer's depth over to the default framebuffer */
-static void jank_blit_depth(int width, int height) {
-  rlBindFramebuffer(RL_READ_FRAMEBUFFER, jank_gb_fbo);
-  rlBindFramebuffer(RL_DRAW_FRAMEBUFFER, 0);
-  rlBlitFramebuffer(0, 0, width, height, 0, 0, width, height, 0x00000100); /* GL_DEPTH_BUFFER_BIT */
-  rlDisableFramebuffer();
-}
-static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader = s; }")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -104,6 +44,60 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
 ;; Deferred debug modes (the C's enum): 0 position, 1 normal, 2 albedo,
 ;; 3 the final shading.
 (def MODE-SHADING 3)
+
+(defn- gbuffer-init!
+  "Build the G-buffer and return its ids as an ordinary jank map.
+
+  The C kept five `static unsigned int`s and a getter per field. None of
+  that is needed: a GPU id is an unsigned int, which is trait-convertible,
+  so it crosses the jank boundary freely and a plain map holds the set."
+  [width height]
+  (let [fbo (cpp/rlLoadFramebuffer)]
+    (cpp/rlEnableFramebuffer fbo)
+    (let [position (cpp/rlLoadTexture cpp/nullptr (cpp/int width) (cpp/int height)
+                                      (cpp/int cpp/RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16) (cpp/int 1))
+          normal (cpp/rlLoadTexture cpp/nullptr (cpp/int width) (cpp/int height)
+                                    (cpp/int cpp/RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16) (cpp/int 1))
+          albedo (cpp/rlLoadTexture cpp/nullptr (cpp/int width) (cpp/int height)
+                                    (cpp/int cpp/RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) (cpp/int 1))]
+      (cpp/rlActiveDrawBuffers (cpp/int 3))
+      (cpp/rlFramebufferAttach fbo position (cpp/int cpp/RL_ATTACHMENT_COLOR_CHANNEL0)
+                               (cpp/int cpp/RL_ATTACHMENT_TEXTURE2D) (cpp/int 0))
+      (cpp/rlFramebufferAttach fbo normal (cpp/int cpp/RL_ATTACHMENT_COLOR_CHANNEL1)
+                               (cpp/int cpp/RL_ATTACHMENT_TEXTURE2D) (cpp/int 0))
+      (cpp/rlFramebufferAttach fbo albedo (cpp/int cpp/RL_ATTACHMENT_COLOR_CHANNEL2)
+                               (cpp/int cpp/RL_ATTACHMENT_TEXTURE2D) (cpp/int 0))
+      (let [depth (cpp/rlLoadTextureDepth (cpp/int width) (cpp/int height) (cpp/bool true))]
+        (cpp/rlFramebufferAttach fbo depth (cpp/int cpp/RL_ATTACHMENT_DEPTH)
+                                 (cpp/int cpp/RL_ATTACHMENT_RENDERBUFFER) (cpp/int 0))
+        (when-not (cpp/rlFramebufferComplete fbo)
+          (println "G-buffer framebuffer is not complete"))
+        {:fbo (int (+ 0.0 fbo)) :position (int (+ 0.0 position))
+         :normal (int (+ 0.0 normal)) :albedo (int (+ 0.0 albedo))
+         :depth (int (+ 0.0 depth))}))))
+
+(defn- gbuffer-unload!
+  [{:keys [fbo position normal albedo depth]}]
+  (cpp/rlUnloadFramebuffer (cpp/int fbo))
+  (cpp/rlUnloadTexture (cpp/int position))
+  (cpp/rlUnloadTexture (cpp/int normal))
+  (cpp/rlUnloadTexture (cpp/int albedo))
+  (cpp/rlUnloadTexture (cpp/int depth))
+  nil)
+
+(defn- draw-gbuffer-tex!
+  "Draw a raw G-buffer texture id full-screen, y-flipped."
+  [id width height]
+  (let [tex (cpp/new cpp/Texture2D)]
+    (cpp/= (.-id (cpp/* tex)) (cpp/cast cpp/uint (int id)))
+    (cpp/= (.-width (cpp/* tex)) (cpp/int width))
+    (cpp/= (.-height (cpp/* tex)) (cpp/int height))
+    (cpp/DrawTextureRec (cpp/* tex)
+                        (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                       (cpp/float (+ 0.0 width)) (cpp/float (- 0.0 (+ 0.0 height))))
+                        (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                        cpp/RAYWHITE))
+  nil)
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -131,15 +125,26 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
                                     :y (+ 0.0 (int (cpp/GetRandomValue 0 4)))
                                     :z (+ 0.0 (int (cpp/GetRandomValue -5 4)))
                                     :rot (+ 0.0 (int (cpp/GetRandomValue 0 359)))}))
-                  acc))]
+                  acc))
+        ;; the G-buffer's five GPU ids as a plain jank map, replacing five
+        ;; cpp/raw statics and a getter each
+        gbuf (gbuffer-init! WIDTH HEIGHT)]
 
     (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
 
-    (cpp/jank_gbuffer_init WIDTH HEIGHT)
-    (cpp/jank_deferred_init_samplers deferred-shader)
+    (cpp/rlEnableShader (.-id deferred-shader))
+    ;; point the deferred shader's sampler2D uniforms at texture units 0/1/2
+    (doseq [[nm unit] [["gPosition" 0] ["gNormal" 1] ["gAlbedoSpec" 2]]]
+      (cpp/SetShaderValue deferred-shader
+                          (cpp/rlGetLocationUniform (.-id deferred-shader) nm)
+                          (cpp/new cpp/int (cpp/int unit))
+                          (cpp/int cpp/RL_SHADER_UNIFORM_SAMPLER2D)))
+    (cpp/rlDisableShader)
 
-    (cpp/jank_model_set_shader (cpp/& model) gbuffer-shader)
-    (cpp/jank_model_set_shader (cpp/& cube) gbuffer-shader)
+    (md/set-shader! (cpp/box (cpp/new cpp/Model model)) 0
+                    (cpp/box (cpp/new cpp/Shader gbuffer-shader)))
+    (md/set-shader! (cpp/box (cpp/new cpp/Model cube)) 0
+                    (cpp/box (cpp/new cpp/Shader gbuffer-shader)))
 
     ;; the four point lights live on the DEFERRED shader
     (loop [i 0]
@@ -181,7 +186,7 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
           (cpp/BeginDrawing)
 
           ;; geometry pass: the scene into the three G-buffer targets
-          (cpp/rlEnableFramebuffer (cpp/jank_gb_get_fbo))
+          (cpp/rlEnableFramebuffer (cpp/cast cpp/uint (:fbo gbuf)))
           (cpp/rlClearColor 0 0 0 0)
           (cpp/rlClearScreenBuffers)
           (cpp/rlDisableColorBlend)
@@ -221,18 +226,23 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
               (cpp/rlDisableColorBlend)
               (cpp/rlEnableShader (.-id deferred-shader))
               (cpp/rlActiveTextureSlot 0)
-              (cpp/rlEnableTexture (cpp/jank_gb_get_position))
+              (cpp/rlEnableTexture (cpp/cast cpp/uint (:position gbuf)))
               (cpp/rlActiveTextureSlot 1)
-              (cpp/rlEnableTexture (cpp/jank_gb_get_normal))
+              (cpp/rlEnableTexture (cpp/cast cpp/uint (:normal gbuf)))
               (cpp/rlActiveTextureSlot 2)
-              (cpp/rlEnableTexture (cpp/jank_gb_get_albedo))
+              (cpp/rlEnableTexture (cpp/cast cpp/uint (:albedo gbuf)))
               (cpp/rlLoadDrawQuad)
               (cpp/rlDisableShader)
               (cpp/rlEnableColorBlend)
               (cpp/EndMode3D)
 
               ;; carry the G-buffer depth over, then forward-draw the markers
-              (cpp/jank_blit_depth WIDTH HEIGHT)
+              (cpp/rlBindFramebuffer (cpp/int cpp/RL_READ_FRAMEBUFFER) (cpp/cast cpp/uint (:fbo gbuf)))
+              (cpp/rlBindFramebuffer (cpp/int cpp/RL_DRAW_FRAMEBUFFER) (cpp/cast cpp/uint 0))
+              (cpp/rlBlitFramebuffer (cpp/int 0) (cpp/int 0) (cpp/int WIDTH) (cpp/int HEIGHT)
+                                     (cpp/int 0) (cpp/int 0) (cpp/int WIDTH) (cpp/int HEIGHT)
+                                     (cpp/int 0x00000100))
+              (cpp/rlDisableFramebuffer)
 
               (cpp/BeginMode3D camera)
               (cpp/rlEnableShader (cpp/rlGetShaderIdDefault))
@@ -254,9 +264,9 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
               (cpp/DrawText "FINAL RESULT" 10 (- HEIGHT 30) 20 cpp/DARKGREEN))
             (do
               ;; raw G-buffer texture debug views
-              (cond (= mode 0) (cpp/jank_draw_gbuffer_tex (cpp/jank_gb_get_position) WIDTH HEIGHT)
-                    (= mode 1) (cpp/jank_draw_gbuffer_tex (cpp/jank_gb_get_normal) WIDTH HEIGHT)
-                    :else (cpp/jank_draw_gbuffer_tex (cpp/jank_gb_get_albedo) WIDTH HEIGHT))
+              (cond (= mode 0) (draw-gbuffer-tex! (:position gbuf) WIDTH HEIGHT)
+                    (= mode 1) (draw-gbuffer-tex! (:normal gbuf) WIDTH HEIGHT)
+                    :else (draw-gbuffer-tex! (:albedo gbuf) WIDTH HEIGHT))
               (cond (= mode 0) (cpp/DrawText "POSITION TEXTURE" 10 (- HEIGHT 30) 20 cpp/DARKGREEN)
                     (= mode 1) (cpp/DrawText "NORMAL TEXTURE" 10 (- HEIGHT 30) 20 cpp/DARKGREEN)
                     :else (cpp/DrawText "ALBEDO TEXTURE" 10 (- HEIGHT 30) 20 cpp/DARKGREEN))))
@@ -272,6 +282,6 @@ static void jank_model_set_shader(Model* m, Shader s) { m->materials[0].shader =
     (cpp/UnloadModel cube)
     (cpp/UnloadShader deferred-shader)
     (cpp/UnloadShader gbuffer-shader)
-    (cpp/jank_gbuffer_unload))
+    (gbuffer-unload! gbuf))
 
   (cpp/CloseWindow))
