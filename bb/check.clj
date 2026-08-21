@@ -41,14 +41,14 @@
                        (recur)))
                    nil
                    (catch Exception e
-                     (str (fs/file-name f) " — " (.getMessage e)))))))
+                     (str (fs/file-name f) " - " (.getMessage e)))))))
        vec))
 
 (defn- registration-errors
   "Every registry example must exist in all four registration sites.
 
   This is the check that earns its keep: the four touchpoints are documented
-  but easy to half-do, and missing one fails in a different way each time —
+  but easy to half-do, and missing one fails in a different way each time -
   no `bb <name>` task, or an example absent from the catalog, or a profile
   lein cannot resolve."
   []
@@ -64,16 +64,16 @@
          (mapcat (fn [{:keys [profile]}]
                    (cond-> []
                      (not (fs/exists? (src-path profile)))
-                     (conj (str profile " — no source at " (src-path profile)))
+                     (conj (str profile " - no source at " (src-path profile)))
 
                      (not (contains? profiles profile))
-                     (conj (str profile " — no :profiles entry in raylib-examples/project.clj"))
+                     (conj (str profile " - no :profiles entry in raylib-examples/project.clj"))
 
                      (not (contains? tasks profile))
-                     (conj (str profile " — no `bb " profile "` task in bb.edn"))
+                     (conj (str profile " - no `bb " profile "` task in bb.edn"))
 
                      (not (str/includes? cat (str "`" profile "`")))
-                     (conj (str profile " — not listed in docs/guide/example-catalog.md")))))
+                     (conj (str profile " - not listed in docs/guide/example-catalog.md")))))
          vec)))
 
 (defn- edn-errors
@@ -83,7 +83,7 @@
        (keep (fn [f]
                (when (fs/exists? f)
                  (try (clojure.edn/read-string (slurp f)) nil
-                      (catch Exception e (str f " — " (.getMessage e)))))))
+                      (catch Exception e (str f " - " (.getMessage e)))))))
        vec))
 
 (defn- orphan-errors
@@ -100,7 +100,7 @@
     (->> (sort (map str (fs/glob "raylib-examples/src" "**/*.jank")))
          (remove known)
          (filter (fn [f] (re-find #"\(defn -main" (slurp f))))
-         (mapv (fn [f] (str f " — defines -main but has no bb/helpers.clj registry row"))))))
+         (mapv (fn [f] (str f " - defines -main but has no bb/helpers.clj registry row"))))))
 
 (defn- report [label errs]
   (if (seq errs)
@@ -112,10 +112,10 @@
 (defn run!
   "Run every offline gate. Exits non-zero if any fails."
   []
-  (println "Checking the example suite (offline — no jank compile)\n")
-  (let [results [(report (str "reader syntax — " (count (fs/glob "raylib-examples/src" "**/*.jank")) " .jank files parse to EOF")
+  (println "Checking the example suite (offline - no jank compile)\n")
+  (let [results [(report (str "reader syntax - " (count (fs/glob "raylib-examples/src" "**/*.jank")) " .jank files parse to EOF")
                          (reader-errors))
-                 (report (str "registration — " (count h/examples) " examples present in all four sites")
+                 (report (str "registration - " (count h/examples) " examples present in all four sites")
                          (registration-errors))
                  (report "no orphan sources" (orphan-errors))
                  (report "EDN data files parse" (edn-errors))]]

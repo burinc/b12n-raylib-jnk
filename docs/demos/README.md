@@ -2,7 +2,7 @@
 
 Animated GIF previews of every example. Recorded with a capture CLI that is not publicly released, so `bb record` is maintainer-only - every GIF here is committed.
 
-## core — window, input, cameras, files
+## core: window, input, cameras, files
 
 ### input-keys
 
@@ -268,7 +268,7 @@ A live controller diagram: buttons/sticks/triggers light up (Xbox/PS/generic)
 
 ![input-gamepad](input-gamepad.gif)
 
-## shapes — 2D drawing, easing, rlgl
+## shapes: 2D drawing, easing, rlgl
 
 ### bouncing-ball
 
@@ -516,7 +516,7 @@ Rounded gradient rectangles via rlgl
 
 ![rectangle-advanced](rectangle-advanced.gif)
 
-## text — fonts, unicode, layout
+## text: fonts, unicode, layout
 
 ### format-text
 
@@ -614,7 +614,7 @@ Bitmap vs SDF font scaling, the SDF drawn through a shader
 
 ![font-sdf](font-sdf.gif)
 
-## textures — images, sprites, render textures
+## textures: images, sprites, render textures
 
 ### image-generation
 
@@ -802,7 +802,7 @@ The classic DOS fire effect in a palette-indexed buffer
 
 ![screen-buffer](screen-buffer.gif)
 
-## models — meshes, 3D, OBJ/GLB
+## models: meshes, 3D, OBJ/GLB
 
 ### geometric-shapes
 
@@ -972,7 +972,7 @@ Click to splat logo decals clipped onto a character's surface
 
 ![decals](decals.gif)
 
-## shaders — GLSL, uniforms, postprocess, lighting
+## shaders: GLSL, uniforms, postprocess, lighting
 
 ### shapes-textures-shader
 
@@ -1178,7 +1178,7 @@ Conway's Life on a 2048x2048 world: pan/zoom, presets, draw mode
 
 ![game-of-life](game-of-life.gif)
 
-## audio — sounds, music streams
+## audio: sounds, music streams
 
 ### sound-loading
 

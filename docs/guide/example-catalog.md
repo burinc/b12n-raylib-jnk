@@ -15,7 +15,7 @@ bb info            # the grouped cheat-sheet below
 bb run-all [secs]  # every example, N seconds each (unattended)
 ```
 
-## core — window, input, cameras, files (46)
+## core: window, input, cameras, files (46)
 
 | preview | `bb` name | shows |
 |---|---|---|
@@ -66,7 +66,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/automation-events.gif" width="80">](../demos/automation-events.gif) | `automation-events` | A 2D platformer with input record/replay via AutomationEventList |
 | [<img src="../demos/input-gamepad.gif" width="80">](../demos/input-gamepad.gif) | `input-gamepad` | A live controller diagram: buttons/sticks/triggers light up (Xbox/PS/generic) |
 
-## shapes — 2D drawing, easing, rlgl (41)
+## shapes: 2D drawing, easing, rlgl (41)
 
 | preview | `bb` name | shows |
 |---|---|---|
@@ -112,7 +112,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/top-down-lights.gif" width="80">](../demos/top-down-lights.gif) | `top-down-lights` | 2D lights casting shadow volumes off boxes |
 | [<img src="../demos/rectangle-advanced.gif" width="80">](../demos/rectangle-advanced.gif) | `rectangle-advanced` | Rounded gradient rectangles via rlgl |
 
-## text — fonts, unicode, layout (16)
+## text: fonts, unicode, layout (16)
 
 | preview | `bb` name | shows |
 |---|---|---|
@@ -133,7 +133,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/strings-management.gif" width="80">](../demos/strings-management.gif) | `strings-management` | Drag/slice/shatter/glue text particles; 1-6 run raylib's TextTo* fns |
 | [<img src="../demos/font-sdf.gif" width="80">](../demos/font-sdf.gif) | `font-sdf` | Bitmap vs SDF font scaling, the SDF drawn through a shader |
 
-## textures — images, sprites, render textures (31)
+## textures: images, sprites, render textures (31)
 
 | preview | `bb` name | shows |
 |---|---|---|
@@ -169,7 +169,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/framebuffer-rendering.gif" width="80">](../demos/framebuffer-rendering.gif) | `framebuffer-rendering` | An observer camera watching a subject camera + frustum |
 | [<img src="../demos/screen-buffer.gif" width="80">](../demos/screen-buffer.gif) | `screen-buffer` | The classic DOS fire effect in a palette-indexed buffer |
 
-## models — meshes, 3D, OBJ/GLB (29)
+## models: meshes, 3D, OBJ/GLB (29)
 
 | preview | `bb` name | shows |
 |---|---|---|
@@ -203,7 +203,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/animation-blend-custom.gif" width="80">](../demos/animation-blend-custom.gif) | `animation-blend-custom` | Per-bone blending: walking legs + attacking upper body |
 | [<img src="../demos/decals.gif" width="80">](../demos/decals.gif) | `decals` | Click to splat logo decals clipped onto a character's surface |
 
-## shaders — GLSL, uniforms, postprocess, lighting (35)
+## shaders: GLSL, uniforms, postprocess, lighting (35)
 
 | preview | `bb` name | shows |
 |---|---|---|
@@ -243,7 +243,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/deferred-rendering.gif" width="80">](../demos/deferred-rendering.gif) | `deferred-rendering` | A three-target G-buffer + full-screen deferred lighting pass |
 | [<img src="../demos/game-of-life.gif" width="80">](../demos/game-of-life.gif) | `game-of-life` | Conway's Life on a 2048x2048 world: pan/zoom, presets, draw mode |
 
-## audio — sounds, music streams (11)
+## audio: sounds, music streams (11)
 
 | preview | `bb` name | shows |
 |---|---|---|
@@ -259,7 +259,7 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/amp-envelope.gif" width="80">](../demos/amp-envelope.gif) | `amp-envelope` | An ADSR amplitude envelope on a tone, with a live shape graph |
 | [<img src="../demos/spectrum-visualizer.gif" width="80">](../demos/spectrum-visualizer.gif) | `spectrum-visualizer` | A live FFT spectrum of the music through a shader |
 
-## interop — jank/C++ mechanics (1)
+## interop: jank/C++ mechanics (1)
 
 Not raylib ports. These demonstrate the language boundary itself, and are
 counted separately so the raylib port totals above stay comparable with

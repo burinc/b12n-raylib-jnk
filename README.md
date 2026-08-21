@@ -4,7 +4,7 @@
 [![categories complete](https://img.shields.io/badge/complete-shapes,_shaders,_audio,_text-brightgreen)](raylib-examples/README.md#porting-progress)
 
 209 official [raylib](https://www.raylib.com/examples.html) examples ported to
-**[jank](https://jank-lang.org)** — a native Clojure dialect that compiles to
+**[jank](https://jank-lang.org)**, a native Clojure dialect that compiles to
 native code via C++/LLVM, not the JVM. Each example is one `.jank` namespace
 under `raylib-examples/src/raylib_examples/`; a Leiningen profile picks which
 `-main` runs.
@@ -12,7 +12,7 @@ under `raylib-examples/src/raylib_examples/`; a Leiningen profile picks which
 raylib comes from the official
 [`org.jank-lang.commons/raylib-sys`](https://github.com/jank-lang/commons)
 package, so there is no wrapper to build or install here. A `raylib`
-submodule is still fetched, but only for the example assets — the shaders,
+submodule is still fetched, but only for the example assets: the shaders,
 models, textures and audio that many of the examples load.
 
 ## Requirements
@@ -54,7 +54,7 @@ If the `lein` on your `PATH` can't bootstrap, set `LEIN=/path/to/lein`.
 
 There is no `bwrap` on macOS, so Leiningen's build sandbox cannot work there
 at all. Every `bb`/`lein` invocation here already passes `--disable-sandbox`
-for you — see [`docs/guide/getting-started.md`](docs/guide/getting-started.md).
+for you. See [`docs/guide/getting-started.md`](docs/guide/getting-started.md).
 
 ## Manual usage
 
@@ -66,20 +66,20 @@ cd raylib-examples  && lein with-profile +<example> run --disable-sandbox
 ## The examples
 
 **See [`raylib-examples/README.md`](raylib-examples/README.md) for the full
-catalog** — every ported example with its official C source and what it
+catalog**, listing every ported example with its official C source and what it
 shows, grouped by raylib category (shapes, core, text, textures, shaders,
 models, audio). `bb info` gives you the same breakdown from the terminal.
 See [`docs/demos/README.md`](docs/demos/README.md) for an animated preview
 of every recorded example, recorded via `bb record` (configured by
 `scripts/demo_manifest.edn`). `bb record --only
-<example-name>` matches an exact id or an id prefix — e.g. `--only
+<example-name>` matches an exact id or an id prefix, e.g. `--only
 camera-2d` also selects `camera-2d-platformer`, `camera-2d-split-screen`,
-and `camera-2d-mouse-zoom` — so double-check the plan
+and `camera-2d-mouse-zoom`, so double-check the plan
 (`bb record --dry-run`) before combining a short `--only` prefix with
 `--force`.
 
 `bb record` drives a `screen-grab` capture CLI that is not publicly
-released, so recording is maintainer-only — the task will tell you so rather
+released, so recording is maintainer-only. The task will tell you so rather
 than failing obscurely. You never need to run it: every GIF under
 `docs/demos/` is committed.
 
@@ -89,7 +89,7 @@ than failing obscurely. You never need to run it: every GIF under
   compute-shader support (`rlLoadShaderProgramCompute`, SSBOs,
   `rlComputeShaderDispatch`). raylib is built by the official `raylib-sys`
   package at OpenGL 3.3, which is what raylib's own Desktop default
-  resolves to — and 3.3 is the practical ceiling on macOS anyway (Apple
+  resolves to, and 3.3 is the practical ceiling on macOS anyway (Apple
   caps out at OpenGL 4.1; GLFW rejects a 4.3 context request
   unconditionally there, regardless of any compatibility hint). Running it
   on a platform where 4.3 is real would mean building raylib yourself with
@@ -123,14 +123,14 @@ public.
 
 ## Contributing
 
-New examples are welcome — the suite is deliberately mechanical to grow, and
+New examples are welcome. The suite is deliberately mechanical to grow, and
 `raylib-examples/README.md` keeps a queue of what is not ported yet. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, the headless smoke test that
 stands in for CI here, and the four places a new example has to be registered.
 
 ## License
 
-[zlib](LICENSE) — the same license as raylib itself, so the original terms
+[zlib](LICENSE), the same license as raylib itself, so the original terms
 carry through the ports rather than being replaced by something stricter.
 
 Every file is under that license. [`NOTICE`](NOTICE) records every
