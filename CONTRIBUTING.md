@@ -105,6 +105,11 @@ Port from the **definitive C source** in
 not from any intermediate binding. Keep the physics and formulas faithful, and
 note any deliberate simplification in the docstring.
 
+If your change is user-facing — a new example, a new `bb` task, a build step,
+a corrected claim in the guide — add a line to
+[`CHANGELOG.md`](CHANGELOG.md) under *Unreleased* in the same commit. This
+project does not do separate doc-sync commits.
+
 One new example touches exactly four places, all in the same commit:
 
 **[`docs/guide/porting-workflow.md § 3`](docs/guide/porting-workflow.md#3-register-in-all-four-places-same-commit)**

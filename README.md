@@ -116,6 +116,11 @@ wrapper forward as a standalone, self-contained project. [raylib](https://www.ra
 itself is by Ramon Santamaria ([@raysan5](https://github.com/raysan5)) and
 contributors, vendored here as a git submodule under its own zlib license.
 
+## Changelog
+
+[`CHANGELOG.md`](CHANGELOG.md) records what has changed since the repo went
+public.
+
 ## Contributing
 
 New examples are welcome — the suite is deliberately mechanical to grow, and
