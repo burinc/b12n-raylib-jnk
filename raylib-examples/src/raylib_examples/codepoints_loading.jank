@@ -24,12 +24,6 @@
     pointer and draws nothing - testing dead code, dropped here."
   (:include "raylib.h"))
 
-;; jank can't construct a native int array; fill a static buffer
-;; element-wise and hand its pointer to LoadFontEx.
-(cpp/raw "static int jank_cp_buf[512] = { 0 };
-static void jank_cp_set(int i, int v) { jank_cp_buf[i] = v; }
-static int* jank_cp_ptr(void) { return jank_cp_buf; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/text/resources/")
@@ -40,6 +34,22 @@ static int* jank_cp_ptr(void) { return jank_cp_buf; }")
        "わかよたれそ　つねならむ\n"
        "うゐのおくやま　けふこえて\n"
        "あさきゆめみし　ゑひもせす"))
+
+(defn- int-array!
+  "A native int[n] filled from `values`, returned BOXED.
+
+  jank's own (cpp/new (:array cpp/int n)) does not compile, so the array
+  comes from MemAlloc reinterpreted with cpp/unsafe-cast; cpp/aget + cpp/=
+  fill it. Boxed on the way out because an int* is a native value and
+  cannot be returned bare."
+  [values]
+  (let [n (count values)
+        p (cpp/unsafe-cast (:* cpp/int) (cpp/MemAlloc (cpp/cast cpp/uint (* n 4))))]
+    (loop [i 0]
+      (when (< i n)
+        (cpp/= (cpp/aget p (cpp/int i)) (cpp/int (int (nth values i))))
+        (recur (inc i))))
+    (cpp/box p)))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -64,14 +74,10 @@ static int* jank_cp_ptr(void) { return jank_cp_buf; }")
         nu (count uniq)]
     (cpp/UnloadCodepoints codepoints)
 
-    ;; write the deduped codepoints into the native buffer
-    (loop [i 0]
-      (when (< i nu)
-        (cpp/jank_cp_set i (nth uniq i))
-        (recur (inc i))))
-
-    (let [font (cpp/LoadFontEx (str RES "DotGothic16-Regular.ttf") 36
-                               (cpp/jank_cp_ptr) nu)]
+    ;; the deduped codepoints as one native int array
+    (let [cp-box (int-array! uniq)
+          font (cpp/LoadFontEx (str RES "DotGothic16-Regular.ttf") 36
+                               (cpp/unbox (:* cpp/int) cp-box) (cpp/int nu))]
       (cpp/SetTextureFilter (.-texture font) cpp/TEXTURE_FILTER_BILINEAR)
       (cpp/SetTextLineSpacing 20)
       (cpp/SetTargetFPS 60)
