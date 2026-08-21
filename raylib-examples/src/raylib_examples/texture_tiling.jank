@@ -17,23 +17,8 @@
     pattern).
   - The Z camera re-target reuses camera-3d-free's jank_cam_retarget
     shim shape."
+  (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
-
-;; Field writes into the model's material (no jank syntax for
-;; struct-array member assignment) + the usual VEC2 uniform setter.
-(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}
-static void jank_model_set_shader(Model* m, Shader s) {
-  m->materials[0].shader = s;
-}
-static void jank_cam_retarget(Camera3D* c) {
-  c->target = (Vector3){ 0.0f, 0.5f, 0.0f };
-}
-static void jank_set_vec2(Shader s, int loc, double a, double b) {
-  float v[2] = { (float)a, (float)b };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -55,10 +40,14 @@ static void jank_set_vec2(Shader s, int loc, double a, double b) {
         shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/tiling.fs"))
         tiling-loc (int (cpp/GetShaderLocation shader "tiling"))]
 
-    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (md/set-texture! (cpp/box (cpp/new cpp/Model model))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
     (cpp/SetTextureWrap texture cpp/TEXTURE_WRAP_REPEAT)
-    (cpp/jank_set_vec2 shader tiling-loc 3.0 3.0)
-    (cpp/jank_model_set_shader (cpp/& model) shader)
+    (cpp/SetShaderValue shader (int tiling-loc)
+                        (cpp/new cpp/Vector2 (cpp/float 3.0) (cpp/float 3.0))
+                        cpp/SHADER_UNIFORM_VEC2)
+    (md/set-shader! (cpp/box (cpp/new cpp/Model model)) 0
+                    (cpp/box (cpp/new cpp/Shader shader)))
 
     (cpp/DisableCursor)
     (cpp/SetTargetFPS 60)
@@ -67,7 +56,9 @@ static void jank_set_vec2(Shader s, int loc, double a, double b) {
       (when (cpp/! (cpp/WindowShouldClose))
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FREE)
         (when (cpp/IsKeyPressed cpp/KEY_Z)
-          (cpp/jank_cam_retarget (cpp/& camera)))
+          (cpp/= (.-target camera)
+                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0)))
+          nil)
 
         (cpp/BeginDrawing)
         (cpp/ClearBackground cpp/RAYWHITE)

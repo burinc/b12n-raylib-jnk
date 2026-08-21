@@ -19,22 +19,10 @@
     example creates no lights - the header doubles as the shared
     uniform toolbox."
   (:require [clojure.string :as string])
+  (:require [raylib-examples.models :as md])
   (:require [raylib-examples.rlights :as rl]
             [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h" "math.h"))
-
-;; Material map setup + absolute Y-rotation transform set.
-(cpp/raw "static void jank_model_setup_map(Model* m, int map, Texture2D tex) {
-  m->materials[0].maps[map].texture = tex;
-  GenTextureMipmaps(&m->materials[0].maps[map].texture);
-  SetTextureFilter(m->materials[0].maps[map].texture, TEXTURE_FILTER_TRILINEAR);
-}
-static void jank_model_set_shader(Model* m, Shader s) {
-  m->materials[0].shader = s;
-}
-static void jank_model_set_rotate_y(Model* m, double angle) {
-  m->transform = MatrixRotateY((float)angle);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -71,11 +59,22 @@ static void jank_model_set_rotate_y(Model* m, double angle) {
                                 (int (cpp/GetShaderLocation shader "normalMap")))
     (sh/set-shader-loc! sh-box cpp/SHADER_LOC_VECTOR_VIEW view-loc)
 
-    (cpp/jank_model_set_shader (cpp/& plane) shader)
-    (cpp/jank_model_setup_map (cpp/& plane) (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
-                              (cpp/LoadTexture (str RES "tiles_diffuse.png")))
-    (cpp/jank_model_setup_map (cpp/& plane) (cpp/int cpp/MATERIAL_MAP_NORMAL)
-                              (cpp/LoadTexture (str RES "tiles_normal.png")))
+    (md/set-shader! (cpp/box (cpp/new cpp/Model plane)) 0
+                    (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model plane)) 0 (cpp/int cpp/MATERIAL_MAP_DIFFUSE)
+                         (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTexture (str RES "tiles_diffuse.png")))))
+    (cpp/GenTextureMipmaps (cpp/& (.-texture (cpp/aget (.-maps (cpp/aget (.-materials plane) (cpp/int 0)))
+                                        (cpp/int cpp/MATERIAL_MAP_DIFFUSE)))))
+    (cpp/SetTextureFilter (.-texture (cpp/aget (.-maps (cpp/aget (.-materials plane) (cpp/int 0)))
+                                        (cpp/int cpp/MATERIAL_MAP_DIFFUSE)))
+                          cpp/TEXTURE_FILTER_TRILINEAR)
+    (md/set-map-texture! (cpp/box (cpp/new cpp/Model plane)) 0 (cpp/int cpp/MATERIAL_MAP_NORMAL)
+                         (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTexture (str RES "tiles_normal.png")))))
+    (cpp/GenTextureMipmaps (cpp/& (.-texture (cpp/aget (.-maps (cpp/aget (.-materials plane) (cpp/int 0)))
+                                        (cpp/int cpp/MATERIAL_MAP_NORMAL)))))
+    (cpp/SetTextureFilter (.-texture (cpp/aget (.-maps (cpp/aget (.-materials plane) (cpp/int 0)))
+                                        (cpp/int cpp/MATERIAL_MAP_NORMAL)))
+                          cpp/TEXTURE_FILTER_TRILINEAR)
 
     (cpp/SetTargetFPS 60)
 
@@ -102,7 +101,8 @@ static void jank_model_set_rotate_y(Model* m, double angle) {
               use-nm? (if (cpp/IsKeyPressed cpp/KEY_N) (not use-nm?) use-nm?)]
 
           ;; spin the plane at a constant rate (absolute transform set)
-          (cpp/jank_model_set_rotate_y (cpp/& plane) (* (+ 0.0 (cpp/GetTime)) 0.5))
+          (cpp/= (.-transform plane)
+                 (cpp/MatrixRotateY (cpp/float (* (+ 0.0 (cpp/GetTime)) 0.5))))
 
           (sh/set-vec3! sh-box light-pos-loc lx 1.0 lz)
           (let [p (.-position camera)]
