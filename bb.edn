@@ -445,6 +445,11 @@
                          [site-result wiki-result deploy-result])
                (System/exit 1)))))))}
 
+  check
+  {:doc "Offline gates: reader syntax, four-touchpoint registration, EDN (no compile)"
+   :requires ([check :as c])
+   :task (c/run!)}
+
   nrepl
   {:doc "Start a jank nREPL for the examples project (writes .nrepl-port)"
    :task (h/nrepl!)}

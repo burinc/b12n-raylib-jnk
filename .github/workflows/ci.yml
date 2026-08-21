@@ -1,0 +1,66 @@
+name: CI
+
+# ---------------------------------------------------------------------------
+# Runs on pull requests and pushes to main, plus manual dispatch. Actions is
+# free for standard runners on public repositories, which this repo is.
+#
+# There is deliberately NO compile gate, and that is not an oversight. jank
+# publishes no current prebuilt binary — the only release asset is an
+# ubuntu-24.04 tarball from 2025-01-27, older than the lein-jank this project
+# requires — and jank's own CI builds the compiler from source, which means
+# building Clang. That is far beyond what a per-PR job should do.
+#
+# So this gate covers everything that goes wrong BEFORE the compiler is
+# reached, which in practice is most of what actually goes wrong: unbalanced
+# parens, and an example registered in some of its four required places but
+# not all of them. The whole run is under a second of real work.
+#
+# If jank ever ships a usable prebuilt binary, a `lein with-profile +<name>`
+# compile job belongs here too. Until then, the headless smoke run described
+# in CONTRIBUTING.md is the gate that proves an example, and it stays the
+# contributor's job.
+# ---------------------------------------------------------------------------
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per branch; a new push cancels the previous run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: offline gates
+    runs-on: ubuntu-latest
+
+    steps:
+      # No submodules. The raylib submodule is only needed for a native build,
+      # which this job deliberately does not do, and fetching it would add
+      # minutes to a job whose real work takes under a second.
+      - uses: actions/checkout@v4
+
+      - name: Install babashka
+        uses: DeLaGuardo/setup-clojure@13.6.1
+        with:
+          bb: 1.12.196
+
+      # Loads bb.edn and bb/helpers.clj. Catches the two ways this repo's own
+      # tooling has broken in practice: an EDN reader macro in a task body
+      # (bb.edn is EDN, so #"regex", @deref and #(...) are all errors), and a
+      # helper used above its definition.
+      - name: bb.edn and helpers load
+        run: bb tasks > /dev/null
+
+      # The gate that matters: reader syntax on every .jank source, all four
+      # registration touchpoints per example, no orphaned sources, and the EDN
+      # data files the tooling reads at runtime.
+      - name: Offline checks
+        run: bb check

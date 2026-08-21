@@ -436,7 +436,8 @@
                 [["install" "Install jank-raylib-sys into ~/.m2 (idempotent)"]
                  ["clean" "Remove */target build dirs"]])
   (info-section "Dev"
-                [["nrepl" "Start a jank nREPL (cpp/ interop works in it)"]])
+                [["check" "Offline gates: syntax, registration, EDN (fast, no compile)"]
+                 ["nrepl" "Start a jank nREPL (cpp/ interop works in it)"]])
   (info-section "Docs (maintainer)"
                 [["record" "Batch-record a demo GIF per example (needs screen-grab)"]
                  ["docs-sync" "Rebuild + republish the guide and site (bb docs-sync [--no-push])"]])
