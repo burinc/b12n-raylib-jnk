@@ -20,38 +20,6 @@
     working directory like the C (gitignored)."
   (:include "raylib.h"))
 
-;; The C example's SaveStorageValue, verbatim (example-defined C, not
-;; raylib API): grow-or-reuse the file buffer, poke value at position.
-(cpp/raw "static bool jank_save_slot(const char* f, int position, int value) {
-  bool success = false;
-  int dataSize = 0;
-  unsigned int newDataSize = 0;
-  unsigned char* fileData = LoadFileData(f, &dataSize);
-  unsigned char* newFileData = NULL;
-  if (fileData != NULL) {
-    if (dataSize <= (int)(position*sizeof(int))) {
-      newDataSize = (position + 1)*sizeof(int);
-      newFileData = (unsigned char*)RL_REALLOC(fileData, newDataSize);
-      if (newFileData != NULL) { ((int*)newFileData)[position] = value; }
-      else { newFileData = fileData; newDataSize = dataSize; }
-    } else {
-      newFileData = fileData;
-      newDataSize = dataSize;
-      ((int*)newFileData)[position] = value;
-    }
-    success = SaveFileData(f, newFileData, newDataSize);
-    RL_FREE(newFileData);
-  } else {
-    dataSize = (position + 1)*sizeof(int);
-    fileData = (unsigned char*)RL_MALLOC(dataSize);
-    ((int*)fileData)[position] = value;
-    success = SaveFileData(f, fileData, dataSize);
-    UnloadFileData(fileData);
-  }
-  return success;
-}
-static int jank_i32_at(unsigned char* data, int i) { return ((int*)data)[i]; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def STORAGE-FILE "storage.data")
@@ -59,10 +27,32 @@ static int jank_i32_at(unsigned char* data, int i) { return ((int*)data)[i]; }")
 (def POS-HISCORE 1)
 
 (defn- save-slot!
-  "The C's SaveStorageValue(position, value) via the shim; jank-bool result
-  (a jank fn can't return the shim's native bool, rule 2)."
+  "The C's SaveStorageValue(position, value), in jank.
+
+  Reads the file, widens it if the slot is past the end, writes the i32 and
+  saves. The int view of the byte buffer is cpp/unsafe-cast: the data is
+  unsigned char* and the slot is an int, which is a reinterpretation, not a
+  trait conversion, so cpp/cast will not do it."
   [pos value]
-  (if (cpp/jank_save_slot STORAGE-FILE (int pos) (int value)) true false))
+  (let [size (cpp/int 0)
+        data (cpp/LoadFileData STORAGE-FILE (cpp/& size))
+        have (int (+ 0.0 size))
+        need (* (inc pos) 4)
+        n (max have need)
+        buf (cpp/unsafe-cast (:* (:unsigned cpp/char)) (cpp/MemAlloc (cpp/cast cpp/uint n)))]
+    ;; copy what was there, zero-fill any gap
+    (loop [i 0]
+      (when (< i n)
+        (cpp/= (cpp/aget buf (cpp/int i))
+               (cpp/cast (:unsigned cpp/char) (if (< i have)
+                                     (int (+ 0.0 (cpp/aget data (cpp/int i))))
+                                     0)))
+        (recur (inc i))))
+    (cpp/= (cpp/aget (cpp/unsafe-cast (:* cpp/int) buf) (cpp/int pos)) (cpp/int (int value)))
+    (let [ok (cpp/SaveFileData STORAGE-FILE (cpp/unsafe-cast (:* cpp/void) buf) (cpp/int n))]
+      (cpp/UnloadFileData data)
+      (cpp/MemFree (cpp/unsafe-cast (:* cpp/void) buf))
+      (if ok true false))))
 
 (defn- load-slot
   "The C's LoadStorageValue: the i32 at byte position `pos`, or 0 when the
@@ -72,7 +62,7 @@ static int jank_i32_at(unsigned char* data, int i) { return ((int*)data)[i]; }")
         data (cpp/LoadFileData STORAGE-FILE (cpp/& size))
         n (int (+ 0.0 size))                  ; box the out-param
         v (if (>= n (* (inc pos) 4))
-            (int (cpp/jank_i32_at data pos))
+            (int (+ 0.0 (cpp/aget (cpp/unsafe-cast (:* cpp/int) data) (cpp/int pos))))
             0)]
     (cpp/UnloadFileData data)                 ; free(NULL) is a no-op
     v))
