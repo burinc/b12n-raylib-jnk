@@ -16,8 +16,6 @@
   (:include "raylib.h"))
 
 ;; jank can't assign struct fields; re-target through a pointer.
-(cpp/raw "static void jank_cam_retarget(Camera3D* c) { c->target = (Vector3){ 0.0f, 0.0f, 0.0f }; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 
@@ -38,7 +36,9 @@
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FREE)
 
         (when (cpp/IsKeyPressed cpp/KEY_Z)
-          (cpp/jank_cam_retarget (cpp/& camera)))
+          (cpp/= (.-target camera)
+                 (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0)))
+          nil)
 
         (cpp/BeginDrawing)
         (cpp/ClearBackground cpp/RAYWHITE)

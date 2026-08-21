@@ -15,22 +15,11 @@
   - ColorNormalize(GRAY) reduces to (/ 130.0 255.0) components sent
     with sh/set-vec4!; fog density threads through recur as a
     jank real, clamped in jank."
-  (:require [clojure.string :as string])
+  (:require [raylib-examples.models :as md]
+            [clojure.string :as string])
   (:require [raylib-examples.rlights :as rl]
             [raylib-examples.shaders :as sh])
   (:include "raylib.h" "raymath.h"))
-
-;; Model helpers: material field writes + the torus spin.
-(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}
-static void jank_model_set_shader(Model* m, Shader s) {
-  m->materials[0].shader = s;
-}
-static void jank_model_spin(Model* m, double rx, double rz) {
-  m->transform = MatrixMultiply(m->transform, MatrixRotateX((float)rx));
-  m->transform = MatrixMultiply(m->transform, MatrixRotateZ((float)rz));
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -66,9 +55,9 @@ static void jank_model_spin(Model* m, double rx, double rz) {
         fog-color-loc (int (cpp/GetShaderLocation shader "fogColor"))
         fog-density-loc (int (cpp/GetShaderLocation shader "fogDensity"))]
 
-    (cpp/jank_model_set_texture (cpp/& model-a) texture)
-    (cpp/jank_model_set_texture (cpp/& model-b) texture)
-    (cpp/jank_model_set_texture (cpp/& model-c) texture)
+    (md/set-texture! (cpp/box (cpp/new cpp/Model model-a)) (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model model-b)) (cpp/box (cpp/new cpp/Texture2D texture)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model model-c)) (cpp/box (cpp/new cpp/Texture2D texture)))
 
     (sh/set-shader-loc! sh-box cpp/SHADER_LOC_MATRIX_MODEL
                                 (int (cpp/GetShaderLocation shader "matModel")))
@@ -79,9 +68,9 @@ static void jank_model_spin(Model* m, double rx, double rz) {
     (let [g (/ 130.0 255.0)]
       (sh/set-vec4! sh-box fog-color-loc g g g 1.0))
 
-    (cpp/jank_model_set_shader (cpp/& model-a) shader)
-    (cpp/jank_model_set_shader (cpp/& model-b) shader)
-    (cpp/jank_model_set_shader (cpp/& model-c) shader)
+    (md/set-shader! (cpp/box (cpp/new cpp/Model model-a)) 0 (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-shader! (cpp/box (cpp/new cpp/Model model-b)) 0 (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-shader! (cpp/box (cpp/new cpp/Model model-c)) 0 (cpp/box (cpp/new cpp/Shader shader)))
 
     ;; one white point light
     (rl/create-light! {:type rl/LIGHT-POINT
@@ -103,7 +92,10 @@ static void jank_model_spin(Model* m, double rx, double rz) {
               fog-density (if (> fog-density 1.0) 1.0 (if (< fog-density 0.0) 0.0 fog-density))]
 
           (sh/set-float! sh-box fog-density-loc fog-density)
-          (cpp/jank_model_spin (cpp/& model-a) -0.025 0.012)
+          (cpp/= (.-transform model-a)
+                 (cpp/MatrixMultiply (.-transform model-a) (cpp/MatrixRotateX (cpp/float -0.025))))
+          (cpp/= (.-transform model-a)
+                 (cpp/MatrixMultiply (.-transform model-a) (cpp/MatrixRotateZ (cpp/float 0.012))))
           (let [p (.-position camera)]
             (rl/push-view-pos! sh-box view-loc (.-x p) (.-y p) (.-z p)))
 

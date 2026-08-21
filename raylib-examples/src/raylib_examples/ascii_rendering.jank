@@ -17,16 +17,6 @@
     no native value crosses the loop."
   (:include "raylib.h"))
 
-;; VEC2 + FLOAT uniform setters (build the arrays in C from scalars).
-(cpp/raw "static void jank_set_vec2(Shader s, int loc, double a, double b) {
-  float v[2] = { (float)a, (float)b };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
-}
-static void jank_set_float(Shader s, int loc, double a) {
-  float v = (float)a;
-  SetShaderValue(s, loc, &v, SHADER_UNIFORM_FLOAT);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
@@ -41,7 +31,7 @@ static void jank_set_float(Shader s, int loc, double a) {
         resolution-loc (int (cpp/GetShaderLocation shader "resolution"))
         fontsize-loc (int (cpp/GetShaderLocation shader "fontSize"))
         target (cpp/LoadRenderTexture WIDTH HEIGHT)]
-    (cpp/jank_set_vec2 shader resolution-loc (+ 0.0 WIDTH) (+ 0.0 HEIGHT))
+    (cpp/SetShaderValue shader (int resolution-loc) (cpp/new cpp/Vector2 (cpp/float (+ 0.0 WIDTH)) (cpp/float (+ 0.0 HEIGHT))) cpp/SHADER_UNIFORM_VEC2)
     (cpp/SetTargetFPS 60)
 
     ;; Thread [bounce-x bounce-speed font-size]; the raysan sprite bounces
@@ -53,7 +43,7 @@ static void jank_set_float(Shader s, int loc, double a) {
               font-size (cond (and (cpp/IsKeyPressed cpp/KEY_LEFT) (> font-size 9.0)) (- font-size 1.0)
                               (and (cpp/IsKeyPressed cpp/KEY_RIGHT) (< font-size 15.0)) (+ font-size 1.0)
                               :else font-size)]
-          (cpp/jank_set_float shader fontsize-loc font-size)
+          (cpp/SetShaderValue shader (int fontsize-loc) (cpp/new cpp/float (cpp/float font-size)) cpp/SHADER_UNIFORM_FLOAT)
 
           ;; Draw the 2D scene into the render texture.
           (cpp/BeginTextureMode target)

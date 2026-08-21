@@ -20,10 +20,6 @@
 
 ;; jank's cpp/cast won't reinterpret void*->unsigned char*; do the pointer
 ;; math in raw C++ (freely allowed there) and hand back a const void*.
-(cpp/raw "static const void* jank_gif_frame_ptr(void* data, int offset) {
-  return (const void*)(((unsigned char*)data) + offset);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/textures/resources/")
@@ -53,7 +49,10 @@
               offset (* iw ih 4 cur)]
           ;; stream the current frame's slice of image.data to the texture
           (when tick?
-            (cpp/UpdateTexture tex (cpp/jank_gif_frame_ptr (.-data img) offset)))
+            (cpp/UpdateTexture tex
+                              (cpp/unsafe-cast (:* (:const cpp/void))
+                                               (cpp/+ (cpp/unsafe-cast (:* (:unsigned cpp/char)) (.-data img))
+                                                      (cpp/int offset)))))
 
           (let [delay (if (cpp/IsKeyPressed cpp/KEY_RIGHT) (+ delay 1) delay)
                 delay (if (cpp/IsKeyPressed cpp/KEY_LEFT) (- delay 1) delay)

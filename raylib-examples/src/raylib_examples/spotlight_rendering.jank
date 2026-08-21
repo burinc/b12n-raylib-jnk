@@ -25,16 +25,6 @@
     in gl_FragCoord space, which is bottom-up."
   (:include "raylib.h" "math.h"))
 
-;; Per-type scalar uniform setters (the preferred shim - see the guide).
-(cpp/raw "static void jank_set_float(Shader s, int loc, double v) {
-  float f = (float)v;
-  SetShaderValue(s, loc, &f, SHADER_UNIFORM_FLOAT);
-}
-static void jank_set_vec2(Shader s, int loc, double a, double b) {
-  float v[2] = { (float)a, (float)b };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def MAX-SPOTS 3)
@@ -110,13 +100,13 @@ static void jank_set_vec2(Shader s, int loc, double a, double b) {
                                        :radius-loc (int (cpp/GetShaderLocation shader (str "spots[" i "].radius")))})))
                    acc))]
 
-    (cpp/jank_set_float shader w-loc (+ 0.0 WIDTH))
+    (cpp/SetShaderValue shader (int w-loc) (cpp/new cpp/float (cpp/float (+ 0.0 WIDTH))) cpp/SHADER_UNIFORM_FLOAT)
     (loop [i 0]
       (when (< i MAX-SPOTS)
         (let [s (nth spots0 i)]
-          (cpp/jank_set_vec2 shader (:pos-loc s) (:x s) (:y s))
-          (cpp/jank_set_float shader (:inner-loc s) (:inner s))
-          (cpp/jank_set_float shader (:radius-loc s) (:radius s)))
+          (cpp/SetShaderValue shader (int (:pos-loc s)) (cpp/new cpp/Vector2 (cpp/float (:x s)) (cpp/float (:y s))) cpp/SHADER_UNIFORM_VEC2)
+          (cpp/SetShaderValue shader (int (:inner-loc s)) (cpp/new cpp/float (cpp/float (:inner s))) cpp/SHADER_UNIFORM_FLOAT)
+          (cpp/SetShaderValue shader (int (:radius-loc s)) (cpp/new cpp/float (cpp/float (:radius s))) cpp/SHADER_UNIFORM_FLOAT))
         (recur (inc i))))
 
     (cpp/SetTargetFPS 60)
@@ -151,7 +141,7 @@ static void jank_set_vec2(Shader s, int loc, double a, double b) {
           (loop [i 0]
             (when (< i MAX-SPOTS)
               (let [s (nth spots i)]
-                (cpp/jank_set_vec2 shader (:pos-loc s) (:x s) (:y s)))
+                (cpp/SetShaderValue shader (int (:pos-loc s)) (cpp/new cpp/Vector2 (cpp/float (:x s)) (cpp/float (:y s))) cpp/SHADER_UNIFORM_VEC2))
               (recur (inc i))))
 
           (cpp/BeginDrawing)

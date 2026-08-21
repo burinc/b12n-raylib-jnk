@@ -13,16 +13,8 @@
     (texture-tiling's (cpp/& model) shim pair) are all it takes.
   - SetConfigFlags(FLAG_MSAA_4X_HINT) before InitWindow works as a
     plain call with the C constant."
+  (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
-
-;; Material field writes (no jank spelling for struct-array member
-;; assignment on the Model) - the texture-tiling shim pair.
-(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}
-static void jank_model_set_shader(Model* m, Shader s) {
-  m->materials[0].shader = s;
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -43,8 +35,10 @@ static void jank_model_set_shader(Model* m, Shader s) {
         shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/grayscale.fs"))]
 
     ;; the shader rides the material: every DrawModel picks it up
-    (cpp/jank_model_set_shader (cpp/& model) shader)
-    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (md/set-shader! (cpp/box (cpp/new cpp/Model model)) 0
+                    (cpp/box (cpp/new cpp/Shader shader)))
+    (md/set-texture! (cpp/box (cpp/new cpp/Model model))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
 
     (cpp/DisableCursor)
     (cpp/SetTargetFPS 60)

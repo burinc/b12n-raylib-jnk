@@ -24,14 +24,6 @@
     the scene is DrawCube primitives + a grid (the custom-uniform move)."
   (:include "raylib.h"))
 
-;; Apply one postprocess shader to the whole render texture (y-flipped).
-(cpp/raw "static void jank_draw_postpro(Shader s, Texture2D t) {
-  BeginShaderMode(s);
-    DrawTextureRec(t, (Rectangle){ 0, 0, (float)t.width, (float)-t.height },
-                   (Vector2){ 0, 0 }, WHITE);
-  EndShaderMode();
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
@@ -95,18 +87,27 @@
           ;; Draw the render texture to screen through the selected shader.
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)
-          (cond (= fx 0) (cpp/jank_draw_postpro grayscale tex)
-                (= fx 1) (cpp/jank_draw_postpro posterization tex)
-                (= fx 2) (cpp/jank_draw_postpro dream-vision tex)
-                (= fx 3) (cpp/jank_draw_postpro pixelizer tex)
-                (= fx 4) (cpp/jank_draw_postpro cross-hatching tex)
-                (= fx 5) (cpp/jank_draw_postpro cross-stitching tex)
-                (= fx 6) (cpp/jank_draw_postpro predator tex)
-                (= fx 7) (cpp/jank_draw_postpro scanlines tex)
-                (= fx 8) (cpp/jank_draw_postpro fisheye tex)
-                (= fx 9) (cpp/jank_draw_postpro sobel tex)
-                (= fx 10) (cpp/jank_draw_postpro bloom tex)
-                :else (cpp/jank_draw_postpro blur tex))
+          ;; one shader selected by nested ifs (a cond's implicit trailing
+          ;; nil would clash with the native Shader type), then one draw
+          (cpp/BeginShaderMode (if (= fx 0) grayscale
+                              (if (= fx 1) posterization
+                              (if (= fx 2) dream-vision
+                              (if (= fx 3) pixelizer
+                              (if (= fx 4) cross-hatching
+                              (if (= fx 5) cross-stitching
+                              (if (= fx 6) predator
+                              (if (= fx 7) scanlines
+                              (if (= fx 8) fisheye
+                              (if (= fx 9) sobel
+                              (if (= fx 10) bloom
+                              blur))))))))))))
+          (cpp/DrawTextureRec tex
+                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float (+ 0.0 (.-width tex)))
+                                             (cpp/float (- 0.0 (+ 0.0 (.-height tex)))))
+                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                              cpp/WHITE)
+          (cpp/EndShaderMode)
 
           (cpp/DrawRectangle 0 9 580 30 (cpp/Fade cpp/LIGHTGRAY (cpp/float 0.7)))
           (cpp/DrawText "(c) Church 3D model by Alberto Cano" 10 (- HEIGHT 20) 10 cpp/GRAY)

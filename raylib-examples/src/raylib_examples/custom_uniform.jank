@@ -21,12 +21,6 @@
     DrawCube' precedent). The postprocess pipeline is unchanged."
   (:include "raylib.h"))
 
-;; VEC2 uniform setter: build the 2-float array in C from scalar args.
-(cpp/raw "static void jank_set_vec2(Shader s, int loc, double a, double b) {
-  float v[2] = { (float)a, (float)b };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
@@ -51,9 +45,10 @@
         (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_ORBITAL)
 
         ;; Swirl center follows the mouse (y measured from the bottom).
-        (cpp/jank_set_vec2 shader center-loc
-                           (+ 0.0 (cpp/GetMouseX))
-                           (+ 0.0 (- HEIGHT (cpp/GetMouseY))))
+        (cpp/SetShaderValue shader (int center-loc)
+                            (cpp/new cpp/Vector2 (cpp/float (+ 0.0 (cpp/GetMouseX)))
+                                                 (cpp/float (+ 0.0 (- HEIGHT (cpp/GetMouseY)))))
+                            cpp/SHADER_UNIFORM_VEC2)
 
         ;; Render the 3D scene into the target texture.
         (cpp/BeginTextureMode target)

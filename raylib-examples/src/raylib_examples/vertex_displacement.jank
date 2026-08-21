@@ -16,12 +16,9 @@
     the usual (cpp/& model) shim; the time FLOAT uniform rides the
     rlights setter toolbox (location hoisted out of the loop,
     unlike the C's per-frame lookup)."
-  (:require [raylib-examples.shaders :as sh])
+  (:require [raylib-examples.models :as md]
+            [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h"))
-
-(cpp/raw "static void jank_model_set_shader(Model* m, Shader s) {
-  m->materials[0].shader = s;
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -53,7 +50,8 @@
     (cpp/rlEnableTexture (.-id perlin-map))
     (cpp/rlSetUniformSampler perlin-loc 1)
 
-    (cpp/jank_model_set_shader (cpp/& plane-model) shader)
+    (md/set-shader! (cpp/box (cpp/new cpp/Model plane-model)) 0
+                    (cpp/box (cpp/new cpp/Shader shader)))
 
     (cpp/SetTargetFPS 60)
 

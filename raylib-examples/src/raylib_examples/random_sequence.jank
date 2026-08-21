@@ -22,8 +22,6 @@
 
 ;; jank can't subscript a raw int* returned from C; do the C subscript in
 ;; raw C++ and return a boxed int.
-(cpp/raw "static int jank_seq_at(int* seq, int i) { return seq[i]; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def BASELINE (* 0.75 HEIGHT))   ; bars grow up from here; text lives below
@@ -45,7 +43,7 @@
         seq (cpp/LoadRandomSequence rect-count 0 (dec rect-count))
         rects (loop [i 0 acc []]
                 (if (< i rect-count)
-                  (let [sv (cpp/jank_seq_at seq i)
+                  (let [sv (cpp/aget seq (cpp/int i))
                         h (* (/ (+ 0.0 sv) (dec rect-count)) BASELINE)]
                     (recur (inc i)
                            (conj acc {:rgba (rand-rgba)
@@ -66,7 +64,7 @@
         seq (cpp/LoadRandomSequence n 0 (dec n))
         out (loop [i 0 v rects]
               (if (< i n)
-                (let [j (cpp/jank_seq_at seq i)
+                (let [j (cpp/aget seq (cpp/int i))
                       r1 (nth v i)
                       r2 (nth v j)
                       v (assoc v i (assoc r1 :rgba (:rgba r2) :y (:y r2) :h (:h r2)))

@@ -17,18 +17,8 @@
     off (.-position camera) into jank reals before UpdateCamera.
   - Native bools stay out of and-chains: the CheckCollisionCircleRec
     test nests in its own when (rule 1)."
+  (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
-
-;; Wall lookup at init, collision-reset camera write, material texture write.
-(cpp/raw "static int jank_map_wall(Image img, int x, int y) {
-  return (GetImageColor(img, x, y).r == 255) ? 1 : 0;
-}
-static void jank_cam_set_pos(Camera3D* c, double x, double y, double z) {
-  c->position = (Vector3){ (float)x, (float)y, (float)z };
-}
-static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -59,12 +49,15 @@ static void jank_model_set_texture(Model* m, Texture2D tex) {
         walls (loop [i 0 acc []]
                 (if (< i (* mw mh))
                   (recur (inc i)
-                         (conj acc (int (cpp/jank_map_wall im-map
-                                                           (int (mod i mw))
-                                                           (int (quot i mw))))))
+                         (conj acc (if (= (int (.-r (cpp/GetImageColor im-map
+                                                                             (cpp/int (int (mod i mw)))
+                                                                             (cpp/int (int (quot i mw))))))
+                                          255)
+                                   1 0)))
                   acc))]
 
-    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (md/set-texture! (cpp/box (cpp/new cpp/Model model))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
     (cpp/UnloadImage im-map)
 
     (cpp/DisableCursor)
@@ -103,7 +96,9 @@ static void jank_model_set_texture(Model* m, Texture2D tex) {
                                (cpp/Rectangle (cpp/float (+ MAP-X -0.5 x))
                                               (cpp/float (+ MAP-Z -0.5 y))
                                               (cpp/float 1.0) (cpp/float 1.0)))
-                          (cpp/jank_cam_set_pos (cpp/& camera) old-x old-y old-z)))
+                          (cpp/= (.-position camera)
+                                 (cpp/Vector3 (cpp/float old-x) (cpp/float old-y) (cpp/float old-z)))
+                          nil))
                       (recur (inc x)))))
                 (recur (inc y))))
 

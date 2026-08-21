@@ -11,14 +11,8 @@
     level decay branches as conds; the transform is simple-mask's
     MatrixRotateXYZ absolute-set shim fed DEG2RAD-scaled angles.
   - OBJ model + material texture write are proven ground."
+  (:require [raylib-examples.models :as md])
   (:include "raylib.h" "raymath.h"))
-
-(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}
-static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz) {
-  m->transform = MatrixRotateXYZ((Vector3){ (float)rx, (float)ry, (float)rz });
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -38,7 +32,8 @@ static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz)
         texture (cpp/LoadTexture (str RES "models/obj/plane_diffuse.png"))]
 
     (cpp/SetTextureWrap texture cpp/TEXTURE_WRAP_REPEAT)
-    (cpp/jank_model_set_texture (cpp/& model) texture)
+    (md/set-texture! (cpp/box (cpp/new cpp/Model model))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
 
     (cpp/SetTargetFPS 60)
 
@@ -63,8 +58,10 @@ static void jank_model_set_rotate_xyz(Model* m, double rx, double ry, double rz)
                          (< roll 0.0) (+ roll 0.5)
                          :else roll)]
 
-          (cpp/jank_model_set_rotate_xyz (cpp/& model)
-                                         (* DEG2RAD pitch) (* DEG2RAD yaw) (* DEG2RAD roll))
+          (cpp/= (.-transform model)
+                 (cpp/MatrixRotateXYZ (cpp/Vector3 (cpp/float (* DEG2RAD pitch))
+                                                   (cpp/float (* DEG2RAD yaw))
+                                                   (cpp/float (* DEG2RAD roll)))))
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)

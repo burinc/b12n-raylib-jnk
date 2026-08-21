@@ -18,8 +18,6 @@
 
 ;; Subscript the FilePathList's char** paths in raw C++ (jank can't index a
 ;; raw char**); hand back the element pointer for `str` to copy.
-(cpp/raw "static const char* jank_dropped_at(char** paths, int i) { return paths[i]; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 
@@ -37,7 +35,7 @@
                           pp (loop [i 0 acc paths]
                                (if (< i n)
                                  (recur (inc i)
-                                        (conj acc (str (cpp/jank_dropped_at (.-paths dropped) i))))
+                                        (conj acc (str (cpp/aget (.-paths dropped) (cpp/int i)))))
                                  acc))]
                       (cpp/UnloadDroppedFiles dropped)
                       pp)
