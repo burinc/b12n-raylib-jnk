@@ -50,8 +50,35 @@
     (p/shell "git" "submodule" "update" "--init" "--recursive")))
 
 ;; ---------------------------------------------------------------------------
-;; Library installation (idempotent — skips when the jar is already in ~/.m2)
+;; Library installation (idempotent - skips when the jar is already in ~/.m2)
 ;; ---------------------------------------------------------------------------
+
+(defn- jank-sources
+  "Every .jank source, as explicit paths.
+
+  clj-kondo does NOT discover .jank files: `clj-kondo --lint <dir>` scans for
+  .clj/.cljs/.cljc, finds nothing, and exits 0 in a few milliseconds. That
+  silent pass looks exactly like success, so the file list is always explicit."
+  []
+  (sort (map str (fs/glob "raylib-examples/src" "**/*.jank"))))
+
+(defn lint!
+  "clj-kondo over every .jank source.
+
+  `strict?` makes any finding a non-zero exit; otherwise this reports and
+  exits 0. See .clj-kondo/config.edn for why three linters are muted."
+  [strict?]
+  (if-not (fs/which "clj-kondo")
+    (do (info "clj-kondo not on PATH - skipping lint.")
+        (info "Install: brew install borkdude/brew/clj-kondo")
+        (when strict? (System/exit 1)))
+    (let [files (jank-sources)
+          _ (info (str "Linting " (count files) " .jank sources"))
+          {:keys [exit]} (apply p/shell {:continue true} "clj-kondo" "--lint" files)]
+      (if (zero? exit)
+        (ok "clj-kondo: no findings.")
+        (do (err "clj-kondo reported findings (see above).")
+            (when strict? (System/exit exit)))))))
 
 (defn nrepl!
   "Start a jank nREPL server for the examples project.
@@ -324,10 +351,10 @@
     (info "Press Q or close a window to skip to the next one early.")
     (info "Each example needs ~11s to launch (JVM + jank start) before its")
     (info "window opens, so keep secs above ~13; the first cold run of each")
-    (info "also compiles — use a bigger value then, e.g.  bb run-all 40")
+    (info "also compiles - use a bigger value then, e.g.  bb run-all 40")
     (doseq [{:keys [profile desc]} examples]
       (println)
-      (println (c :magenta (str "  ▶ " profile)) "—" desc)
+      (println (c :magenta (str "  ▶ " profile)) "-" desc)
       (run-example-timed! profile secs))
     (println)
     (ok (str "Cycled through " (count examples) " examples."))))
@@ -342,7 +369,7 @@
   (ok "Removed all */target build dirs."))
 
 (defn print-examples []
-  (header "🎮 b12n-raylib-jnk — raylib examples (jank)")
+  (header "🎮 b12n-raylib-jnk - raylib examples (jank)")
   (doseq [{:keys [profile desc controls]} examples]
     (println (str "  " (c :cyan (format "bb %-16s" profile)) " " desc))
     (when controls (println (str "  " (apply str (repeat 20 " ")) (c :magenta controls)))))
@@ -353,21 +380,21 @@
   (println))
 
 ;; ---------------------------------------------------------------------------
-;; bb info — a grouped cheat-sheet (easier to scan than the flat `bb tasks`)
+;; bb info - a grouped cheat-sheet (easier to scan than the flat `bb tasks`)
 ;; ---------------------------------------------------------------------------
 
 ;; Display order + section titles for the example categories.
 (def ^:private cat-order
-  [[:core     "core — window, input, cameras, files"]
-   [:shapes   "shapes — 2D drawing, easing, rlgl"]
-   [:text     "text — fonts, unicode, layout"]
-   [:textures "textures — images, sprites, render textures"]
-   [:models   "models — meshes, 3D, OBJ/GLB"]
-   [:shaders  "shaders — GLSL, uniforms, postprocess, lighting"]
-   [:audio    "audio — sounds, music streams"]
+  [[:core     "core: window, input, cameras, files"]
+   [:shapes   "shapes: 2D drawing, easing, rlgl"]
+   [:text     "text: fonts, unicode, layout"]
+   [:textures "textures: images, sprites, render textures"]
+   [:models   "models: meshes, 3D, OBJ/GLB"]
+   [:shaders  "shaders: GLSL, uniforms, postprocess, lighting"]
+   [:audio    "audio: sounds, music streams"]
    ;; Not a raylib category: original examples demonstrating jank/C++ interop
    ;; itself. Kept separate so the raylib port counts stay comparable upstream.
-   [:interop  "interop — jank/C++ mechanics, not raylib ports"]])
+   [:interop  "interop: jank/C++ mechanics, not raylib ports"]])
 
 (defn- truncate [s n]
   (if (> (count s) n) (str (subs s 0 (- n 1)) "…") s))
@@ -391,6 +418,7 @@
                 [["clean" "Remove */target build dirs"]])
   (info-section "Dev"
                 [["check" "Offline gates: syntax, registration, EDN (fast, no compile)"]
+                 ["lint" "clj-kondo over every .jank source"]
                  ["nrepl" "Start a jank nREPL (cpp/ interop works in it)"]])
   (info-section "Docs (maintainer)"
                 [["record" "Batch-record a demo GIF per example (needs screen-grab)"]

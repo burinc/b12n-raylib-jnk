@@ -19,7 +19,6 @@
     MatrixLookAt splat + random spin + mesh build + material bind.
   - The C's custom GuiButton pair becomes H (hide model) and C
     (clear decals) keys."
-  (:require [clojure.string :as string])
   (:include "raylib.h" "raymath.h" "string.h"))
 
 ;; ---- The C's decal machinery, verbatim (MeshBuilder + clipping) ----

@@ -1,0 +1,44 @@
+;; clj-kondo config for a jank codebase.
+;;
+;; clj-kondo has no jank support, but it parses .jank files as Clojure and
+;; that is enough to be useful. Three linters have to be told about jank,
+;; otherwise they fire once per file and bury everything real: without this
+;; config the suite reports 644 warnings, of which 2 are genuine.
+;;
+;; NOTE: clj-kondo does not DISCOVER .jank files. `clj-kondo --lint <dir>`
+;; scans for .clj/.cljs/.cljc and silently reports zero findings very fast.
+;; `bb lint` passes filenames explicitly for that reason.
+{:linters
+ {;; jank reaches C++ through the cpp/ pseudo-namespace. There is no require
+  ;; for it and clj-kondo cannot know it exists.
+  :unresolved-namespace {:exclude [cpp]}
+
+  ;; (:include "raylib.h") is jank's ns option for pulling in C++ headers.
+  ;; clj-kondo only knows Clojure's ns options.
+  :unknown-ns-option {:level :off}
+
+  ;; Every example's -main takes [& args] whether or not it reads them, so
+  ;; this fires 213 times.
+  ;;
+  ;; TRADEOFF: this is off entirely, not excluded by name - clj-kondo has no
+  ;; name-based exclusion for unused-binding. It means genuinely unused
+  ;; bindings elsewhere go unreported too. The alternative is renaming args
+  ;; to _args in every example, which is a lot of churn for one linter.
+  ;; Revisit if unused bindings ever become a real problem here.
+  :unused-binding {:level :off}
+
+  ;; Both of the following are jank FALSE POSITIVES, and acting on either
+  ;; would change behaviour. clj-kondo reasons about Clojure semantics; jank's
+  ;; differ at exactly these two points.
+
+  ;; (int x) where clj-kondo has inferred x is already an int. In jank the
+  ;; coercion is often load-bearing: a jank integer handed to a C int
+  ;; parameter needs it, and mod/quot return reals. Removing these breaks
+  ;; calls into raylib.
+  :redundant-primitive-coercion {:level :off}
+
+  ;; (+ blend (+ 0.0 (cpp/GetFrameTime))) reads as a redundant nested call in
+  ;; Clojure. In jank (+ 0.0 x) is a deliberate BOXING idiom - see
+  ;; docs/guide/type-checking-and-coercion.md - and flattening it changes
+  ;; whether the expression stays an unboxed f64.
+  :redundant-nested-call {:level :off}}}
