@@ -19,30 +19,6 @@
   (:include "raylib.h" "math.h"))
 
 ;; The oscillator + stream refill (UpdateAudioStream needs the float*).
-(cpp/raw "#define JANK_BUFFER_SIZE 4096
-#define JANK_SAMPLE_RATE 44100
-static float jank_buffer[JANK_BUFFER_SIZE];
-static int jank_sine_index = 0;
-static int jank_sine_frequency = 440;
-static double jank_sine_start_time = 0.0;
-
-/* refill the stream; the frequency only switches at zero crossings */
-static int jank_fill_stream(AudioStream stream, int newFrequency) {
-  for (int i = 0; i < JANK_BUFFER_SIZE; i++) {
-    int wavelength = JANK_SAMPLE_RATE/jank_sine_frequency;
-    jank_buffer[i] = sin(2*PI*jank_sine_index/wavelength);
-    jank_sine_index++;
-    if (jank_sine_index >= wavelength) {
-      jank_sine_frequency = newFrequency;
-      jank_sine_index = 0;
-      jank_sine_start_time = GetTime();
-    }
-  }
-  UpdateAudioStream(stream, jank_buffer, JANK_BUFFER_SIZE);
-  return jank_sine_frequency;
-}
-static double jank_get_sine_start(void) { return jank_sine_start_time; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def SAMPLE-RATE 44100)
@@ -54,6 +30,41 @@ static double jank_get_sine_start(void) { return jank_sine_start_time; }")
         dot (string/index-of s ".")]
     (if dot (subs s 0 (min (count s) (+ dot 3))) s)))
 
+(def ^:private BUFFER-SIZE 4096)
+(def ^:private TAU 6.283185307179586)
+
+(defn- fill-stream!
+  "Refill the stream with a sine, switching to new-freq only at a zero
+  crossing, and return the frequency actually playing.
+
+  Sine state (sample index, live frequency, the GetTime of the last
+  crossing) lives in a jank atom, written once per refill rather than
+  once per sample. The sample buffer stays native because
+  UpdateAudioStream takes a pointer, and the stream arrives boxed: an
+  AudioStream has no conversion trait, so a bare one would reach here as
+  an object_ref.
+
+  Roughly 11 refills a second at 44.1 kHz, so this is not a hot path."
+  [stream-box st buf-box new-freq]
+  (let [stream (cpp/* (cpp/unbox (:* cpp/AudioStream) stream-box))
+        p (cpp/unbox (:* cpp/float) buf-box)
+        {:keys [idx freq start]} @st
+        [idx freq start]
+        (loop [i 0 idx idx freq freq start start]
+          (if (< i BUFFER-SIZE)
+            (let [wavelength (quot SAMPLE-RATE freq)]
+              (cpp/= (cpp/aget p (cpp/int i))
+                     (cpp/float (cpp/sin (/ (* TAU idx) wavelength))))
+              (let [n (inc idx)]
+                (if (>= n wavelength)
+                  (recur (inc i) 0 new-freq (+ 0.0 (cpp/GetTime)))
+                  (recur (inc i) n freq start))))
+            [idx freq start]))]
+    (reset! st {:idx idx :freq freq :start start})
+    (cpp/UpdateAudioStream stream (cpp/unsafe-cast (:* (:const cpp/void)) p)
+                           (cpp/int BUFFER-SIZE))
+    freq))
+
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - raw stream (jank)")
@@ -62,7 +73,10 @@ static double jank_get_sine_start(void) { return jank_sine_start_time; }")
   (cpp/SetAudioStreamBufferSizeDefault 4096)
 
   ;; 44.1kHz, 32-bit float samples, mono
-  (let [stream (cpp/LoadAudioStream SAMPLE-RATE 32 1)]
+  (let [stream (cpp/LoadAudioStream SAMPLE-RATE 32 1)
+        st (atom {:idx 0 :freq 440 :start 0.0})
+        buf-box (cpp/box (cpp/unsafe-cast (:* cpp/float)
+                                          (cpp/MemAlloc (cpp/cast cpp/uint (* BUFFER-SIZE 4)))))]
     (cpp/SetAudioStreamPan stream (cpp/float 0.0))
     (cpp/PlayAudioStream stream)
 
@@ -82,7 +96,8 @@ static double jank_get_sine_start(void) { return jank_sine_start_time; }")
               _ (when (not= pan' pan)
                   (cpp/SetAudioStreamPan stream (cpp/float pan')))
               freq (if (cpp/IsAudioStreamProcessed stream)
-                     (int (cpp/jank_fill_stream stream (int new-freq)))
+                     (int (fill-stream! (cpp/box (cpp/new cpp/AudioStream stream))
+                                        st buf-box (int new-freq)))
                      freq)]
 
           (cpp/BeginDrawing)
@@ -94,7 +109,7 @@ static double jank_get_sine_start(void) { return jank_sine_start_time; }")
           (cpp/DrawText "Left/right to pan" 10 30 20 cpp/DARKGRAY)
 
           ;; plot the same sine as the one streaming to the speakers
-          (let [window-start (* (- (+ 0.0 (cpp/GetTime)) (+ 0.0 (cpp/jank_get_sine_start)))
+          (let [window-start (* (- (+ 0.0 (cpp/GetTime)) (:start @st))
                                 SAMPLE-RATE)
                 window-size (* 0.1 SAMPLE-RATE)
                 wavelength (int (quot SAMPLE-RATE freq))]

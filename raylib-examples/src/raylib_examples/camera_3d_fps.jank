@@ -10,258 +10,309 @@
   Based on raylib/examples/core/core_3d_camera_fps.c (3/4 complexity).
 
   jank-native notes:
-  - The whole controller is native math: a `Body` struct plus a fistful
-    of Vector2/Vector3 globals threaded through UpdateBody and
-    UpdateCameraFPS via pointers, every step a raymath call
-    (Vector3RotateByAxisAngle / Vector3Lerp / Clamp / Lerp / ...) whose
-    Vector3 result a jank fn may neither return nor carry through
-    loop/recur. So the body physics, the FPS camera update, the level
-    draw and the velocity-readout HUD live verbatim in one cpp/raw shim
-    over static state; jank owns the window lifecycle, the frame loop
-    and the frame boundaries, calling update / draw-3d / draw-hud each
-    frame. The diagonal-input normalization (the C's NORMALIZE_INPUT,
-    which is #defined so its #if is active) is kept inline."
+  - The controller state is a plain jank map of numbers, not a native
+    struct. A Vector3 may not be returned from a jank fn, but its three
+    floats cross freely, so decomposing the body into :px/:py/:pz and
+    friends sidesteps the native-value-lifetime rule entirely rather
+    than working around it with boxes.
+  - The two raymath calls worth keeping are Vector3RotateByAxisAngle and
+    Vector3Angle. Both are wrapped to take and return [x y z] vectors of
+    numbers, constructing the native Vector3 inline and reading the
+    components straight back off the result. The rest (lerp, cross,
+    scale, dot, length) is a line of jank arithmetic each.
+  - Only the Camera3D is boxed: BeginMode3D needs the real struct, and
+    one allocation outside the frame loop beats rebuilding it per frame.
+  - The diagonal-input normalization (the C's NORMALIZE_INPUT, which is
+    #defined so its #if is active) is kept."
+  (:require [clojure.string :as string])
   (:include "raylib.h" "raymath.h"))
-
-;; The FPS body physics + camera + level, near-verbatim from the C.
-(cpp/raw "
-#define JANK_FPS_GRAVITY       32.0f
-#define JANK_FPS_MAX_SPEED     20.0f
-#define JANK_FPS_CROUCH_SPEED   5.0f
-#define JANK_FPS_JUMP_FORCE    12.0f
-#define JANK_FPS_MAX_ACCEL    150.0f
-#define JANK_FPS_FRICTION       0.86f
-#define JANK_FPS_AIR_DRAG       0.98f
-#define JANK_FPS_CONTROL       15.0f
-#define JANK_FPS_CROUCH_HEIGHT  0.0f
-#define JANK_FPS_STAND_HEIGHT   1.0f
-#define JANK_FPS_BOTTOM_HEIGHT  0.5f
-
-typedef struct {
-  Vector3 position;
-  Vector3 velocity;
-  Vector3 dir;
-  bool isGrounded;
-} JankFpsBody;
-
-static Vector2 jank_fps_sensitivity = { 0.001f, 0.001f };
-static JankFpsBody jank_fps_player = { 0 };
-static Vector2 jank_fps_lookRotation = { 0 };
-static float jank_fps_headTimer = 0.0f;
-static float jank_fps_walkLerp = 0.0f;
-static float jank_fps_headLerp = JANK_FPS_STAND_HEIGHT;
-static Vector2 jank_fps_lean = { 0 };
-static Camera jank_fps_camera = { 0 };
-
-/* Update body considering current world state. */
-static void jank_fps_update_body(JankFpsBody *body, float rot, char side, char forward, bool jumpPressed, bool crouchHold) {
-  Vector2 input = (Vector2){ (float)side, (float)-forward };
-
-  /* NORMALIZE_INPUT is #defined, so this diagonal slow-down is active */
-  if ((side != 0) && (forward != 0)) input = Vector2Normalize(input);
-
-  float delta = GetFrameTime();
-
-  if (!body->isGrounded) body->velocity.y -= JANK_FPS_GRAVITY*delta;
-
-  if (body->isGrounded && jumpPressed) {
-    body->velocity.y = JANK_FPS_JUMP_FORCE;
-    body->isGrounded = false;
-  }
-
-  Vector3 front = (Vector3){ sinf(rot), 0.f, cosf(rot) };
-  Vector3 right = (Vector3){ cosf(-rot), 0.f, sinf(-rot) };
-
-  Vector3 desiredDir = (Vector3){ input.x*right.x + input.y*front.x, 0.0f, input.x*right.z + input.y*front.z, };
-  body->dir = Vector3Lerp(body->dir, desiredDir, JANK_FPS_CONTROL*delta);
-
-  float decel = (body->isGrounded ? JANK_FPS_FRICTION : JANK_FPS_AIR_DRAG);
-  Vector3 hvel = (Vector3){ body->velocity.x*decel, 0.0f, body->velocity.z*decel };
-
-  float hvelLength = Vector3Length(hvel);
-  if (hvelLength < (JANK_FPS_MAX_SPEED*0.01f)) hvel = (Vector3){ 0 };
-
-  /* This is what creates strafing */
-  float speed = Vector3DotProduct(hvel, body->dir);
-
-  float maxSpeed = (crouchHold? JANK_FPS_CROUCH_SPEED : JANK_FPS_MAX_SPEED);
-  float accel = Clamp(maxSpeed - speed, 0.f, JANK_FPS_MAX_ACCEL*delta);
-  hvel.x += body->dir.x*accel;
-  hvel.z += body->dir.z*accel;
-
-  body->velocity.x = hvel.x;
-  body->velocity.z = hvel.z;
-
-  body->position.x += body->velocity.x*delta;
-  body->position.y += body->velocity.y*delta;
-  body->position.z += body->velocity.z*delta;
-
-  /* Collision against the floor */
-  if (body->position.y <= 0.0f) {
-    body->position.y = 0.0f;
-    body->velocity.y = 0.0f;
-    body->isGrounded = true;
-  }
-}
-
-/* Update camera for FPS behaviour (look clamp, head bob, lean). */
-static void jank_fps_update_camera(Camera *camera) {
-  const Vector3 up = (Vector3){ 0.0f, 1.0f, 0.0f };
-  const Vector3 targetOffset = (Vector3){ 0.0f, 0.0f, -1.0f };
-
-  Vector3 yaw = Vector3RotateByAxisAngle(targetOffset, up, jank_fps_lookRotation.x);
-
-  float maxAngleUp = Vector3Angle(up, yaw);
-  maxAngleUp -= 0.001f;
-  if ( -(jank_fps_lookRotation.y) > maxAngleUp) { jank_fps_lookRotation.y = -maxAngleUp; }
-
-  float maxAngleDown = Vector3Angle(Vector3Negate(up), yaw);
-  maxAngleDown *= -1.0f;
-  maxAngleDown += 0.001f;
-  if ( -(jank_fps_lookRotation.y) < maxAngleDown) { jank_fps_lookRotation.y = -maxAngleDown; }
-
-  Vector3 right = Vector3Normalize(Vector3CrossProduct(yaw, up));
-
-  float pitchAngle = -jank_fps_lookRotation.y - jank_fps_lean.y;
-  pitchAngle = Clamp(pitchAngle, -PI/2 + 0.0001f, PI/2 - 0.0001f);
-  Vector3 pitch = Vector3RotateByAxisAngle(yaw, right, pitchAngle);
-
-  float headSin = sinf(jank_fps_headTimer*PI);
-  float headCos = cosf(jank_fps_headTimer*PI);
-  const float stepRotation = 0.01f;
-  camera->up = Vector3RotateByAxisAngle(up, pitch, headSin*stepRotation + jank_fps_lean.x);
-
-  const float bobSide = 0.1f;
-  const float bobUp = 0.15f;
-  Vector3 bobbing = Vector3Scale(right, headSin*bobSide);
-  bobbing.y = fabsf(headCos*bobUp);
-
-  camera->position = Vector3Add(camera->position, Vector3Scale(bobbing, jank_fps_walkLerp));
-  camera->target = Vector3Add(camera->position, pitch);
-}
-
-/* Draw the checkerboard floor, four towers and the red sun. */
-static void jank_fps_draw_level(void) {
-  const int floorExtent = 25;
-  const float tileSize = 5.0f;
-  const Color tileColor1 = (Color){ 150, 200, 200, 255 };
-
-  for (int y = -floorExtent; y < floorExtent; y++) {
-    for (int x = -floorExtent; x < floorExtent; x++) {
-      if ((y & 1) && (x & 1)) {
-        DrawPlane((Vector3){ x*tileSize, 0.0f, y*tileSize}, (Vector2){ tileSize, tileSize }, tileColor1);
-      } else if (!(y & 1) && !(x & 1)) {
-        DrawPlane((Vector3){ x*tileSize, 0.0f, y*tileSize}, (Vector2){ tileSize, tileSize }, LIGHTGRAY);
-      }
-    }
-  }
-
-  const Vector3 towerSize = (Vector3){ 16.0f, 32.0f, 16.0f };
-  const Color towerColor = (Color){ 150, 200, 200, 255 };
-
-  Vector3 towerPos = (Vector3){ 16.0f, 16.0f, 16.0f };
-  DrawCubeV(towerPos, towerSize, towerColor);
-  DrawCubeWiresV(towerPos, towerSize, DARKBLUE);
-
-  towerPos.x *= -1;
-  DrawCubeV(towerPos, towerSize, towerColor);
-  DrawCubeWiresV(towerPos, towerSize, DARKBLUE);
-
-  towerPos.z *= -1;
-  DrawCubeV(towerPos, towerSize, towerColor);
-  DrawCubeWiresV(towerPos, towerSize, DARKBLUE);
-
-  towerPos.x *= -1;
-  DrawCubeV(towerPos, towerSize, towerColor);
-  DrawCubeWiresV(towerPos, towerSize, DARKBLUE);
-
-  DrawSphere((Vector3){ 300.0f, 300.0f, 0.0f }, 100.0f, (Color){ 255, 0, 0, 255 });
-}
-
-/* ---- jank-callable entry points ---- */
-
-static void jank_fps_init(void) {
-  jank_fps_camera = (Camera){ 0 };
-  jank_fps_camera.fovy = 60.0f;
-  jank_fps_camera.projection = CAMERA_PERSPECTIVE;
-  jank_fps_camera.position = (Vector3){
-    jank_fps_player.position.x,
-    jank_fps_player.position.y + (JANK_FPS_BOTTOM_HEIGHT + jank_fps_headLerp),
-    jank_fps_player.position.z,
-  };
-  jank_fps_update_camera(&jank_fps_camera);
-
-  DisableCursor();
-  SetTargetFPS(60);
-}
-
-static void jank_fps_update(void) {
-  Vector2 mouseDelta = GetMouseDelta();
-  jank_fps_lookRotation.x -= mouseDelta.x*jank_fps_sensitivity.x;
-  jank_fps_lookRotation.y += mouseDelta.y*jank_fps_sensitivity.y;
-
-  char sideway = (IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
-  char forward = (IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
-  bool crouching = IsKeyDown(KEY_LEFT_CONTROL);
-  jank_fps_update_body(&jank_fps_player, jank_fps_lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching);
-
-  float delta = GetFrameTime();
-  jank_fps_headLerp = Lerp(jank_fps_headLerp, (crouching ? JANK_FPS_CROUCH_HEIGHT : JANK_FPS_STAND_HEIGHT), 20.0f*delta);
-  jank_fps_camera.position = (Vector3){
-    jank_fps_player.position.x,
-    jank_fps_player.position.y + (JANK_FPS_BOTTOM_HEIGHT + jank_fps_headLerp),
-    jank_fps_player.position.z,
-  };
-
-  if (jank_fps_player.isGrounded && ((forward != 0) || (sideway != 0))) {
-    jank_fps_headTimer += delta*3.0f;
-    jank_fps_walkLerp = Lerp(jank_fps_walkLerp, 1.0f, 10.0f*delta);
-    jank_fps_camera.fovy = Lerp(jank_fps_camera.fovy, 55.0f, 5.0f*delta);
-  } else {
-    jank_fps_walkLerp = Lerp(jank_fps_walkLerp, 0.0f, 10.0f*delta);
-    jank_fps_camera.fovy = Lerp(jank_fps_camera.fovy, 60.0f, 5.0f*delta);
-  }
-
-  jank_fps_lean.x = Lerp(jank_fps_lean.x, sideway*0.02f, 10.0f*delta);
-  jank_fps_lean.y = Lerp(jank_fps_lean.y, forward*0.015f, 10.0f*delta);
-
-  jank_fps_update_camera(&jank_fps_camera);
-}
-
-static void jank_fps_draw_3d(void) {
-  BeginMode3D(jank_fps_camera);
-    jank_fps_draw_level();
-  EndMode3D();
-}
-
-static void jank_fps_draw_hud(void) {
-  DrawRectangle(5, 5, 330, 75, Fade(SKYBLUE, 0.5f));
-  DrawRectangleLines(5, 5, 330, 75, BLUE);
-
-  DrawText(\"Camera controls:\", 15, 15, 10, BLACK);
-  DrawText(\"- Move keys: W, A, S, D, Space, Left-Ctrl\", 15, 30, 10, BLACK);
-  DrawText(\"- Look around: arrow keys or mouse\", 15, 45, 10, BLACK);
-  DrawText(TextFormat(\"- Velocity Len: (%06.3f)\", Vector2Length((Vector2){ jank_fps_player.velocity.x, jank_fps_player.velocity.z })), 15, 60, 10, BLACK);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
+
+(def ^:private GRAVITY 32.0)
+(def ^:private MAX-SPEED 20.0)
+(def ^:private CROUCH-SPEED 5.0)
+(def ^:private JUMP-FORCE 12.0)
+(def ^:private MAX-ACCEL 150.0)
+(def ^:private FRICTION 0.86)
+(def ^:private AIR-DRAG 0.98)
+(def ^:private CONTROL 15.0)
+(def ^:private CROUCH-HEIGHT 0.0)
+(def ^:private STAND-HEIGHT 1.0)
+(def ^:private BOTTOM-HEIGHT 0.5)
+(def ^:private SENSITIVITY 0.001)
+(def ^:private PI 3.141592653589793)
+
+;; ---- small math, in jank ----
+
+(defn- lerp [a b t] (+ a (* t (- b a))))
+
+(defn- clamp [v lo hi] (if (< v lo) lo (if (> v hi) hi v)))
+
+(defn- v3-rotate-axis
+  "Vector3RotateByAxisAngle, taking and returning [x y z] of numbers.
+  The native Vector3 exists only as an argument and as the let-local
+  holding the result, so it never has to cross a fn boundary."
+  [[x y z] [ax ay az] angle]
+  (let [r (cpp/Vector3RotateByAxisAngle
+           (cpp/Vector3 (cpp/float x) (cpp/float y) (cpp/float z))
+           (cpp/Vector3 (cpp/float ax) (cpp/float ay) (cpp/float az))
+           (cpp/float angle))]
+    [(+ 0.0 (.-x r)) (+ 0.0 (.-y r)) (+ 0.0 (.-z r))]))
+
+(defn- v3-angle
+  "Vector3Angle. Kept as a raymath call because it is atan2 of the cross
+  length against the dot, not something worth restating."
+  [[ax ay az] [bx by bz]]
+  (+ 0.0 (cpp/Vector3Angle (cpp/Vector3 (cpp/float ax) (cpp/float ay) (cpp/float az))
+                           (cpp/Vector3 (cpp/float bx) (cpp/float by) (cpp/float bz)))))
+
+(defn- v3-normalize
+  [[x y z]]
+  (let [l (cpp/sqrt (+ (* x x) (* y y) (* z z)))]
+    (if (zero? l) [0.0 0.0 0.0] [(/ x l) (/ y l) (/ z l)])))
+
+(defn- v3-cross
+  [[ax ay az] [bx by bz]]
+  [(- (* ay bz) (* az by)) (- (* az bx) (* ax bz)) (- (* ax by) (* ay bx))])
+
+;; ---- body physics ----
+
+(defn- update-body
+  "One physics step. Mirrors the C's UpdateBody: gravity, jump, the
+  desired-direction lerp, friction / air drag, then the acceleration
+  clamp that produces strafe-accel, then integration and the floor."
+  [{:keys [px py pz vx vy vz dx dy dz grounded?] :as st} rot side forward jump? crouch? delta]
+  (let [ix (+ 0.0 side)
+        iy (- 0.0 forward)
+        ;; NORMALIZE_INPUT is #defined in the C, so diagonals slow down
+        [ix iy] (if (and (not= side 0) (not= forward 0))
+                  (let [l (cpp/sqrt (+ (* ix ix) (* iy iy)))]
+                    (if (zero? l) [ix iy] [(/ ix l) (/ iy l)]))
+                  [ix iy])
+
+        vy (if grounded? vy (- vy (* GRAVITY delta)))
+        [vy grounded?] (if (and grounded? jump?) [JUMP-FORCE false] [vy grounded?])
+
+        front-x (cpp/sin rot)
+        front-z (cpp/cos rot)
+        right-x (cpp/cos (- 0.0 rot))
+        right-z (cpp/sin (- 0.0 rot))
+
+        want-x (+ (* ix right-x) (* iy front-x))
+        want-z (+ (* ix right-z) (* iy front-z))
+        t (* CONTROL delta)
+        dx (lerp dx want-x t)
+        dy (lerp dy 0.0 t)
+        dz (lerp dz want-z t)
+
+        decel (if grounded? FRICTION AIR-DRAG)
+        hx (* vx decel)
+        hz (* vz decel)
+        hlen (cpp/sqrt (+ (* hx hx) (* hz hz)))
+        [hx hz] (if (< hlen (* MAX-SPEED 0.01)) [0.0 0.0] [hx hz])
+
+        ;; this is what creates strafing
+        speed (+ (* hx dx) (* hz dz))
+        max-speed (if crouch? CROUCH-SPEED MAX-SPEED)
+        accel (clamp (- max-speed speed) 0.0 (* MAX-ACCEL delta))
+        vx (+ hx (* dx accel))
+        vz (+ hz (* dz accel))
+
+        px (+ px (* vx delta))
+        py (+ py (* vy delta))
+        pz (+ pz (* vz delta))
+        floor? (<= py 0.0)]
+    (assoc st
+           :px px :py (if floor? 0.0 py) :pz pz
+           :vx vx :vy (if floor? 0.0 vy) :vz vz
+           :dx dx :dy dy :dz dz
+           :grounded? (if floor? true grounded?))))
+
+(defn- camera-vectors
+  "The C's UpdateCameraFPS: clamp the look so it cannot pass straight up
+  or down, then derive up / position / target with head-bob and lean.
+  Returns the three camera vectors as [x y z] triples."
+  [{:keys [look-x look-y head-timer walk-lerp lean-x lean-y]} [cx cy cz]]
+  (let [up [0.0 1.0 0.0]
+        yaw (v3-rotate-axis [0.0 0.0 -1.0] up look-x)
+
+        max-up (- (v3-angle up yaw) 0.001)
+        look-y (if (> (- 0.0 look-y) max-up) (- 0.0 max-up) look-y)
+        max-down (+ (* -1.0 (v3-angle [0.0 -1.0 0.0] yaw)) 0.001)
+        look-y (if (< (- 0.0 look-y) max-down) (- 0.0 max-down) look-y)
+
+        right (v3-normalize (v3-cross yaw up))
+        pitch-angle (clamp (- (- 0.0 look-y) lean-y)
+                           (+ (/ PI -2.0) 0.0001) (- (/ PI 2.0) 0.0001))
+        pitch (v3-rotate-axis yaw right pitch-angle)
+
+        head-sin (cpp/sin (* head-timer PI))
+        head-cos (cpp/cos (* head-timer PI))
+        step-rotation 0.01
+        cam-up (v3-rotate-axis up pitch (+ (* head-sin step-rotation) lean-x))
+
+        bob-side 0.1
+        bob-up 0.15
+        [rx _ rz] right
+        bob-x (* rx head-sin bob-side)
+        bob-y (cpp/fabs (* head-cos bob-up))
+        bob-z (* rz head-sin bob-side)
+
+        pos [(+ cx (* bob-x walk-lerp))
+             (+ cy (* bob-y walk-lerp))
+             (+ cz (* bob-z walk-lerp))]
+        [pxx pyy pzz] pos
+        [tx ty tz] pitch]
+    {:look-y look-y
+     :position pos
+     :target [(+ pxx tx) (+ pyy ty) (+ pzz tz)]
+     :up cam-up}))
+
+(defn- write-camera!
+  "Push the three vectors and the fov into the boxed Camera3D."
+  [cam-box {:keys [position target up]} fovy]
+  (let [c (cpp/* (cpp/unbox (:* cpp/Camera3D) cam-box))
+        [px py pz] position
+        [tx ty tz] target
+        [ux uy uz] up]
+    (cpp/= (.-x (.-position c)) (cpp/float px))
+    (cpp/= (.-y (.-position c)) (cpp/float py))
+    (cpp/= (.-z (.-position c)) (cpp/float pz))
+    (cpp/= (.-x (.-target c)) (cpp/float tx))
+    (cpp/= (.-y (.-target c)) (cpp/float ty))
+    (cpp/= (.-z (.-target c)) (cpp/float tz))
+    (cpp/= (.-x (.-up c)) (cpp/float ux))
+    (cpp/= (.-y (.-up c)) (cpp/float uy))
+    (cpp/= (.-z (.-up c)) (cpp/float uz))
+    (cpp/= (.-fovy c) (cpp/float fovy)))
+  nil)
+
+(defn- draw-level!
+  "Checkerboard floor, four towers and the red sun."
+  []
+  (let [floor-extent 25
+        tile 5.0]
+    (loop [y (- floor-extent)]
+      (when (< y floor-extent)
+        (loop [x (- floor-extent)]
+          (when (< x floor-extent)
+            (let [odd-y (odd? y)
+                  odd-x (odd? x)]
+              (when (or (and odd-y odd-x) (and (not odd-y) (not odd-x)))
+                (cpp/DrawPlane (cpp/Vector3 (cpp/float (* x tile)) (cpp/float 0.0)
+                                            (cpp/float (* y tile)))
+                               (cpp/Vector2 (cpp/float tile) (cpp/float tile))
+                               (if (and odd-y odd-x)
+                                 (cpp/Color (cpp/cast cpp/uint8_t 150) (cpp/cast cpp/uint8_t 200)
+                                            (cpp/cast cpp/uint8_t 200) (cpp/cast cpp/uint8_t 255))
+                                 cpp/LIGHTGRAY))))
+            (recur (inc x))))
+        (recur (inc y)))))
+
+  (let [tower-color (cpp/Color (cpp/cast cpp/uint8_t 150) (cpp/cast cpp/uint8_t 200)
+                               (cpp/cast cpp/uint8_t 200) (cpp/cast cpp/uint8_t 255))]
+    (doseq [[tx tz] [[16.0 16.0] [-16.0 16.0] [-16.0 -16.0] [16.0 -16.0]]]
+      (cpp/DrawCubeV (cpp/Vector3 (cpp/float tx) (cpp/float 16.0) (cpp/float tz))
+                     (cpp/Vector3 (cpp/float 16.0) (cpp/float 32.0) (cpp/float 16.0))
+                     tower-color)
+      (cpp/DrawCubeWiresV (cpp/Vector3 (cpp/float tx) (cpp/float 16.0) (cpp/float tz))
+                          (cpp/Vector3 (cpp/float 16.0) (cpp/float 32.0) (cpp/float 16.0))
+                          cpp/DARKBLUE)))
+
+  (cpp/DrawSphere (cpp/Vector3 (cpp/float 300.0) (cpp/float 300.0) (cpp/float 0.0))
+                  (cpp/float 100.0)
+                  (cpp/Color (cpp/cast cpp/uint8_t 255) (cpp/cast cpp/uint8_t 0)
+                             (cpp/cast cpp/uint8_t 0) (cpp/cast cpp/uint8_t 255)))
+  nil)
+
+(defn- fmt3
+  "The C's %06.3f: three digits after the dot, zero-padded to width 6."
+  [v]
+  (let [s (str (/ (+ 0.0 (cpp/round (* v 1000.0))) 1000.0))
+        s (if (string/index-of s ".") s (str s "."))
+        dot (string/index-of s ".")
+        frac (- (count s) dot 1)
+        s (if (> frac 3) (subs s 0 (+ dot 4)) (str s (subs "000" 0 (- 3 frac))))]
+    (str (subs "000000" 0 (max 0 (- 6 (count s)))) s)))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - 3d camera fps (jank)")
 
-  (cpp/jank_fps_init)
+  ;; the one native value that has to persist: BeginMode3D needs the struct
+  (let [cam-box (cpp/box (cpp/new cpp/Camera3D))]
+    (cpp/= (.-projection (cpp/* (cpp/unbox (:* cpp/Camera3D) cam-box)))
+           (cpp/int cpp/CAMERA_PERSPECTIVE))
 
-  (loop []
-    (when (cpp/! (cpp/WindowShouldClose))
-      (cpp/jank_fps_update)
+    (let [st0 {:px 0.0 :py 0.0 :pz 0.0 :vx 0.0 :vy 0.0 :vz 0.0
+               :dx 0.0 :dy 0.0 :dz 0.0 :grounded? false
+               :look-x 0.0 :look-y 0.0 :head-timer 0.0
+               :walk-lerp 0.0 :head-lerp STAND-HEIGHT :lean-x 0.0 :lean-y 0.0}
+          cam0 (camera-vectors st0 [0.0 (+ BOTTOM-HEIGHT STAND-HEIGHT) 0.0])]
+      (write-camera! cam-box cam0 60.0)
 
-      (cpp/BeginDrawing)
-      (cpp/ClearBackground cpp/RAYWHITE)
-      (cpp/jank_fps_draw_3d)
-      (cpp/jank_fps_draw_hud)
-      (cpp/EndDrawing)
-      (recur)))
+      (cpp/DisableCursor)
+      (cpp/SetTargetFPS 60)
+
+      ;; Thread [state fovy].
+      (loop [st (assoc st0 :look-y (:look-y cam0))
+             fovy 60.0]
+        (when (cpp/! (cpp/WindowShouldClose))
+          (let [md (cpp/GetMouseDelta)
+                delta (+ 0.0 (cpp/GetFrameTime))
+                st (assoc st
+                          :look-x (- (:look-x st) (* (+ 0.0 (.-x md)) SENSITIVITY))
+                          :look-y (+ (:look-y st) (* (+ 0.0 (.-y md)) SENSITIVITY)))
+
+                side (- (if (cpp/IsKeyDown cpp/KEY_D) 1 0) (if (cpp/IsKeyDown cpp/KEY_A) 1 0))
+                forward (- (if (cpp/IsKeyDown cpp/KEY_W) 1 0) (if (cpp/IsKeyDown cpp/KEY_S) 1 0))
+                crouch? (cpp/IsKeyDown cpp/KEY_LEFT_CONTROL)
+
+                st (update-body st (:look-x st) side forward
+                                (cpp/IsKeyPressed cpp/KEY_SPACE) crouch? delta)
+
+                st (assoc st :head-lerp
+                          (lerp (:head-lerp st)
+                                (if crouch? CROUCH-HEIGHT STAND-HEIGHT)
+                                (* 20.0 delta)))
+
+                moving? (and (:grounded? st) (or (not= forward 0) (not= side 0)))
+                st (assoc st
+                          :head-timer (if moving?
+                                        (+ (:head-timer st) (* delta 3.0))
+                                        (:head-timer st))
+                          :walk-lerp (lerp (:walk-lerp st) (if moving? 1.0 0.0) (* 10.0 delta))
+                          :lean-x (lerp (:lean-x st) (* side 0.02) (* 10.0 delta))
+                          :lean-y (lerp (:lean-y st) (* forward 0.015) (* 10.0 delta)))
+                fovy (lerp fovy (if moving? 55.0 60.0) (* 5.0 delta))
+
+                cam (camera-vectors st [(:px st)
+                                        (+ (:py st) BOTTOM-HEIGHT (:head-lerp st))
+                                        (:pz st)])
+                st (assoc st :look-y (:look-y cam))]
+
+            (write-camera! cam-box cam fovy)
+
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/RAYWHITE)
+
+            (cpp/BeginMode3D (cpp/* (cpp/unbox (:* cpp/Camera3D) cam-box)))
+            (draw-level!)
+            (cpp/EndMode3D)
+
+            (cpp/DrawRectangle 5 5 330 75 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+            (cpp/DrawRectangleLines 5 5 330 75 cpp/BLUE)
+            (cpp/DrawText "Camera controls:" 15 15 10 cpp/BLACK)
+            (cpp/DrawText "- Move keys: W, A, S, D, Space, Left-Ctrl" 15 30 10 cpp/BLACK)
+            (cpp/DrawText "- Look around: arrow keys or mouse" 15 45 10 cpp/BLACK)
+            (cpp/DrawText (str "- Velocity Len: ("
+                               (fmt3 (cpp/sqrt (+ (* (:vx st) (:vx st)) (* (:vz st) (:vz st)))))
+                               ")")
+                          15 60 10 cpp/BLACK)
+
+            (cpp/EndDrawing)
+            (recur st fovy))))))
 
   (cpp/CloseWindow))

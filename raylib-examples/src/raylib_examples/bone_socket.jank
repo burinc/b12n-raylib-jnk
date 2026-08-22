@@ -19,51 +19,49 @@
     after setting the transform) - kept."
   (:include "raylib.h" "raymath.h"))
 
-(cpp/raw "static ModelAnimation *jank_anims = NULL;
-static int jank_anims_count = 0;
-static int jank_load_anims(const char* path) {
-  jank_anims = LoadModelAnimations(path, &jank_anims_count);
-  return jank_anims_count;
-}
-static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
-static void jank_update_anim(Model m, int i, int frame) {
-  UpdateModelAnimation(m, jank_anims[i], (float)frame);
-}
-/* find a bone index by name (-1 when absent) */
-static int jank_find_bone(Model* m, const char* name) {
-  for (int i = 0; i < m->skeleton.boneCount; i++)
-    if (TextIsEqual(m->skeleton.bones[i].name, name)) return i;
-  return -1;
-}
-/* rotate the character around Y and park the matrix in its transform */
-static void jank_set_character_transform(Model* m, double angleDeg) {
-  Quaternion rotate = QuaternionFromAxisAngle((Vector3){ 0.0f, 1.0f, 0.0f },
-                                              (float)angleDeg*DEG2RAD);
-  m->transform = MatrixMultiply(QuaternionToMatrix(rotate), MatrixTranslate(0, 0, 0));
-}
-static void jank_draw_character(Model m) {
-  DrawMesh(m.meshes[0], m.materials[1], m.transform);
-}
-/* the C's socket math, verbatim: bone rotation delta vs bind pose,
-   translated to the bone's animated position, in character space */
-static void jank_draw_socket_equip(Model character, Model equip,
-                                   int animIdx, int frame, int boneIdx) {
-  Transform *transform = &jank_anims[animIdx].keyframePoses[frame][boneIdx];
-  Quaternion inRotation = character.skeleton.bindPose[boneIdx].rotation;
-  Quaternion outRotation = transform->rotation;
-  Quaternion rotate = QuaternionMultiply(outRotation, QuaternionInvert(inRotation));
-  Matrix matrixTransform = QuaternionToMatrix(rotate);
-  matrixTransform = MatrixMultiply(matrixTransform,
-                                   MatrixTranslate(transform->translation.x,
-                                                   transform->translation.y,
-                                                   transform->translation.z));
-  matrixTransform = MatrixMultiply(matrixTransform, character.transform);
-  DrawMesh(equip.meshes[0], equip.materials[1], matrixTransform);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(defn- find-bone
+  "Index of the named bone, or -1. Takes the model BOXED, since a Model
+  cannot arrive as a bare jank fn argument."
+  [m-box name]
+  (let [m (cpp/unbox (:* cpp/Model) m-box)
+        n (int (+ 0.0 (.-boneCount (.-skeleton (cpp/* m)))))]
+    (loop [i 0]
+      (if (>= i n)
+        -1
+        (if (cpp/TextIsEqual (.-name (cpp/aget (.-bones (.-skeleton (cpp/* m))) (cpp/int i)))
+                             name)
+          i
+          (recur (inc i)))))))
+
+(defn- draw-socket-equip!
+  "The C's socket math: the bone's rotation delta against the bind pose,
+  translated to its animated position, then into character space.
+
+  Everything native arrives boxed. Called once per attachment, which is
+  why this is a fn rather than three inlined copies."
+  [char-box equip-box anims-box anim-idx frame bone-idx]
+  (let [ch (cpp/* (cpp/unbox (:* cpp/Model) char-box))
+        eq (cpp/* (cpp/unbox (:* cpp/Model) equip-box))
+        anims (cpp/unbox (:* cpp/ModelAnimation) anims-box)
+        pose (cpp/aget (.-keyframePoses (cpp/aget anims (cpp/int (int anim-idx))))
+                       (cpp/int (int frame)))
+        tr (cpp/aget pose (cpp/int (int bone-idx)))
+        in-rot (.-rotation (cpp/aget (.-bindPose (.-skeleton ch)) (cpp/int (int bone-idx))))
+        rotate (cpp/QuaternionMultiply (.-rotation tr) (cpp/QuaternionInvert in-rot))
+        mt (cpp/MatrixMultiply
+            (cpp/MatrixMultiply (cpp/QuaternionToMatrix rotate)
+                                (cpp/MatrixTranslate (.-x (.-translation tr))
+                                                     (.-y (.-translation tr))
+                                                     (.-z (.-translation tr))))
+            (.-transform ch))]
+    (cpp/DrawMesh (cpp/aget (.-meshes eq) (cpp/int 0))
+                  (cpp/aget (.-materials eq) (cpp/int 1))
+                  mt))
+  nil)
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -78,10 +76,15 @@ static void jank_draw_socket_equip(Model character, Model equip,
         hat (cpp/LoadModel (str RES "models/gltf/greenman_hat.glb"))
         sword (cpp/LoadModel (str RES "models/gltf/greenman_sword.glb"))
         shield (cpp/LoadModel (str RES "models/gltf/greenman_shield.glb"))
-        anim-count (int (cpp/jank_load_anims (str RES "models/gltf/greenman.glb")))
-        bone-hat (int (cpp/jank_find_bone (cpp/& character) "socket_hat"))
-        bone-hand-r (int (cpp/jank_find_bone (cpp/& character) "socket_hand_R"))
-        bone-hand-l (int (cpp/jank_find_bone (cpp/& character) "socket_hand_L"))]
+        ;; count via an int* out-param; the array lives in this let
+        anim-n (cpp/int 0)
+        anims (cpp/LoadModelAnimations (str RES "models/gltf/greenman.glb") (cpp/& anim-n))
+        anims-box (cpp/box anims)
+        anim-count (int (+ 0.0 anim-n))
+        char-box (cpp/box (cpp/new cpp/Model character))
+        bone-hat (find-bone char-box "socket_hat")
+        bone-hand-r (find-bone char-box "socket_hand_R")
+        bone-hand-l (find-bone char-box "socket_hand_L")]
 
     (cpp/DisableCursor)
     (cpp/SetTargetFPS 60)
@@ -108,9 +111,10 @@ static void jank_draw_socket_equip(Model character, Model equip,
               sword? (if (cpp/IsKeyPressed cpp/KEY_TWO) (not sword?) sword?)
               shield? (if (cpp/IsKeyPressed cpp/KEY_THREE) (not shield?) shield?)
               frame (int (mod (inc frame)
-                              (int (cpp/jank_anim_keyframes (int anim-index)))))]
+                              (int (+ 0.0 (.-keyframeCount (cpp/aget anims (cpp/int (int anim-index))))))))]
 
-          (cpp/jank_update_anim character (int anim-index) (int frame))
+          (cpp/UpdateModelAnimation character (cpp/aget anims (cpp/int (int anim-index)))
+                                    (cpp/float (+ 0.0 (int frame))))
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)
@@ -118,17 +122,29 @@ static void jank_draw_socket_equip(Model character, Model equip,
           (cpp/BeginMode3D camera)
 
           ;; the character, rotated then re-animated (the C's double update)
-          (cpp/jank_set_character_transform (cpp/& character) (+ 0.0 angle))
-          (cpp/jank_update_anim character (int anim-index) (int frame))
-          (cpp/jank_draw_character character)
+          (cpp/= (.-transform character)
+                 (cpp/MatrixMultiply
+                  (cpp/QuaternionToMatrix
+                   (cpp/QuaternionFromAxisAngle
+                    (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                    (cpp/float (* (+ 0.0 angle) cpp/DEG2RAD))))
+                  (cpp/MatrixTranslate (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))))
+          (cpp/UpdateModelAnimation character (cpp/aget anims (cpp/int (int anim-index)))
+                                    (cpp/float (+ 0.0 (int frame))))
+          (cpp/DrawMesh (cpp/aget (.-meshes character) (cpp/int 0))
+                        (cpp/aget (.-materials character) (cpp/int 1))
+                        (.-transform character))
 
           ;; equipment riding the socket bones
           (when hat?
-            (cpp/jank_draw_socket_equip character hat (int anim-index) (int frame) bone-hat))
+            (draw-socket-equip! char-box (cpp/box (cpp/new cpp/Model hat))
+                                anims-box anim-index frame bone-hat))
           (when sword?
-            (cpp/jank_draw_socket_equip character sword (int anim-index) (int frame) bone-hand-r))
+            (draw-socket-equip! char-box (cpp/box (cpp/new cpp/Model sword))
+                                anims-box anim-index frame bone-hand-r))
           (when shield?
-            (cpp/jank_draw_socket_equip character shield (int anim-index) (int frame) bone-hand-l))
+            (draw-socket-equip! char-box (cpp/box (cpp/new cpp/Model shield))
+                                anims-box anim-index frame bone-hand-l))
 
           (cpp/DrawGrid 10 (cpp/float 1.0))
           (cpp/EndMode3D)
