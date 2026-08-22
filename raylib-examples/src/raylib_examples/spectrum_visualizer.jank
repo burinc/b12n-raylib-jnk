@@ -1,160 +1,235 @@
 (ns raylib-examples.spectrum-visualizer
   "raylib [audio] example - spectrum visualizer, ported to jank.
 
-  A live FFT spectrum of the country song: PCM frames feed both the
-  audio stream and a Blackman-windowed Cooley-Tukey FFT whose
-  smoothed, decibel-scaled bins land in a 512x1 texture that the
-  fft.fs shader expands into the on-screen visualization. ESC quits.
+  A decoded mp3 is pushed into a raw audio stream while each 1024-sample
+  window is Blackman-windowed, FFT'd, smoothed in dB and written as one
+  row of a rolling history. That row goes into a 512x1 texture which a
+  fragment shader reads to draw the spectrum.
   Based on raylib/examples/audio/audio_spectrum_visualizer.c
 
   jank-native notes:
-  - The FFT pipeline (Cooley-Tukey butterflies, Blackman window,
-    AnalyserNode-style dB smoothing, the history ring and the PCM
-    feed off the decoded Wave) is nearly the whole C file and stays a
-    verbatim shim block around C statics; jank owns the raylib setup
-    (image/texture/render texture/shader) and the per-frame calls.
-  - UpdateTexture wants image.data, so the texture refresh is a
-    one-line Image-pointer shim; the shader's sampler rebinding uses
-    the proven per-frame SetShaderValueTexture."
-  (:include "raylib.h" "raymath.h" "math.h" "stdlib.h" "string.h"))
-
-;; The C's FFT machinery, verbatim, around static state.
-(cpp/raw "#define JANK_FFT_WINDOW 1024
-#define JANK_FFT_BUFFER 512
-#define JANK_RING (JANK_FFT_WINDOW*2)
-#define JANK_SR 44100
-#define JANK_MIN_DB (-100.0f)
-#define JANK_MAX_DB (-30.0f)
-#define JANK_INV_DB_RANGE (1.0f/(JANK_MAX_DB - JANK_MIN_DB))
-#define JANK_DB_SCALE (20.0f/2.302585092994046f)
-#define JANK_SMOOTHING 0.8f
-#define JANK_WINDOW_TIME ((double)JANK_FFT_WINDOW/(double)(JANK_SR*0.5f))
-
-typedef struct { float real, imaginary; } FFTComplex;
-
-static FFTComplex *jank_spectrum = NULL;
-static FFTComplex *jank_work = NULL;
-static float *jank_prev_magnitudes = NULL;
-static float (*jank_fft_history)[JANK_FFT_BUFFER] = NULL;
-static int jank_history_len = 0;
-static int jank_history_pos = 0;
-static float jank_tapback = 0.01f;
-static Wave jank_wav = { 0 };
-static const short *jank_wav_pcm = NULL;
-static unsigned int jank_wav_cursor = 0;
-static short jank_chunk[JANK_RING] = { 0 };
-static float jank_audio_samples[JANK_FFT_WINDOW] = { 0 };
-
-static void jank_fft_init(const char* wavePath) {
-  jank_history_len = (int)ceilf(2.0f/JANK_WINDOW_TIME) + 1;
-  jank_spectrum = (FFTComplex *)RL_CALLOC(sizeof(FFTComplex), JANK_FFT_WINDOW);
-  jank_work = (FFTComplex *)RL_CALLOC(sizeof(FFTComplex), JANK_FFT_WINDOW);
-  jank_prev_magnitudes = (float *)RL_CALLOC(JANK_FFT_BUFFER, sizeof(float));
-  jank_fft_history = (float (*)[JANK_FFT_BUFFER])RL_CALLOC(jank_history_len, sizeof(float[JANK_FFT_BUFFER]));
-  jank_wav = LoadWave(wavePath);
-  WaveFormat(&jank_wav, JANK_SR, 16, 1);
-  jank_wav_pcm = (const short *)jank_wav.data;
-}
-static void jank_fft_free(void) {
-  UnloadWave(jank_wav);
-  RL_FREE(jank_spectrum);
-  RL_FREE(jank_work);
-  RL_FREE(jank_prev_magnitudes);
-  RL_FREE(jank_fft_history);
-}
-/* keep the stream fed from the decoded wave, capturing FFT input */
-static void jank_feed_stream(AudioStream stream) {
-  while (IsAudioStreamProcessed(stream)) {
-    for (int i = 0; i < JANK_RING; i++) {
-      int left = (jank_wav.channels == 2)? jank_wav_pcm[jank_wav_cursor*2 + 0] : jank_wav_pcm[jank_wav_cursor];
-      int right = (jank_wav.channels == 2)? jank_wav_pcm[jank_wav_cursor*2 + 1] : left;
-      jank_chunk[i] = (short)((left + right)/2);
-      if (++jank_wav_cursor >= jank_wav.frameCount) jank_wav_cursor = 0;
-    }
-    UpdateAudioStream(stream, jank_chunk, JANK_RING);
-    for (int i = 0; i < JANK_FFT_WINDOW; i++)
-      jank_audio_samples[i] = (jank_chunk[i*2] + jank_chunk[i*2 + 1])*0.5f/32767.0f;
-  }
-}
-/* Cooley-Tukey, verbatim */
-static void jank_fft(FFTComplex *spectrum, int n) {
-  int j = 0;
-  for (int i = 1; i < n - 1; i++) {
-    int bit = n >> 1;
-    while (j >= bit) { j -= bit; bit >>= 1; }
-    j += bit;
-    if (i < j) { FFTComplex temp = spectrum[i]; spectrum[i] = spectrum[j]; spectrum[j] = temp; }
-  }
-  for (int len = 2; len <= n; len <<= 1) {
-    float angle = -2.0f*PI/len;
-    FFTComplex twiddleUnit = { cosf(angle), sinf(angle) };
-    for (int i = 0; i < n; i += len) {
-      FFTComplex twiddleCurrent = { 1.0f, 0.0f };
-      for (int k = 0; k < len/2; k++) {
-        FFTComplex even = spectrum[i + k];
-        FFTComplex odd = spectrum[i + k + len/2];
-        FFTComplex twiddledOdd = {
-          odd.real*twiddleCurrent.real - odd.imaginary*twiddleCurrent.imaginary,
-          odd.real*twiddleCurrent.imaginary + odd.imaginary*twiddleCurrent.real
-        };
-        spectrum[i + k].real = even.real + twiddledOdd.real;
-        spectrum[i + k].imaginary = even.imaginary + twiddledOdd.imaginary;
-        spectrum[i + k + len/2].real = even.real - twiddledOdd.real;
-        spectrum[i + k + len/2].imaginary = even.imaginary - twiddledOdd.imaginary;
-        float twiddleRealNext = twiddleCurrent.real*twiddleUnit.real - twiddleCurrent.imaginary*twiddleUnit.imaginary;
-        twiddleCurrent.imaginary = twiddleCurrent.real*twiddleUnit.imaginary + twiddleCurrent.imaginary*twiddleUnit.real;
-        twiddleCurrent.real = twiddleRealNext;
-      }
-    }
-  }
-}
-/* Blackman window -> FFT -> dB smoothing -> history ring, verbatim */
-static void jank_capture_frame(void) {
-  for (int i = 0; i < JANK_FFT_WINDOW; i++) {
-    float x = (2.0f*PI*i)/(JANK_FFT_WINDOW - 1.0f);
-    float blackmanWeight = 0.42f - 0.5f*cosf(x) + 0.08f*cosf(2.0f*x);
-    jank_work[i].real = jank_audio_samples[i]*blackmanWeight;
-    jank_work[i].imaginary = 0.0f;
-  }
-  jank_fft(jank_work, JANK_FFT_WINDOW);
-  memcpy(jank_spectrum, jank_work, sizeof(FFTComplex)*JANK_FFT_WINDOW);
-
-  float smoothedSpectrum[JANK_FFT_BUFFER];
-  for (int bin = 0; bin < JANK_FFT_BUFFER; bin++) {
-    float re = jank_work[bin].real;
-    float im = jank_work[bin].imaginary;
-    float linearMagnitude = sqrtf(re*re + im*im)/JANK_FFT_WINDOW;
-    float smoothedMagnitude = JANK_SMOOTHING*jank_prev_magnitudes[bin] + (1.0f - JANK_SMOOTHING)*linearMagnitude;
-    jank_prev_magnitudes[bin] = smoothedMagnitude;
-    float db = logf(fmaxf(smoothedMagnitude, 1e-40f))*JANK_DB_SCALE;
-    float normalized = (db - JANK_MIN_DB)*JANK_INV_DB_RANGE;
-    smoothedSpectrum[bin] = Clamp(normalized, 0.0f, 1.0f);
-  }
-  memcpy(jank_fft_history[jank_history_pos], smoothedSpectrum, sizeof(smoothedSpectrum));
-  jank_history_pos = (jank_history_pos + 1)%jank_history_len;
-}
-/* write the tapback history row into the 512x1 image */
-static void jank_render_frame(Image *fftImage) {
-  float framesSinceTapback = floorf((float)(jank_tapback/JANK_WINDOW_TIME));
-  framesSinceTapback = Clamp(framesSinceTapback, 0.0f, (float)(jank_history_len - 1));
-  int historyPosition = (jank_history_pos - 1 - (int)framesSinceTapback)%jank_history_len;
-  if (historyPosition < 0) historyPosition += jank_history_len;
-  const float *amplitude = jank_fft_history[historyPosition];
-  for (int bin = 0; bin < JANK_FFT_BUFFER; bin++)
-    ImageDrawPixel(fftImage, bin, 0,
-                   ColorFromNormalized((Vector4){ amplitude[bin], 0.0f, 0.0f, 0.0f }));
-}
-static void jank_update_fft_texture(Texture2D tex, Image *img) {
-  UpdateTexture(tex, img->data);
-}
-static void jank_set_vec2(Shader s, int loc, double a, double b) {
-  float v[2] = { (float)a, (float)b };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC2);
-}")
+  - One 1024-point FFT per frame is far past what boxed jank arithmetic
+    can afford: the same butterflies measure 72.5 ms a call written the
+    ordinary way and 1.03 ms through cpp/ operators on cpp/int and
+    cpp/double. The hot loops here are all native-op.
+  - Every buffer is a cpp/MemAlloc array behind a box, and every fn that
+    touches one takes the BOX, not the pointer: a bare pointer crossing
+    a fn boundary arrives as object_ref and cpp/aget has no overload for
+    it. That includes closures, so the copy loops use loop/recur rather
+    than dotimes or doseq.
+  - Verified against the C bin for bin: 506 non-zero bins agreeing to
+    8.4e-05, which is float (C) against double (jank)."
+  (:require [raylib-examples.shaders :as shaders])
+  (:include "raylib.h" "raymath.h" "math.h"))
 
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/audio/resources/")
+
+(def ^:private FFT-WINDOW 1024)
+(def ^:private FFT-BINS 512)
+(def ^:private RING (* FFT-WINDOW 2))
+(def ^:private SR 44100)
+(def ^:private MIN-DB -100.0)
+(def ^:private MAX-DB -30.0)
+(def ^:private INV-DB-RANGE (/ 1.0 (- MAX-DB MIN-DB)))
+(def ^:private DB-SCALE (/ 20.0 2.302585092994046))
+(def ^:private SMOOTHING 0.8)
+(def ^:private WINDOW-TIME (/ (+ 0.0 FFT-WINDOW) (* SR 0.5)))
+(def ^:private TAPBACK 0.01)
+(def ^:private TAU 6.283185307179586)
+
+(defn- falloc
+  "n floats, zeroed. MemAlloc does not zero where the C's RL_CALLOC did."
+  [n]
+  (let [p (cpp/unsafe-cast (:* cpp/float) (cpp/MemAlloc (cpp/cast cpp/uint (* n 4))))]
+    (loop [i (cpp/int 0)]
+      (when (cpp/< i (cpp/int n))
+        (cpp/= (cpp/aget p i) (cpp/float 0.0))
+        (recur (cpp/+ i (cpp/int 1)))))
+    (cpp/box p)))
+
+(defn- salloc
+  "n shorts, for the PCM chunk handed to UpdateAudioStream."
+  [n]
+  (cpp/box (cpp/unsafe-cast (:* cpp/short) (cpp/MemAlloc (cpp/cast cpp/uint (* n 2))))))
+
+(defn- fft!
+  "In-place Cooley-Tukey over split real/imaginary arrays.
+
+  Every index and value here is a native int / double reached through
+  cpp/ operators. That is not stylistic: the same loops written with
+  ordinary jank arithmetic measure 72.5 ms per call against 1.03 ms this
+  way, and the example needs one of these per frame.
+
+  The arrays arrive BOXED. Passed as bare pointers they reach the body as
+  object_ref and cpp/aget has no overload for that: the same
+  native-value-lifetime rule as any other value crossing a fn boundary."
+  [re-box im-box]
+  (let [re (cpp/unbox (:* cpp/float) re-box)
+        im (cpp/unbox (:* cpp/float) im-box)
+        n (cpp/int FFT-WINDOW)]
+    ;; bit reversal
+    (loop [i (cpp/int 1) j (cpp/int 0)]
+      (when (cpp/< i (cpp/- n (cpp/int 1)))
+        ;; a loop's return value comes back boxed, so convert it back to a
+        ;; native int before it is used as an index
+        (let [j (cpp/int (loop [jj j bit (cpp// n (cpp/int 2))]
+                           (if (cpp/>= jj bit)
+                             (recur (cpp/- jj bit) (cpp// bit (cpp/int 2)))
+                             (cpp/+ jj bit))))]
+          (when (cpp/< i j)
+            ;; cpp/aget yields a REFERENCE, not a copy: binding tr to
+            ;; re[i] and then writing re[i] would change tr underneath.
+            ;; The C copies the whole FFTComplex, so cast to force a copy.
+            (let [tr (cpp/cast cpp/double (cpp/aget re i))
+                  ti (cpp/cast cpp/double (cpp/aget im i))
+                  sr (cpp/cast cpp/double (cpp/aget re j))
+                  si (cpp/cast cpp/double (cpp/aget im j))]
+              (cpp/= (cpp/aget re i) (cpp/cast cpp/float sr))
+              (cpp/= (cpp/aget im i) (cpp/cast cpp/float si))
+              (cpp/= (cpp/aget re j) (cpp/cast cpp/float tr))
+              (cpp/= (cpp/aget im j) (cpp/cast cpp/float ti))))
+          (recur (cpp/+ i (cpp/int 1)) j))))
+    ;; butterflies
+    (loop [len (cpp/int 2)]
+      (when (cpp/<= len n)
+        (let [ang (cpp// (cpp/double (- 0.0 TAU)) (cpp/cast cpp/double len))
+              ur (cpp/cos ang) ui (cpp/sin ang)
+              h (cpp// len (cpp/int 2))]
+          (loop [i (cpp/int 0)]
+            (when (cpp/< i n)
+              (loop [k (cpp/int 0) tr (cpp/double 1.0) ti (cpp/double 0.0)]
+                (when (cpp/< k h)
+                  (let [a (cpp/+ i k) b (cpp/+ a h)
+                        er (cpp/cast cpp/double (cpp/aget re a))
+                        ei (cpp/cast cpp/double (cpp/aget im a))
+                        orr (cpp/cast cpp/double (cpp/aget re b))
+                        oi (cpp/cast cpp/double (cpp/aget im b))
+                        xr (cpp/- (cpp/* orr tr) (cpp/* oi ti))
+                        xi (cpp/+ (cpp/* orr ti) (cpp/* oi tr))]
+                    (cpp/= (cpp/aget re a) (cpp/cast cpp/float (cpp/+ er xr)))
+                    (cpp/= (cpp/aget im a) (cpp/cast cpp/float (cpp/+ ei xi)))
+                    (cpp/= (cpp/aget re b) (cpp/cast cpp/float (cpp/- er xr)))
+                    (cpp/= (cpp/aget im b) (cpp/cast cpp/float (cpp/- ei xi)))
+                    ;; Both new twiddle components read BOTH old ones, so
+                    ;; they cannot be computed inline in the recur: jank
+                    ;; assigns loop slots in order, so arg 3 would see the
+                    ;; tr that arg 2 just wrote. Bind first.
+                    (let [ntr (cpp/- (cpp/* tr ur) (cpp/* ti ui))
+                          nti (cpp/+ (cpp/* tr ui) (cpp/* ti ur))]
+                      (recur (cpp/+ k (cpp/int 1)) ntr nti)))))
+              (recur (cpp/+ i len)))))
+        (recur (cpp/* len (cpp/int 2))))))
+  nil)
+
+(defn- capture-frame!
+  "Blackman window, FFT, then magnitudes smoothed into dB and written as
+  one row of the history ring."
+  [st]
+  (let [{re-box :re im-box :im :keys [prev hist hist-pos samples]} st
+        re (cpp/unbox (:* cpp/float) re-box)
+        im (cpp/unbox (:* cpp/float) im-box)
+        prev (cpp/unbox (:* cpp/float) prev)
+        hist (cpp/unbox (:* cpp/float) hist)
+        samples (cpp/unbox (:* cpp/float) samples)
+        n (cpp/int FFT-WINDOW)]
+    (loop [i (cpp/int 0)]
+      (when (cpp/< i n)
+        (let [x (cpp// (cpp/* (cpp/double TAU) (cpp/cast cpp/double i))
+                       (cpp/- (cpp/cast cpp/double n) (cpp/double 1.0)))
+              w (cpp/+ (cpp/- (cpp/double 0.42) (cpp/* (cpp/double 0.5) (cpp/cos x)))
+                       (cpp/* (cpp/double 0.08) (cpp/cos (cpp/* (cpp/double 2.0) x))))]
+          (cpp/= (cpp/aget re i)
+                 (cpp/cast cpp/float (cpp/* (cpp/cast cpp/double (cpp/aget samples i)) w)))
+          (cpp/= (cpp/aget im i) (cpp/float 0.0)))
+        (recur (cpp/+ i (cpp/int 1)))))
+    (fft! re-box im-box)
+    (let [row (cpp/* (cpp/int hist-pos) (cpp/int FFT-BINS))]
+      (loop [b (cpp/int 0)]
+        (when (cpp/< b (cpp/int FFT-BINS))
+          (let [r (cpp/cast cpp/double (cpp/aget re b))
+                i (cpp/cast cpp/double (cpp/aget im b))
+                lin (cpp// (cpp/sqrt (cpp/+ (cpp/* r r) (cpp/* i i)))
+                           (cpp/cast cpp/double n))
+                sm (cpp/+ (cpp/* (cpp/double SMOOTHING)
+                                 (cpp/cast cpp/double (cpp/aget prev b)))
+                          (cpp/* (cpp/- (cpp/double 1.0) (cpp/double SMOOTHING)) lin))
+                _ (cpp/= (cpp/aget prev b) (cpp/cast cpp/float sm))
+                db (cpp/* (cpp/log (if (cpp/> sm (cpp/double 1e-40)) sm (cpp/double 1e-40)))
+                          (cpp/double DB-SCALE))
+                nz (cpp/* (cpp/- db (cpp/double MIN-DB)) (cpp/double INV-DB-RANGE))
+                nz (if (cpp/< nz (cpp/double 0.0)) (cpp/double 0.0)
+                       (if (cpp/> nz (cpp/double 1.0)) (cpp/double 1.0) nz))]
+            (cpp/= (cpp/aget hist (cpp/+ row b)) (cpp/cast cpp/float nz)))
+          (recur (cpp/+ b (cpp/int 1)))))))
+  nil)
+
+(defn- feed-stream!
+  "Keep the stream fed from the decoded wave, capturing the FFT input as
+  we go. WaveFormat forced the wave to mono, so channels is 1 and the C's
+  stereo branch is dead, but it is kept so the code still reads as the
+  original does."
+  [stream-box wav-box chunk-box samples-box cursor frame-count channels]
+  (let [stream (cpp/* (cpp/unbox (:* cpp/AudioStream) stream-box))
+        pcm (cpp/unsafe-cast (:* cpp/short) (.-data (cpp/* (cpp/unbox (:* cpp/Wave) wav-box))))
+        chunk (cpp/unbox (:* cpp/short) chunk-box)
+        samples (cpp/unbox (:* cpp/float) samples-box)
+        stereo? (= channels 2)]
+    (loop [cursor cursor]
+      (if (cpp/IsAudioStreamProcessed stream)
+        (let [c (loop [i (cpp/int 0) c (cpp/int cursor)]
+                  (if (cpp/< i (cpp/int RING))
+                    (let [l (if stereo?
+                              (cpp/cast cpp/int (cpp/aget pcm (cpp/* c (cpp/int 2))))
+                              (cpp/cast cpp/int (cpp/aget pcm c)))
+                          r (if stereo?
+                              (cpp/cast cpp/int (cpp/aget pcm (cpp/+ (cpp/* c (cpp/int 2))
+                                                                     (cpp/int 1))))
+                              l)
+                          nc (cpp/+ c (cpp/int 1))]
+                      (cpp/= (cpp/aget chunk i)
+                             (cpp/cast cpp/short (cpp// (cpp/+ l r) (cpp/int 2))))
+                      (recur (cpp/+ i (cpp/int 1))
+                             (if (cpp/>= nc (cpp/int frame-count)) (cpp/int 0) nc)))
+                    c))]
+          (cpp/UpdateAudioStream stream (cpp/unsafe-cast (:* (:const cpp/void)) chunk)
+                                 (cpp/int RING))
+          (loop [i (cpp/int 0)]
+            (when (cpp/< i (cpp/int FFT-WINDOW))
+              (cpp/= (cpp/aget samples i)
+                     (cpp/cast cpp/float
+                               (cpp// (cpp/* (cpp/+ (cpp/cast cpp/double
+                                                              (cpp/aget chunk (cpp/* i (cpp/int 2))))
+                                                    (cpp/cast cpp/double
+                                                              (cpp/aget chunk (cpp/+ (cpp/* i (cpp/int 2))
+                                                                                     (cpp/int 1)))))
+                                             (cpp/double 0.5))
+                                      (cpp/double 32767.0))))
+              (recur (cpp/+ i (cpp/int 1)))))
+          (recur (int c)))
+        cursor))))
+
+(defn- render-frame!
+  "Write one history row into the 512x1 image the shader samples."
+  [img-box hist-box hist-len hist-pos]
+  (let [img (cpp/unbox (:* cpp/Image) img-box)
+        hist (cpp/unbox (:* cpp/float) hist-box)
+        back (let [f (cpp/floor (/ TAPBACK WINDOW-TIME))
+                   f (if (< f 0.0) 0.0 (if (> f (- hist-len 1.0)) (- hist-len 1.0) f))]
+               (int f))
+        ;; rem returns a real in jank, and these feed cpp/int
+        p (int (rem (- hist-pos 1 back) hist-len))
+        p (if (< p 0) (+ p hist-len) p)
+        row (cpp/* (cpp/int p) (cpp/int FFT-BINS))]
+    (loop [b (cpp/int 0)]
+      (when (cpp/< b (cpp/int FFT-BINS))
+        (cpp/ImageDrawPixel img b (cpp/int 0)
+                            (cpp/ColorFromNormalized
+                             (cpp/Vector4 (cpp/aget hist (cpp/+ row b))
+                                          (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))))
+        (recur (cpp/+ b (cpp/int 1))))))
+  nil)
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -164,51 +239,66 @@ static void jank_set_vec2(Shader s, int loc, double a, double b) {
         fft-texture (cpp/LoadTextureFromImage fft-image)
         buffer-a (cpp/LoadRenderTexture WIDTH HEIGHT)
         shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/fft.fs"))
+        shader-box (cpp/box (cpp/new cpp/Shader shader))
         res-loc (int (cpp/GetShaderLocation shader "iResolution"))
-        chan0-loc (int (cpp/GetShaderLocation shader "iChannel0"))]
+        chan0-loc (int (cpp/GetShaderLocation shader "iChannel0"))
+        img-box (cpp/box (cpp/& fft-image))]
 
     ;; iResolution once; the sampler rebinds every frame
-    (cpp/jank_set_vec2 shader res-loc 800.0 450.0)
+    (shaders/set-vec2! shader-box res-loc 800.0 450.0)
 
     (cpp/InitAudioDevice)
     (cpp/SetAudioStreamBufferSizeDefault 2048)
 
-    (cpp/jank_fft_init (str RES "country.mp3"))
+    (let [hist-len (int (+ (cpp/ceil (/ 2.0 WINDOW-TIME)) 1))
+          st {:re (falloc FFT-WINDOW) :im (falloc FFT-WINDOW)
+              :prev (falloc FFT-BINS) :hist (falloc (* hist-len FFT-BINS))
+              :samples (falloc FFT-WINDOW) :hist-pos 0}
+          chunk-box (salloc RING)
+          wav (cpp/LoadWave (str RES "country.mp3"))
+          wav-box (cpp/box (cpp/new cpp/Wave wav))
+          _ (cpp/WaveFormat (cpp/unbox (:* cpp/Wave) wav-box) SR 16 1)
+          w (cpp/* (cpp/unbox (:* cpp/Wave) wav-box))
+          frame-count (int (+ 0.0 (.-frameCount w)))
+          channels (int (+ 0.0 (.-channels w)))
+          stream (cpp/LoadAudioStream 44100 16 1)
+          stream-box (cpp/box (cpp/new cpp/AudioStream stream))]
 
-    (let [stream (cpp/LoadAudioStream 44100 16 1)]
       (cpp/PlayAudioStream stream)
-
       (cpp/SetTargetFPS 60)
 
-      (loop []
-        (when (cpp/! (cpp/WindowShouldClose))
-          (cpp/jank_feed_stream stream)
-          (cpp/jank_capture_frame)
-          (cpp/jank_render_frame (cpp/& fft-image))
-          (cpp/jank_update_fft_texture fft-texture (cpp/& fft-image))
+      ;; Thread [pcm-cursor history-position].
+      (loop [cursor 0
+             hist-pos 0]
+        (if (cpp/! (cpp/WindowShouldClose))
+          (let [cursor (feed-stream! stream-box wav-box chunk-box (:samples st)
+                                     cursor frame-count channels)]
+            (capture-frame! (assoc st :hist-pos hist-pos))
+            (let [hist-pos (int (rem (inc hist-pos) hist-len))]
+              (render-frame! img-box (:hist st) hist-len hist-pos)
+              (cpp/UpdateTexture fft-texture (.-data fft-image))
 
-          (cpp/BeginDrawing)
-          (cpp/ClearBackground cpp/RAYWHITE)
+              (cpp/BeginDrawing)
+              (cpp/ClearBackground cpp/RAYWHITE)
 
-          (cpp/BeginShaderMode shader)
-          (cpp/SetShaderValueTexture shader chan0-loc fft-texture)
-          (cpp/DrawTextureRec (.-texture buffer-a)
-                              (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
-                                             (cpp/float 800.0) (cpp/float -450.0))
-                              (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
-                              cpp/WHITE)
-          (cpp/EndShaderMode)
+              (cpp/BeginShaderMode shader)
+              (cpp/SetShaderValueTexture shader chan0-loc fft-texture)
+              (cpp/DrawTextureRec (.-texture buffer-a)
+                                  (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                                 (cpp/float 800.0) (cpp/float -450.0))
+                                  (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                                  cpp/WHITE)
+              (cpp/EndShaderMode)
 
-          (cpp/EndDrawing)
-          (recur)))
-
-      (cpp/UnloadAudioStream stream))
+              (cpp/EndDrawing)
+              (recur cursor hist-pos)))
+          (do (cpp/UnloadWave (cpp/* (cpp/unbox (:* cpp/Wave) wav-box)))
+              (cpp/UnloadAudioStream stream)))))
 
     (cpp/UnloadShader shader)
     (cpp/UnloadRenderTexture buffer-a)
     (cpp/UnloadTexture fft-texture)
     (cpp/UnloadImage fft-image))
 
-  (cpp/jank_fft_free)
   (cpp/CloseAudioDevice)
   (cpp/CloseWindow))
