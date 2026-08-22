@@ -293,7 +293,14 @@
               (cpp/EndDrawing)
               (recur cursor hist-pos)))
           (do (cpp/UnloadWave (cpp/* (cpp/unbox (:* cpp/Wave) wav-box)))
-              (cpp/UnloadAudioStream stream)))))
+              (cpp/UnloadAudioStream stream)
+              ;; the C's jank_fft_free released these; MemAlloc has no owner
+              (cpp/MemFree (cpp/unbox (:* cpp/float) (:re st)))
+              (cpp/MemFree (cpp/unbox (:* cpp/float) (:im st)))
+              (cpp/MemFree (cpp/unbox (:* cpp/float) (:prev st)))
+              (cpp/MemFree (cpp/unbox (:* cpp/float) (:hist st)))
+              (cpp/MemFree (cpp/unbox (:* cpp/float) (:samples st)))
+              (cpp/MemFree (cpp/unbox (:* cpp/short) chunk-box))))))
 
     (cpp/UnloadShader shader)
     (cpp/UnloadRenderTexture buffer-a)

@@ -78,12 +78,29 @@ Same rule each time, but the next one never looks like the last:
 5. **A closure counts as a fn boundary.** `dotimes` and `doseq` build one, so
    a native pointer captured by either arrives as an `object_ref` and
    `cpp/aget` has no overload for it. `loop`/`recur` is inline and works.
+6. **Pointers are values too.** A `float *`, `const char *` or `Model *`
+   passed as a jank fn parameter arrives as an `object_ref`, and `cpp/aget`
+   and `cpp/+` have no overload for that. Box the pointer, or keep the whole
+   loop in one fn. `spectrum_visualizer.jank` boxes its FFT arrays,
+   `text_3d_drawing.jank` its `const char *`, `decals.jank` its mesh arrays.
 
 Corollary: a boxed copy **shares the pointer members** of the original.
 `Shader` is `{unsigned int id; int *locs;}`, `Model` holds
 `Material *materials`, so writing through the box reaches the caller's value.
 That is what makes one shared helper namespace viable instead of a shim per
 consumer (`shaders.jank`, `models.jank`, `rlights.jank`).
+
+## Two limits that are not about lifetimes
+
+Neither follows from the boundary rule, but both surface while working around
+it, and both are compile-time errors with clear messages:
+
+- **A jank fn takes at most 10 parameters.** `text_3d_drawing.jank`'s glyph
+  writer needed 11, so its position travels as an `[x y z]` vector.
+- **`loop`/`recur` slots are assigned in order, without temporaries.** An
+  argument that reads a slot written earlier in the same `recur` sees the
+  **new** value. Bind the new values first, or force a copy. See
+  [`numeric-performance.md`](numeric-performance.md#two-loop-traps).
 
 ## Frame-crossing mutable native state
 

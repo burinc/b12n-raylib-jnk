@@ -255,6 +255,7 @@
           (recur frame0 frame1 upper?))))
 
     (cpp/UnloadModelAnimations (cpp/unbox (:* cpp/ModelAnimation) anims-box) anim-count)
+    (cpp/MemFree (cpp/unbox (:* cpp/int) count-box))
     (cpp/UnloadModel model)
     (cpp/UnloadShader skinning-shader))
 
