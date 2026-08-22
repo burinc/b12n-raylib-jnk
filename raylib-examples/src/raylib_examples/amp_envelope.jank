@@ -18,62 +18,6 @@
   (:require [clojure.string :as string])
   (:include "raylib.h" "math.h"))
 
-;; The envelope state machine + oscillator + stream refill.
-(cpp/raw "#define JANK_BUFFER_SIZE 4096
-#define JANK_SAMPLE_RATE 44100
-typedef enum { JANK_IDLE, JANK_ATTACK, JANK_DECAY, JANK_SUSTAIN, JANK_RELEASE } JankADSRState;
-static float jank_attack = 1.0f, jank_decay = 1.0f, jank_sustain = 0.5f, jank_release = 1.0f;
-static float jank_env_value = 0.0f;
-static JankADSRState jank_env_state = JANK_IDLE;
-static float jank_audio_time = 0.0f;
-static float jank_env_buffer[JANK_BUFFER_SIZE] = { 0 };
-
-static void jank_env_set_params(double a, double d, double s, double r) {
-  jank_attack = (float)a; jank_decay = (float)d;
-  jank_sustain = (float)s; jank_release = (float)r;
-}
-static void jank_env_trigger(void) { jank_env_state = JANK_ATTACK; }
-static void jank_env_release_key(void) {
-  if (jank_env_state != JANK_IDLE) jank_env_state = JANK_RELEASE;
-}
-static double jank_env_get_value(void) { return (double)jank_env_value; }
-
-static void jank_update_envelope(void) {
-  float sampleTime = 1.0f/JANK_SAMPLE_RATE;
-  switch (jank_env_state) {
-    case JANK_ATTACK:
-      jank_env_value += (1.0f/jank_attack)*sampleTime;
-      if (jank_env_value >= 1.0f) { jank_env_value = 1.0f; jank_env_state = JANK_DECAY; }
-      break;
-    case JANK_DECAY:
-      jank_env_value -= ((1.0f - jank_sustain)/jank_decay)*sampleTime;
-      if (jank_env_value <= jank_sustain) { jank_env_value = jank_sustain; jank_env_state = JANK_SUSTAIN; }
-      break;
-    case JANK_SUSTAIN:
-      jank_env_value = jank_sustain;
-      break;
-    case JANK_RELEASE:
-      jank_env_value -= (jank_sustain/jank_release)*sampleTime;
-      if (jank_env_value <= 0.001f) { jank_env_value = 0.0f; jank_env_state = JANK_IDLE; }
-      break;
-    default: break;
-  }
-}
-/* one refill: envelope-shaped sine, or silence when idle */
-static void jank_env_fill(AudioStream stream) {
-  if ((jank_env_state != JANK_IDLE) || (jank_env_value > 0.0f)) {
-    for (int i = 0; i < JANK_BUFFER_SIZE; i++) {
-      jank_update_envelope();
-      jank_env_buffer[i] = jank_env_value*sinf(2.0f*PI*440.0f*jank_audio_time);
-      jank_audio_time += (1.0f/JANK_SAMPLE_RATE);
-    }
-  } else {
-    for (int i = 0; i < JANK_BUFFER_SIZE; i++) jank_env_buffer[i] = 0;
-    jank_audio_time = 0.0f;
-  }
-  UpdateAudioStream(stream, jank_env_buffer, JANK_BUFFER_SIZE);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 
@@ -95,6 +39,68 @@ static void jank_env_fill(AudioStream stream) {
   (cpp/DrawRectangleLines 100 y 400 30 cpp/GRAY)
   (cpp/DrawText (str (fmt2 value) "  (" keys- ")") 510 (+ y 10) 10 cpp/DARKGRAY))
 
+(def ^:private BUFFER-SIZE 4096)
+(def ^:private SAMPLE-RATE 44100.0)
+(def ^:private SAMPLE-TIME (/ 1.0 SAMPLE-RATE))
+
+;; :idle :attack :decay :sustain :release
+(defn- step-envelope
+  "One sample of ADSR. Pure: takes and returns [value state], so the
+  4096-sample refill threads it through a loop rather than mutating."
+  [value state {:keys [attack decay sustain release]}]
+  (cond
+    (= state :attack)
+    (let [v (+ value (* (/ 1.0 attack) SAMPLE-TIME))]
+      (if (>= v 1.0) [1.0 :decay] [v :attack]))
+
+    (= state :decay)
+    (let [v (- value (* (/ (- 1.0 sustain) decay) SAMPLE-TIME))]
+      (if (<= v sustain) [sustain :sustain] [v :decay]))
+
+    (= state :sustain) [sustain :sustain]
+
+    (= state :release)
+    (let [v (- value (* (/ sustain release) SAMPLE-TIME))]
+      (if (<= v 0.001) [0.0 :idle] [v :release]))
+
+    :else [value state]))
+
+(defn- fill-stream!
+  "Refill the audio buffer: an envelope-shaped 440 Hz sine, or silence.
+
+  env is a jank atom of {:value :state :time}; only ONE swap happens per
+  refill, with the per-sample state threaded through the loop. The sample
+  buffer is a native float[4096] reached through cpp/unsafe-cast, since
+  UpdateAudioStream wants a pointer.
+
+  ~11 refills a second at 44.1 kHz, so roughly 0.7 ms each: affordable in
+  jank, unlike a per-frame pixel loop.
+
+  The stream arrives BOXED: an AudioStream has no conversion trait, so a
+  bare one becomes an object_ref and UpdateAudioStream rejects it."
+  [stream-box env buf-box params]
+  (let [{:keys [value state time]} @env
+        stream (cpp/* (cpp/unbox (:* cpp/AudioStream) stream-box))
+        p (cpp/unbox (:* cpp/float) buf-box)]
+    (if (or (not= state :idle) (> value 0.0))
+      (let [[v s tm]
+            (loop [i 0 v value s state tm time]
+              (if (< i BUFFER-SIZE)
+                (let [[nv ns] (step-envelope v s params)]
+                  (cpp/= (cpp/aget p (cpp/int i))
+                         (cpp/float (* nv (cpp/sin (* 2.0 3.141592653589793 440.0 tm)))))
+                  (recur (inc i) nv ns (+ tm SAMPLE-TIME)))
+                [v s tm]))]
+        (reset! env {:value v :state s :time tm}))
+      (do (loop [i 0]
+            (when (< i BUFFER-SIZE)
+              (cpp/= (cpp/aget p (cpp/int i)) (cpp/float 0.0))
+              (recur (inc i))))
+          (swap! env assoc :time 0.0)))
+    (cpp/UpdateAudioStream stream (cpp/unsafe-cast (:* (:const cpp/void)) p)
+                           (cpp/int BUFFER-SIZE)))
+  nil)
+
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [audio] example - amp envelope (jank)")
@@ -102,7 +108,12 @@ static void jank_env_fill(AudioStream stream) {
   (cpp/InitAudioDevice)
   (cpp/SetAudioStreamBufferSizeDefault 4096)
 
-  (let [stream (cpp/LoadAudioStream 44100 32 1)]
+  (let [stream (cpp/LoadAudioStream 44100 32 1)
+        ;; envelope state in a jank atom; the sample buffer is native,
+        ;; since UpdateAudioStream takes a pointer
+        env (atom {:value 0.0 :state :idle :time 0.0})
+        buf-box (cpp/box (cpp/unsafe-cast (:* cpp/float)
+                                          (cpp/MemAlloc (cpp/cast cpp/uint (* BUFFER-SIZE 4)))))]
     (cpp/SetTargetFPS 60)
 
     ;; Thread [attack decay sustain release] (seconds / level).
@@ -125,13 +136,13 @@ static void jank_env_fill(AudioStream stream) {
                                    (cpp/IsKeyDown cpp/KEY_F) (- release step)
                                    :else release) 0.1 3.0)]
 
-          (cpp/jank_env_set_params attack decay sustain release)
-
-          (when (cpp/IsKeyPressed cpp/KEY_SPACE) (cpp/jank_env_trigger))
-          (when (cpp/IsKeyReleased cpp/KEY_SPACE) (cpp/jank_env_release_key))
+          (when (cpp/IsKeyPressed cpp/KEY_SPACE) (swap! env assoc :state :attack))
+          (when (cpp/IsKeyReleased cpp/KEY_SPACE)
+            (swap! env (fn [e] (if (= (:state e) :idle) e (assoc e :state :release)))))
 
           (when (cpp/IsAudioStreamProcessed stream)
-            (cpp/jank_env_fill stream))
+            (fill-stream! (cpp/box (cpp/new cpp/AudioStream stream)) env buf-box
+                          {:attack attack :decay decay :sustain sustain :release release}))
           (when (cpp/! (cpp/IsAudioStreamPlaying stream))
             (cpp/PlayAudioStream stream))
 
@@ -166,7 +177,7 @@ static void jank_env_fill(AudioStream stream) {
             (cpp/DrawText "ADSR Visualizer" 100 230 10 cpp/DARKGRAY))
 
           ;; the live gain dot
-          (let [gain (+ 0.0 (cpp/jank_env_get_value))]
+          (let [gain (:value @env)]
             (cpp/DrawCircleV (cpp/Vector2 (cpp/float 520.0)
                                           (cpp/float (- 350.0 (* gain 100.0))))
                              (cpp/float 5.0) cpp/MAROON)
