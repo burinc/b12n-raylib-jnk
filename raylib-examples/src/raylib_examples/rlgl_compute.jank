@@ -26,63 +26,88 @@
   (:require [raylib-examples.shaders :as sh])
   (:include "raylib.h" "rlgl.h"))
 
-;; The C's GolUpdateSSBO (count + buffered draw commands) parked C-side;
-;; jank talks to it through these wrappers. The flush uploads the staged
-;; commands and dispatches one GPU unit per command.
-(cpp/raw "#define JANK_GOL_MAX_CMDS 48
-typedef struct { unsigned int x, y, w, enabled; } GolUpdateCmd;
-typedef struct { unsigned int count; GolUpdateCmd commands[JANK_GOL_MAX_CMDS]; } GolUpdateSSBO;
-static GolUpdateSSBO jank_gol_transfert = { 0 };
-
-static int jank_gol_load_compute(const char* path) {
-  char *code = LoadFileText(path);
-  unsigned int sh = rlLoadShader(code, RL_COMPUTE_SHADER);
-  unsigned int prog = rlLoadShaderProgramCompute(sh);
-  UnloadFileText(code);
-  return (int)prog;
-}
-static int jank_gol_load_transfert_ssbo(void) {
-  return (int)rlLoadShaderBuffer(sizeof(GolUpdateSSBO), NULL, RL_DYNAMIC_COPY);
-}
-static int jank_gol_count(void) { return (int)jank_gol_transfert.count; }
-static void jank_gol_buffer_cmd(int x, int y, int w, int enabled) {
-  if (jank_gol_transfert.count < JANK_GOL_MAX_CMDS) {
-    GolUpdateCmd *cmd = &jank_gol_transfert.commands[jank_gol_transfert.count];
-    cmd->x = (unsigned int)x; cmd->y = (unsigned int)y;
-    cmd->w = (unsigned int)w; cmd->enabled = (unsigned int)enabled;
-    jank_gol_transfert.count++;
-  }
-}
-static void jank_gol_flush(int ssboTransfert, int program, int ssboA) {
-  rlUpdateShaderBuffer((unsigned int)ssboTransfert, &jank_gol_transfert,
-                       sizeof(GolUpdateSSBO), 0);
-  rlEnableShader((unsigned int)program);
-  rlBindShaderBuffer((unsigned int)ssboA, 1);
-  rlBindShaderBuffer((unsigned int)ssboTransfert, 3);
-  rlComputeShaderDispatch(jank_gol_transfert.count, 1, 1);
-  rlDisableShader();
-  jank_gol_transfert.count = 0;
-}")
-
 ;; IMPORTANT: must match the gol*.glsl GOL_WIDTH constant (multiple of 16).
 (def GOL-WIDTH 768)
 (def RES "../jank-raylib-sys/raylib/examples/shaders/resources/")
+
+(def ^:private MAX-CMDS 48)
+
+;; The transfer SSBO the compute shader reads:
+;;   struct { uint count; struct { uint x, y, w, enabled; } commands[48]; }
+;; Every member is a uint, so the whole thing is a flat uint array:
+;; slot 0 is the count, and command i occupies slots 1+i*4 .. 4+i*4.
+(def ^:private SSBO-UINTS (inc (* MAX-CMDS 4)))
+
+(defn- load-compute
+  "Compile one .glsl compute program and return its id."
+  [path]
+  (let [code (cpp/LoadFileText path)
+        sh (cpp/rlLoadShader code (cpp/int cpp/RL_COMPUTE_SHADER))
+        prog (cpp/rlLoadShaderProgramCompute sh)]
+    (cpp/UnloadFileText code)
+    (int (+ 0.0 prog))))
+
+(defn- cmd-buffer!
+  "The transfer SSBO's CPU-side mirror, zeroed, boxed."
+  []
+  (let [p (cpp/unsafe-cast (:* cpp/uint)
+                           (cpp/MemAlloc (cpp/cast cpp/uint (* SSBO-UINTS 4))))]
+    (loop [i 0]
+      (when (< i SSBO-UINTS)
+        (cpp/= (cpp/aget p (cpp/int i)) (cpp/cast cpp/uint 0))
+        (recur (inc i))))
+    (cpp/box p)))
+
+(defn- cmd-count [buf] (int (+ 0.0 (cpp/aget (cpp/unbox (:* cpp/uint) buf) (cpp/int 0)))))
+
+(defn- buffer-cmd!
+  "Append one brush stroke, if there is room."
+  [buf x y w enabled]
+  (let [p (cpp/unbox (:* cpp/uint) buf)
+        n (cmd-count buf)]
+    (when (< n MAX-CMDS)
+      (let [base (inc (* n 4))]
+        (cpp/= (cpp/aget p (cpp/int base)) (cpp/cast cpp/uint (int x)))
+        (cpp/= (cpp/aget p (cpp/int (+ base 1))) (cpp/cast cpp/uint (int y)))
+        (cpp/= (cpp/aget p (cpp/int (+ base 2))) (cpp/cast cpp/uint (int w)))
+        (cpp/= (cpp/aget p (cpp/int (+ base 3))) (cpp/cast cpp/uint (int enabled)))
+        (cpp/= (cpp/aget p (cpp/int 0)) (cpp/cast cpp/uint (inc n))))))
+  nil)
+
+(defn- flush-cmds!
+  "Upload the buffered strokes, dispatch one thread per command, reset."
+  [buf ssbo-transfert program ssbo-a]
+  (let [p (cpp/unbox (:* cpp/uint) buf)
+        n (cmd-count buf)]
+    (cpp/rlUpdateShaderBuffer (cpp/cast cpp/uint ssbo-transfert)
+                              (cpp/unsafe-cast (:* (:const cpp/void)) p)
+                              (cpp/cast cpp/uint (* SSBO-UINTS 4)) (cpp/cast cpp/uint 0))
+    (cpp/rlEnableShader (cpp/cast cpp/uint program))
+    (cpp/rlBindShaderBuffer (cpp/cast cpp/uint ssbo-a) (cpp/cast cpp/uint 1))
+    (cpp/rlBindShaderBuffer (cpp/cast cpp/uint ssbo-transfert) (cpp/cast cpp/uint 3))
+    (cpp/rlComputeShaderDispatch (cpp/cast cpp/uint n) (cpp/cast cpp/uint 1) (cpp/cast cpp/uint 1))
+    (cpp/rlDisableShader)
+    (cpp/= (cpp/aget p (cpp/int 0)) (cpp/cast cpp/uint 0)))
+  nil)
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow GOL-WIDTH GOL-WIDTH "raylib [shaders] example - rlgl compute (jank)")
 
-  (let [gol-logic-prog (int (cpp/jank_gol_load_compute (str RES "shaders/glsl430/gol.glsl")))
+  (let [gol-logic-prog (load-compute (str RES "shaders/glsl430/gol.glsl"))
         gol-render-shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl430/gol_render.glsl"))
         ;; boxed here, where shader is still native (see rlights ns)
         render-box (cpp/box (cpp/new cpp/Shader gol-render-shader))
         res-loc (int (cpp/GetShaderLocation gol-render-shader "resolution"))
-        gol-transfert-prog (int (cpp/jank_gol_load_compute (str RES "shaders/glsl430/gol_transfert.glsl")))
+        gol-transfert-prog (load-compute (str RES "shaders/glsl430/gol_transfert.glsl"))
         ;; two ping-ponged world buffers (768*768 u32 cells) + the command buffer
         ssbo-bytes (* GOL-WIDTH GOL-WIDTH 4)
         ssbo-a0 (int (cpp/rlLoadShaderBuffer ssbo-bytes cpp/nullptr cpp/RL_DYNAMIC_COPY))
         ssbo-b0 (int (cpp/rlLoadShaderBuffer ssbo-bytes cpp/nullptr cpp/RL_DYNAMIC_COPY))
-        ssbo-transfert (int (cpp/jank_gol_load_transfert_ssbo))
+        ssbo-transfert (int (+ 0.0 (cpp/rlLoadShaderBuffer
+                                     (cpp/cast cpp/uint (* SSBO-UINTS 4))
+                                     cpp/nullptr cpp/RL_DYNAMIC_COPY)))
+        cmds (cmd-buffer!)
         white-image (cpp/GenImageColor GOL-WIDTH GOL-WIDTH cpp/WHITE)
         white-tex (cpp/LoadTextureFromImage white-image)
         _ (cpp/UnloadImage white-image)]
@@ -98,18 +123,18 @@ static void jank_gol_flush(int ssboTransfert, int program, int ssboA) {
               half (int (quot brush 2))
               drawing? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_LEFT) true false)
               erasing? (if (cpp/IsMouseButtonDown cpp/MOUSE_BUTTON_RIGHT) true false)
-              count-before (int (cpp/jank_gol_count))
+              count-before (cmd-count cmds)
               buffering? (and (or drawing? erasing?) (< count-before 48))
               stepping? (and (not buffering?) (<= count-before 0))]
 
           (cond buffering?
                 ;; stamp a brush square into the command buffer
-                (cpp/jank_gol_buffer_cmd (- mx half) (- my half) brush
-                                         (if drawing? 1 0))
+                (buffer-cmd! cmds (- mx half) (- my half) brush
+                             (if drawing? 1 0))
 
                 (> count-before 0)
                 ;; upload + apply the buffered strokes on the GPU
-                (cpp/jank_gol_flush ssbo-transfert gol-transfert-prog ssbo-a)
+                (flush-cmds! cmds ssbo-transfert gol-transfert-prog ssbo-a)
 
                 :else
                 ;; step the world: one compute thread per 16x16 tile
