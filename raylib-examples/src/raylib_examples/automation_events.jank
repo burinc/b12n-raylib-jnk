@@ -1,253 +1,274 @@
 (ns raylib-examples.automation-events
   "raylib [core] example - automation events, ported to jank.
 
-  A tiny 2D-camera platformer (LEFT/RIGHT move, SPACE jump, R reset)
-  wired to raylib's automation-event system: press S to start/stop
-  RECORDING your input into an AutomationEventList (exported to
-  automation.rae), press A to REPLAY the last recording frame-for-frame.
-  Drop a .rae/.txt file to load and replay it. A fixed 0.015s timestep
-  keeps replay deterministic.
-  Based on raylib/examples/core/core_automation_events.c (3/4 complexity).
+  A small platformer whose input can be RECORDED and REPLAYED. Arrow
+  keys move, SPACE jumps, R resets, S starts/stops recording (exported
+  to automation.rae), A replays the last recording, and dropping a
+  .rae/.txt file loads and replays it. Mouse wheel zooms. ESC quits.
+  Based on raylib/examples/core/core_automation_events.c
 
   jank-native notes:
-  - Every piece of state is a native value jank can't build or thread:
-    a Player + EnvElement[5] + Camera2D, and the AutomationEventList
-    whose `.events[]` array and `.count` the record/replay loop reads
-    (PlayAutomationEvent takes an AutomationEvent by value). So the
-    platformer physics, the record/replay state machine, the camera
-    framing and the 2D draw all live verbatim in one cpp/raw shim over
-    static state; jank owns the window lifecycle, the frame loop and the
-    frame boundaries, calling init / update / draw / cleanup."
-  (:include "raylib.h" "raymath.h"))
-
-;; The platformer + automation-event record/replay engine.
-(cpp/raw "
-#define JANK_AE_GRAVITY         400
-#define JANK_AE_PLAYER_JUMP_SPD 350.0f
-#define JANK_AE_PLAYER_HOR_SPD  200.0f
-#define JANK_AE_MAX_ENV         5
-#define JANK_AE_SW              800
-#define JANK_AE_SH              450
-
-typedef struct { Vector2 position; float speed; bool canJump; } JankAePlayer;
-typedef struct { Rectangle rect; int blocking; Color color; } JankAeEnvElement;
-
-static JankAePlayer jank_ae_player = { 0 };
-static JankAeEnvElement jank_ae_env[JANK_AE_MAX_ENV] = { 0 };
-static Camera2D jank_ae_camera = { 0 };
-static AutomationEventList jank_ae_list = { 0 };
-static bool jank_ae_recording = false;
-static bool jank_ae_playing = false;
-static unsigned int jank_ae_frameCounter = 0;
-static unsigned int jank_ae_playFrameCounter = 0;
-static unsigned int jank_ae_currentPlayFrame = 0;
-
-static void jank_ae_reset_scene(void) {
-  jank_ae_player.position = (Vector2){ 400, 280 };
-  jank_ae_player.speed = 0;
-  jank_ae_player.canJump = false;
-  jank_ae_camera.target = jank_ae_player.position;
-  jank_ae_camera.offset = (Vector2){ JANK_AE_SW/2.0f, JANK_AE_SH/2.0f };
-  jank_ae_camera.rotation = 0.0f;
-  jank_ae_camera.zoom = 1.0f;
-}
-
-static void jank_ae_init(void) {
-  jank_ae_player.position = (Vector2){ 400, 280 };
-  jank_ae_player.speed = 0;
-  jank_ae_player.canJump = false;
-
-  JankAeEnvElement init[JANK_AE_MAX_ENV] = {
-    {{ 0, 0, 1000, 400 }, 0, LIGHTGRAY },
-    {{ 0, 400, 1000, 200 }, 1, GRAY },
-    {{ 300, 200, 400, 10 }, 1, GRAY },
-    {{ 250, 300, 100, 10 }, 1, GRAY },
-    {{ 650, 300, 100, 10 }, 1, GRAY }
-  };
-  for (int i = 0; i < JANK_AE_MAX_ENV; i++) jank_ae_env[i] = init[i];
-
-  jank_ae_camera.target = jank_ae_player.position;
-  jank_ae_camera.offset = (Vector2){ JANK_AE_SW/2.0f, JANK_AE_SH/2.0f };
-  jank_ae_camera.rotation = 0.0f;
-  jank_ae_camera.zoom = 1.0f;
-
-  jank_ae_list = LoadAutomationEventList(0);
-  SetAutomationEventList(&jank_ae_list);
-
-  SetTargetFPS(60);
-}
-
-static void jank_ae_update(void) {
-  float deltaTime = 0.015f; /* fixed timestep keeps replay deterministic */
-
-  /* Dropped files: load + replay a recorded event list */
-  if (IsFileDropped()) {
-    FilePathList droppedFiles = LoadDroppedFiles();
-    if (IsFileExtension(droppedFiles.paths[0], \".txt;.rae\")) {
-      UnloadAutomationEventList(jank_ae_list);
-      jank_ae_list = LoadAutomationEventList(droppedFiles.paths[0]);
-      jank_ae_recording = false;
-      jank_ae_playing = true;
-      jank_ae_playFrameCounter = 0;
-      jank_ae_currentPlayFrame = 0;
-      jank_ae_reset_scene();
-    }
-    UnloadDroppedFiles(droppedFiles);
-  }
-
-  /* Update player */
-  if (IsKeyDown(KEY_LEFT)) jank_ae_player.position.x -= JANK_AE_PLAYER_HOR_SPD*deltaTime;
-  if (IsKeyDown(KEY_RIGHT)) jank_ae_player.position.x += JANK_AE_PLAYER_HOR_SPD*deltaTime;
-  if (IsKeyDown(KEY_SPACE) && jank_ae_player.canJump) {
-    jank_ae_player.speed = -JANK_AE_PLAYER_JUMP_SPD;
-    jank_ae_player.canJump = false;
-  }
-
-  int hitObstacle = 0;
-  for (int i = 0; i < JANK_AE_MAX_ENV; i++) {
-    JankAeEnvElement *element = &jank_ae_env[i];
-    Vector2 *p = &(jank_ae_player.position);
-    if (element->blocking &&
-        element->rect.x <= p->x &&
-        element->rect.x + element->rect.width >= p->x &&
-        element->rect.y >= p->y &&
-        element->rect.y <= p->y + jank_ae_player.speed*deltaTime) {
-      hitObstacle = 1;
-      jank_ae_player.speed = 0.0f;
-      p->y = element->rect.y;
-    }
-  }
-
-  if (!hitObstacle) {
-    jank_ae_player.position.y += jank_ae_player.speed*deltaTime;
-    jank_ae_player.speed += JANK_AE_GRAVITY*deltaTime;
-    jank_ae_player.canJump = false;
-  } else jank_ae_player.canJump = true;
-
-  if (IsKeyPressed(KEY_R)) jank_ae_reset_scene();
-
-  /* Events playing (before camera update: replay can set mouse-wheel) */
-  if (jank_ae_playing) {
-    while (jank_ae_playFrameCounter == jank_ae_list.events[jank_ae_currentPlayFrame].frame) {
-      PlayAutomationEvent(jank_ae_list.events[jank_ae_currentPlayFrame]);
-      jank_ae_currentPlayFrame++;
-      if (jank_ae_currentPlayFrame == jank_ae_list.count) {
-        jank_ae_playing = false;
-        jank_ae_currentPlayFrame = 0;
-        jank_ae_playFrameCounter = 0;
-        TraceLog(LOG_INFO, \"FINISH PLAYING!\");
-        break;
-      }
-    }
-    jank_ae_playFrameCounter++;
-  }
-
-  /* Update camera to frame the whole level */
-  jank_ae_camera.target = jank_ae_player.position;
-  jank_ae_camera.offset = (Vector2){ JANK_AE_SW/2.0f, JANK_AE_SH/2.0f };
-  float minX = 1000, minY = 1000, maxX = -1000, maxY = -1000;
-
-  jank_ae_camera.zoom += ((float)GetMouseWheelMove()*0.05f);
-  if (jank_ae_camera.zoom > 3.0f) jank_ae_camera.zoom = 3.0f;
-  else if (jank_ae_camera.zoom < 0.25f) jank_ae_camera.zoom = 0.25f;
-
-  for (int i = 0; i < JANK_AE_MAX_ENV; i++) {
-    JankAeEnvElement *element = &jank_ae_env[i];
-    minX = fminf(element->rect.x, minX);
-    maxX = fmaxf(element->rect.x + element->rect.width, maxX);
-    minY = fminf(element->rect.y, minY);
-    maxY = fmaxf(element->rect.y + element->rect.height, maxY);
-  }
-
-  Vector2 max = GetWorldToScreen2D((Vector2){ maxX, maxY }, jank_ae_camera);
-  Vector2 min = GetWorldToScreen2D((Vector2){ minX, minY }, jank_ae_camera);
-
-  if (max.x < JANK_AE_SW) jank_ae_camera.offset.x = JANK_AE_SW - (max.x - (float)JANK_AE_SW/2);
-  if (max.y < JANK_AE_SH) jank_ae_camera.offset.y = JANK_AE_SH - (max.y - (float)JANK_AE_SH/2);
-  if (min.x > 0) jank_ae_camera.offset.x = (float)JANK_AE_SW/2 - min.x;
-  if (min.y > 0) jank_ae_camera.offset.y = (float)JANK_AE_SH/2 - min.y;
-
-  /* Events management */
-  if (IsKeyPressed(KEY_S)) {
-    if (!jank_ae_playing) {
-      if (jank_ae_recording) {
-        StopAutomationEventRecording();
-        jank_ae_recording = false;
-        ExportAutomationEventList(jank_ae_list, \"automation.rae\");
-        TraceLog(LOG_INFO, \"RECORDED FRAMES: %i\", jank_ae_list.count);
-      } else {
-        SetAutomationEventBaseFrame(180);
-        StartAutomationEventRecording();
-        jank_ae_recording = true;
-      }
-    }
-  } else if (IsKeyPressed(KEY_A)) {
-    if (!jank_ae_recording && (jank_ae_list.count > 0)) {
-      jank_ae_playing = true;
-      jank_ae_playFrameCounter = 0;
-      jank_ae_currentPlayFrame = 0;
-      jank_ae_reset_scene();
-    }
-  }
-
-  if (jank_ae_recording || jank_ae_playing) jank_ae_frameCounter++;
-  else jank_ae_frameCounter = 0;
-}
-
-static void jank_ae_draw(void) {
-  ClearBackground(LIGHTGRAY);
-
-  BeginMode2D(jank_ae_camera);
-    for (int i = 0; i < JANK_AE_MAX_ENV; i++) DrawRectangleRec(jank_ae_env[i].rect, jank_ae_env[i].color);
-    DrawRectangleRec((Rectangle){ jank_ae_player.position.x - 20, jank_ae_player.position.y - 40, 40, 40 }, RED);
-  EndMode2D();
-
-  /* Game controls panel */
-  DrawRectangle(10, 10, 290, 145, Fade(SKYBLUE, 0.5f));
-  DrawRectangleLines(10, 10, 290, 145, Fade(BLUE, 0.8f));
-
-  DrawText(\"Controls:\", 20, 20, 10, BLACK);
-  DrawText(\"- RIGHT | LEFT: Player movement\", 30, 40, 10, DARKGRAY);
-  DrawText(\"- SPACE: Player jump\", 30, 60, 10, DARKGRAY);
-  DrawText(\"- R: Reset game state\", 30, 80, 10, DARKGRAY);
-  DrawText(\"- S: START/STOP RECORDING INPUT EVENTS\", 30, 110, 10, BLACK);
-  DrawText(\"- A: REPLAY LAST RECORDED INPUT EVENTS\", 30, 130, 10, BLACK);
-
-  /* Recording / playing indicator */
-  if (jank_ae_recording) {
-    DrawRectangle(10, 160, 290, 30, Fade(RED, 0.3f));
-    DrawRectangleLines(10, 160, 290, 30, Fade(MAROON, 0.8f));
-    DrawCircle(30, 175, 10, MAROON);
-    if (((jank_ae_frameCounter/15)%2) == 1) DrawText(TextFormat(\"RECORDING EVENTS... [%i]\", jank_ae_list.count), 50, 170, 10, MAROON);
-  } else if (jank_ae_playing) {
-    DrawRectangle(10, 160, 290, 30, Fade(LIME, 0.3f));
-    DrawRectangleLines(10, 160, 290, 30, Fade(DARKGREEN, 0.8f));
-    DrawTriangle((Vector2){ 20, 155 + 10 }, (Vector2){ 20, 155 + 30 }, (Vector2){ 40, 155 + 20 }, DARKGREEN);
-    if (((jank_ae_frameCounter/15)%2) == 1) DrawText(TextFormat(\"PLAYING RECORDED EVENTS... [%i]\", jank_ae_currentPlayFrame), 50, 170, 10, DARKGREEN);
-  }
-}
-
-static void jank_ae_cleanup(void) {
-  UnloadAutomationEventList(jank_ae_list);
-}")
+  - The player, the five environment elements and all the recording
+    state are plain jank data: a Vector2 is two numbers and a Rectangle
+    is four, so the whole simulation threads through recur with nothing
+    boxed.
+  - Two things are genuinely native. The Camera2D is boxed because
+    BeginMode2D and GetWorldToScreen2D want the struct. The
+    AutomationEventList is boxed IN AN ATOM, because dropping a file
+    replaces it at runtime and a create-once let-local could not be
+    rebound (the viewport-scaling pattern).
+  - An AutomationEvent is read out of the list with cpp/aget and passed
+    straight to PlayAutomationEvent in the same form, so it never has to
+    cross a fn boundary.
+  - TextFormat is variadic and unavailable, so the two readouts are str."
+  (:include "raylib.h"))
 
 (def WIDTH 800)
 (def HEIGHT 450)
+
+(def ^:private GRAVITY 400.0)
+(def ^:private JUMP-SPD 350.0)
+(def ^:private HOR-SPD 200.0)
+(def ^:private DELTA 0.015) ;; fixed timestep keeps replay deterministic
+
+(def ^:private ENV
+  [{:x 0.0   :y 0.0   :w 1000.0 :h 400.0 :blocking? false :color :light}
+   {:x 0.0   :y 400.0 :w 1000.0 :h 200.0 :blocking? true  :color :gray}
+   {:x 300.0 :y 200.0 :w 400.0  :h 10.0  :blocking? true  :color :gray}
+   {:x 250.0 :y 300.0 :w 100.0  :h 10.0  :blocking? true  :color :gray}
+   {:x 650.0 :y 300.0 :w 100.0  :h 10.0  :blocking? true  :color :gray}])
+
+(def ^:private START-PLAYER {:x 400.0 :y 280.0 :speed 0.0 :can-jump? false})
+
+(defn- set-camera!
+  [cam-box tx ty ox oy zoom]
+  (let [c (cpp/* (cpp/unbox (:* cpp/Camera2D) cam-box))]
+    (cpp/= (.-x (.-target c)) (cpp/float tx))
+    (cpp/= (.-y (.-target c)) (cpp/float ty))
+    (cpp/= (.-x (.-offset c)) (cpp/float ox))
+    (cpp/= (.-y (.-offset c)) (cpp/float oy))
+    (cpp/= (.-rotation c) (cpp/float 0.0))
+    (cpp/= (.-zoom c) (cpp/float zoom)))
+  nil)
+
+(defn- world->screen
+  "GetWorldToScreen2D against the boxed camera, in and out as numbers."
+  [cam-box x y]
+  (let [c (cpp/* (cpp/unbox (:* cpp/Camera2D) cam-box))
+        v (cpp/GetWorldToScreen2D (cpp/Vector2 (cpp/float x) (cpp/float y)) c)]
+    [(+ 0.0 (.-x v)) (+ 0.0 (.-y v))]))
+
+(defn- step-player
+  "Horizontal input, jump, then the C's blocking-element scan and gravity."
+  [p]
+  (let [x (cond (cpp/IsKeyDown cpp/KEY_LEFT) (- (:x p) (* HOR-SPD DELTA))
+                (cpp/IsKeyDown cpp/KEY_RIGHT) (+ (:x p) (* HOR-SPD DELTA))
+                :else (:x p))
+        [speed can-jump?] (if (and (cpp/IsKeyDown cpp/KEY_SPACE) (:can-jump? p))
+                            [(- 0.0 JUMP-SPD) false]
+                            [(:speed p) (:can-jump? p)])
+        hit (loop [i 0]
+              (when (< i (count ENV))
+                (let [e (nth ENV i)]
+                  (if (and (:blocking? e)
+                           (<= (:x e) x)
+                           (>= (+ (:x e) (:w e)) x)
+                           (>= (:y e) (:y p))
+                           (<= (:y e) (+ (:y p) (* speed DELTA))))
+                    e
+                    (recur (inc i))))))]
+    (if hit
+      {:x x :y (:y hit) :speed 0.0 :can-jump? true}
+      {:x x :y (+ (:y p) (* speed DELTA))
+       :speed (+ speed (* GRAVITY DELTA))
+       :can-jump? false})))
+
+(defn- frame-of
+  "The frame number of event i in the boxed list."
+  [list-box i]
+  (int (+ 0.0 (.-frame (cpp/aget (.-events (cpp/* (cpp/unbox (:* cpp/AutomationEventList) list-box)))
+                                 (cpp/int i))))))
+
+(defn- event-count [list-box]
+  (int (+ 0.0 (.-count (cpp/* (cpp/unbox (:* cpp/AutomationEventList) list-box))))))
+
+(defn- play-due!
+  "Fire every event scheduled for this playback frame, as the C's while
+  loop does. Returns [playing? current-frame]."
+  [list-box play-counter current]
+  (let [n (event-count list-box)]
+    (loop [cur current]
+      (if (and (< cur n) (= play-counter (frame-of list-box cur)))
+        (do
+          (cpp/PlayAutomationEvent
+           (cpp/aget (.-events (cpp/* (cpp/unbox (:* cpp/AutomationEventList) list-box)))
+                     (cpp/int cur)))
+          (let [nxt (inc cur)]
+            (if (= nxt n)
+              (do (cpp/TraceLog cpp/LOG_INFO "FINISH PLAYING!") [false 0])
+              (recur nxt))))
+        [true cur]))))
+
+(defn- camera-offset
+  "Frame the whole level: clamp the camera so the level edges stay in
+  view, exactly as the C does after the zoom clamp."
+  [cam-box]
+  (let [[min-x min-y max-x max-y]
+        (loop [i 0 nx 1000.0 ny 1000.0 xx -1000.0 xy -1000.0]
+          (if (< i (count ENV))
+            (let [e (nth ENV i)]
+              (recur (inc i)
+                     (min (:x e) nx) (min (:y e) ny)
+                     (max (+ (:x e) (:w e)) xx) (max (+ (:y e) (:h e)) xy)))
+            [nx ny xx xy]))
+        [max-sx max-sy] (world->screen cam-box max-x max-y)
+        [min-sx min-sy] (world->screen cam-box min-x min-y)
+        ox (/ WIDTH 2.0)
+        oy (/ HEIGHT 2.0)
+        ox (if (< max-sx WIDTH) (- WIDTH (- max-sx (/ WIDTH 2.0))) ox)
+        oy (if (< max-sy HEIGHT) (- HEIGHT (- max-sy (/ HEIGHT 2.0))) oy)
+        ox (if (> min-sx 0.0) (- (/ WIDTH 2.0) min-sx) ox)
+        oy (if (> min-sy 0.0) (- (/ HEIGHT 2.0) min-sy) oy)]
+    [ox oy]))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - automation events (jank)")
 
-  (cpp/jank_ae_init)
+  (let [cam-box (cpp/box (cpp/new cpp/Camera2D))
+        ;; the list is replaced when a file is dropped, so the box lives
+        ;; in an atom rather than a create-once let-local
+        list-atom (atom (cpp/box (cpp/new cpp/AutomationEventList
+                                          (cpp/LoadAutomationEventList cpp/nullptr))))]
+    (cpp/SetAutomationEventList (cpp/unbox (:* cpp/AutomationEventList) @list-atom))
+    (set-camera! cam-box (:x START-PLAYER) (:y START-PLAYER)
+                 (/ WIDTH 2.0) (/ HEIGHT 2.0) 1.0)
+    (cpp/SetTargetFPS 60)
 
-  (loop []
-    (when (cpp/! (cpp/WindowShouldClose))
-      (cpp/jank_ae_update)
+    ;; Thread [player recording? playing? frames play-counter current zoom].
+    (loop [player START-PLAYER
+           recording? false
+           playing? false
+           frames 0
+           play-counter 0
+           current 0
+           zoom 1.0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [;; dropped .rae/.txt: swap the list and replay it
+              [player recording? playing? play-counter current]
+              (if (cpp/IsFileDropped)
+                (let [dropped (cpp/LoadDroppedFiles)
+                      path (cpp/aget (.-paths dropped) (cpp/int 0))
+                      ok? (cpp/IsFileExtension path ".txt;.rae")
+                      r (if ok?
+                          (do (cpp/UnloadAutomationEventList
+                               (cpp/* (cpp/unbox (:* cpp/AutomationEventList) @list-atom)))
+                              (reset! list-atom
+                                      (cpp/box (cpp/new cpp/AutomationEventList
+                                                        (cpp/LoadAutomationEventList path))))
+                              (cpp/SetAutomationEventList
+                               (cpp/unbox (:* cpp/AutomationEventList) @list-atom))
+                              [START-PLAYER false true 0 0])
+                          [player recording? playing? play-counter current])]
+                  (cpp/UnloadDroppedFiles dropped)
+                  r)
+                [player recording? playing? play-counter current])
 
-      (cpp/BeginDrawing)
-      (cpp/jank_ae_draw)
-      (cpp/EndDrawing)
-      (recur)))
+              player (step-player player)
+              player (if (cpp/IsKeyPressed cpp/KEY_R) START-PLAYER player)
 
-  (cpp/jank_ae_cleanup)
+              ;; replay before the camera update: an event can set the wheel
+              [playing? current play-counter]
+              (if playing?
+                (let [[p c] (play-due! @list-atom play-counter current)]
+                  [p c (if p (inc play-counter) 0)])
+                [playing? current play-counter])
+
+              zoom (let [z (+ zoom (* (+ 0.0 (cpp/GetMouseWheelMove)) 0.05))]
+                     (if (> z 3.0) 3.0 (if (< z 0.25) 0.25 z)))
+              _ (set-camera! cam-box (:x player) (:y player)
+                             (/ WIDTH 2.0) (/ HEIGHT 2.0) zoom)
+              [ox oy] (camera-offset cam-box)
+              _ (set-camera! cam-box (:x player) (:y player) ox oy zoom)
+
+              ;; S toggles recording, A replays
+              [recording? playing? play-counter current player]
+              (cond
+                (cpp/IsKeyPressed cpp/KEY_S)
+                (if playing?
+                  [recording? playing? play-counter current player]
+                  (if recording?
+                    (do (cpp/StopAutomationEventRecording)
+                        (cpp/ExportAutomationEventList
+                         (cpp/* (cpp/unbox (:* cpp/AutomationEventList) @list-atom))
+                         "automation.rae")
+                        (cpp/TraceLog cpp/LOG_INFO
+                                      (str "RECORDED FRAMES: " (event-count @list-atom)))
+                        [false playing? play-counter current player])
+                    (do (cpp/SetAutomationEventBaseFrame 180)
+                        (cpp/StartAutomationEventRecording)
+                        [true playing? play-counter current player])))
+
+                (cpp/IsKeyPressed cpp/KEY_A)
+                (if (and (not recording?) (> (event-count @list-atom) 0))
+                  [recording? true 0 0 START-PLAYER]
+                  [recording? playing? play-counter current player])
+
+                :else [recording? playing? play-counter current player])
+
+              frames (if (or recording? playing?) (inc frames) 0)]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/LIGHTGRAY)
+
+          (cpp/BeginMode2D (cpp/* (cpp/unbox (:* cpp/Camera2D) cam-box)))
+          (loop [i 0]
+            (when (< i (count ENV))
+              (let [e (nth ENV i)]
+                (cpp/DrawRectangleRec
+                 (cpp/Rectangle (cpp/float (:x e)) (cpp/float (:y e))
+                                (cpp/float (:w e)) (cpp/float (:h e)))
+                 (if (= (:color e) :light) cpp/LIGHTGRAY cpp/GRAY)))
+              (recur (inc i))))
+          (cpp/DrawRectangleRec
+           (cpp/Rectangle (cpp/float (- (:x player) 20.0)) (cpp/float (- (:y player) 40.0))
+                          (cpp/float 40.0) (cpp/float 40.0))
+           cpp/RED)
+          (cpp/EndMode2D)
+
+          (cpp/DrawRectangle 10 10 290 145 (cpp/Fade cpp/SKYBLUE (cpp/float 0.5)))
+          (cpp/DrawRectangleLines 10 10 290 145 (cpp/Fade cpp/BLUE (cpp/float 0.8)))
+          (cpp/DrawText "Controls:" 20 20 10 cpp/BLACK)
+          (cpp/DrawText "- RIGHT | LEFT: Player movement" 30 40 10 cpp/DARKGRAY)
+          (cpp/DrawText "- SPACE: Player jump" 30 60 10 cpp/DARKGRAY)
+          (cpp/DrawText "- R: Reset game state" 30 80 10 cpp/DARKGRAY)
+          (cpp/DrawText "- S: START/STOP RECORDING INPUT EVENTS" 30 110 10 cpp/BLACK)
+          (cpp/DrawText "- A: REPLAY LAST RECORDED INPUT EVENTS" 30 130 10 cpp/BLACK)
+
+          (cond
+            recording?
+            (do (cpp/DrawRectangle 10 160 290 30 (cpp/Fade cpp/RED (cpp/float 0.3)))
+                (cpp/DrawRectangleLines 10 160 290 30 (cpp/Fade cpp/MAROON (cpp/float 0.8)))
+                (cpp/DrawCircle 30 175 (cpp/float 10.0) cpp/MAROON)
+                (when (= (int (rem (int (quot frames 15)) 2)) 1)
+                  (cpp/DrawText (str "RECORDING EVENTS... [" (event-count @list-atom) "]")
+                                50 170 10 cpp/MAROON)))
+            playing?
+            (do (cpp/DrawRectangle 10 160 290 30 (cpp/Fade cpp/LIME (cpp/float 0.3)))
+                (cpp/DrawRectangleLines 10 160 290 30 (cpp/Fade cpp/DARKGREEN (cpp/float 0.8)))
+                (cpp/DrawTriangle (cpp/Vector2 (cpp/float 20.0) (cpp/float 165.0))
+                                  (cpp/Vector2 (cpp/float 20.0) (cpp/float 185.0))
+                                  (cpp/Vector2 (cpp/float 40.0) (cpp/float 175.0))
+                                  cpp/DARKGREEN)
+                (when (= (int (rem (int (quot frames 15)) 2)) 1)
+                  (cpp/DrawText (str "PLAYING RECORDED EVENTS... [" current "]")
+                                50 170 10 cpp/DARKGREEN)))
+            :else nil)
+
+          (cpp/EndDrawing)
+          (recur player recording? playing? frames play-counter current zoom))))
+
+    (cpp/UnloadAutomationEventList
+     (cpp/* (cpp/unbox (:* cpp/AutomationEventList) @list-atom))))
+
   (cpp/CloseWindow))
