@@ -148,99 +148,99 @@
   monitor-detector {:doc "▶ a scaled map of every attached monitor + its specs" :task (h/run-example! "monitor-detector")}
   input-actions   {:doc "▶ remappable abstract actions (WASD/arrows) via a keyset map" :task (h/run-example! "input-actions")}
   highdpi-demo    {:doc "▶ logical-points vs physical-pixels grids + live DPI scale" :task (h/run-example! "highdpi-demo")}
-  highdpi-testbed {:doc "▶ a HighDPI diagnostic overlay: grid, monitor/DPI info, crosshair" :task (h/run-example! "highdpi-testbed")}
+  highdpi-testbed {:doc "▶ a HighDPI overlay: grid, monitor/DPI info, crosshair" :task (h/run-example! "highdpi-testbed")}
   textured-cube   {:doc "▶ two rlgl textured 3D cubes from a shared atlas" :task (h/run-example! "textured-cube")}
   directional-billboard {:doc "▶ a sprite-sheet billboard that turns as the camera orbits" :task (h/run-example! "directional-billboard")}
-  random-sequence {:doc "▶ colored bars in a random no-repeat permutation (LoadRandomSequence)" :task (h/run-example! "random-sequence")}
-  basic-voxel     {:doc "▶ an 8x8x8 beige voxel grid; click to ray-pick and remove cubes" :task (h/run-example! "basic-voxel")}
-  rotating-cube   {:doc "▶ a textured cube spinning on a tilted axis (rlgl matrix stack)" :task (h/run-example! "rotating-cube")}
-  clipboard-text  {:doc "▶ type + cut/copy/paste with the system clipboard (CTRL shortcuts)" :task (h/run-example! "clipboard-text")}
-  undo-redo       {:doc "▶ a grid player with a 26-slot undo/redo ring buffer (CTRL+Z/Y)" :task (h/run-example! "undo-redo")}
+  random-sequence {:doc "▶ Colored bars in a no-repeat LoadRandomSequence" :task (h/run-example! "random-sequence")}
+  basic-voxel     {:doc "▶ an 8x8x8 voxel grid; click to ray-pick and remove" :task (h/run-example! "basic-voxel")}
+  rotating-cube   {:doc "▶ a textured cube spinning on a tilted axis (rlgl)" :task (h/run-example! "rotating-cube")}
+  clipboard-text  {:doc "▶ type + cut/copy/paste with the system clipboard" :task (h/run-example! "clipboard-text")}
+  undo-redo       {:doc "▶ a grid player with a 26-slot undo/redo ring buffer" :task (h/run-example! "undo-redo")}
   directory-files {:doc "▶ a keyboard file browser: list/enter dirs, filter .png/.c" :task (h/run-example! "directory-files")}
-  custom-logging  {:doc "▶ a custom trace-log callback timestamps + tags every raylib log line" :task (h/run-example! "custom-logging")}
+  custom-logging  {:doc "▶ a trace-log callback timestamps every raylib line" :task (h/run-example! "custom-logging")}
   drop-files      {:doc "▶ drag files onto the window to list their paths" :task (h/run-example! "drop-files")}
   text-file-loading {:doc "▶ load + word-wrap a text file, scroll with the mouse wheel" :task (h/run-example! "text-file-loading")}
-  rectangle-bounds {:doc "▶ word-wrapped text in a mouse-resizable container (SPACE toggles wrap)" :task (h/run-example! "rectangle-bounds")}
+  rectangle-bounds {:doc "▶ word-wrapped text in a mouse-resizable container" :task (h/run-example! "rectangle-bounds")}
   compute-hash    {:doc "▶ type text, ENTER computes CRC32/MD5/SHA1/SHA256 + Base64" :task (h/run-example! "compute-hash")}
-  storage-values  {:doc "▶ save/load a score pair to a binary storage file (R/ENTER/SPACE)" :task (h/run-example! "storage-values")}
-  keyboard-testbed {:doc "▶ an on-screen ENG-US keyboard that lights up the keys you hold" :task (h/run-example! "keyboard-testbed")}
-  input-gestures-testbed {:doc "▶ a gesture dashboard: log, last-gesture panel, angle protractor" :task (h/run-example! "input-gestures-testbed")}
-  viewport-scaling {:doc "▶ a fixed game resolution scaled into a resizable window, 6 policies" :task (h/run-example! "viewport-scaling")}
-  codepoints-loading {:doc "▶ Japanese text rasterized to a minimal font atlas (SPACE toggles atlas)" :task (h/run-example! "codepoints-loading")}
+  storage-values  {:doc "▶ save/load a score pair to a binary storage file" :task (h/run-example! "storage-values")}
+  keyboard-testbed {:doc "▶ an on-screen ENG-US keyboard highlighting held keys" :task (h/run-example! "keyboard-testbed")}
+  input-gestures-testbed {:doc "▶ a gesture dashboard with log, indicators and protractor" :task (h/run-example! "input-gestures-testbed")}
+  viewport-scaling {:doc "▶ a fixed game resolution scaled into a resizable window" :task (h/run-example! "viewport-scaling")}
+  codepoints-loading {:doc "▶ Japanese text rasterized to a minimal TTF font atlas" :task (h/run-example! "codepoints-loading")}
   unicode-ranges  {:doc "▶ grow a multilingual font atlas by unicode range (keys 0-4)" :task (h/run-example! "unicode-ranges")}
   inline-styling  {:doc "▶ text with inline [c..]/[b..]/[r] color style tags" :task (h/run-example! "inline-styling")}
-  unicode-emojis  {:doc "▶ click emojis to pop multilingual speech bubbles (SPACE re-rolls)" :task (h/run-example! "unicode-emojis")}
-  text-3d-drawing {:doc "▶ a bitmap font drawn as textured quads in 3D, with a waving ~~World~~" :task (h/run-example! "text-3d-drawing")}
-  strings-management {:doc "▶ drag/slice/shatter/glue text particles; keys 1-6 run TextToUpper/Lower/Pascal/Snake/Camel" :task (h/run-example! "strings-management")}
-  shapes-textures-shader {:doc "▶ a grayscale fragment shader toggled around shapes + a sprite" :task (h/run-example! "shapes-textures-shader")}
-  texture-outline {:doc "▶ a shader-drawn outline around a sprite (mouse wheel resizes)" :task (h/run-example! "texture-outline")}
-  camera-3d-free  {:doc "▶ a free-look 3D camera around a cube (UpdateCamera unblocked)" :task (h/run-example! "camera-3d-free")}
-  camera-3d-first-person {:doc "▶ walk a yard of random columns in first person (WASD + mouse)" :task (h/run-example! "camera-3d-first-person")}
+  unicode-emojis  {:doc "▶ Click emojis for multilingual speech bubbles" :task (h/run-example! "unicode-emojis")}
+  text-3d-drawing {:doc "▶ a bitmap font as textured quads in 3D, one span waving" :task (h/run-example! "text-3d-drawing")}
+  strings-management {:doc "▶ drag/slice/shatter/glue text; 1-6 run TextTo* fns" :task (h/run-example! "strings-management")}
+  shapes-textures-shader {:doc "▶ a grayscale fragment shader over shapes + a sprite" :task (h/run-example! "shapes-textures-shader")}
+  texture-outline {:doc "▶ a shader-drawn outline around a sprite" :task (h/run-example! "texture-outline")}
+  camera-3d-free  {:doc "▶ a free-look 3D camera around a cube" :task (h/run-example! "camera-3d-free")}
+  camera-3d-first-person {:doc "▶ Walk a yard of random columns in first person" :task (h/run-example! "camera-3d-first-person")}
   texture-waves   {:doc "▶ a space texture rippled by an animated sine-wave shader" :task (h/run-example! "texture-waves")}
   camera-3d-split-screen {:doc "▶ two players, two 3D cameras, side-by-side split screen" :task (h/run-example! "camera-3d-split-screen")}
-  camera-3d-fps   {:doc "▶ a physics FPS controller: WASD + jump/crouch, head-bob, strafe-accel" :task (h/run-example! "camera-3d-fps")}
-  vr-simulator    {:doc "▶ a 3D scene rendered in stereo through a simulated Oculus Rift + lens-distortion shader" :task (h/run-example! "vr-simulator")}
-  automation-events {:doc "▶ a 2D platformer with record/replay of input via AutomationEventList (S rec, A replay)" :task (h/run-example! "automation-events")}
-  input-gamepad   {:doc "▶ a live controller diagram: buttons/sticks/triggers light up (Xbox/PS/generic)" :task (h/run-example! "input-gamepad")}
-  julia-set       {:doc "▶ a Julia set fractal in a fragment shader (zoom with the mouse)" :task (h/run-example! "julia-set")}
-  framebuffer-rendering {:doc "▶ an observer camera watches an orbiting camera + its frustum prism" :task (h/run-example! "framebuffer-rendering")}
+  camera-3d-fps   {:doc "▶ a physics FPS controller with head-bob and lean" :task (h/run-example! "camera-3d-fps")}
+  vr-simulator    {:doc "▶ a 3D scene in stereo through a simulated Oculus Rift" :task (h/run-example! "vr-simulator")}
+  automation-events {:doc "▶ a platformer recording and replaying its own input" :task (h/run-example! "automation-events")}
+  input-gamepad   {:doc "▶ a live controller diagram: buttons/sticks/triggers lit" :task (h/run-example! "input-gamepad")}
+  julia-set       {:doc "▶ a Julia set fractal computed in a fragment shader" :task (h/run-example! "julia-set")}
+  framebuffer-rendering {:doc "▶ an observer camera watching a subject camera + frustum" :task (h/run-example! "framebuffer-rendering")}
   eratosthenes-sieve {:doc "▶ the Sieve of Eratosthenes computed per-pixel in a shader" :task (h/run-example! "eratosthenes-sieve")}
   mandelbrot-set  {:doc "▶ the Mandelbrot set in a shader with deep-zoom presets" :task (h/run-example! "mandelbrot-set")}
-  rounded-rectangle-shader {:doc "▶ SDF rounded rectangles (fill/shadow/border) drawn in a fragment shader" :task (h/run-example! "rounded-rectangle-shader")}
-  raymarching     {:doc "▶ a raymarched SDF scene in a fragment shader with a first-person fly-cam" :task (h/run-example! "raymarching")}
-  color-correction {:doc "▶ a post-process shader tuning contrast/saturation/brightness of a picture" :task (h/run-example! "color-correction")}
-  custom-uniform  {:doc "▶ a mouse-steered swirl post-process over a render-textured 3D scene" :task (h/run-example! "custom-uniform")}
-  ascii-rendering {:doc "▶ a post-process shader re-rendering the scene as ASCII glyphs" :task (h/run-example! "ascii-rendering")}
-  postprocessing  {:doc "▶ twelve full-screen post-process shaders cycled over a 3D scene" :task (h/run-example! "postprocessing")}
-  texture-rendering {:doc "▶ a blank texture painted and animated entirely by a fragment shader" :task (h/run-example! "texture-rendering")}
-  multi-sample2d  {:doc "▶ two textures blended in a shader via a second sampler2D + divider uniform" :task (h/run-example! "multi-sample2d")}
-  palette-switch  {:doc "▶ palette-indexed bands recolored by an 8-color ivec3-array shader uniform" :task (h/run-example! "palette-switch")}
-  hot-reloading   {:doc "▶ edit + save reload.fs while it runs - the fragment shader hot-swaps in" :task (h/run-example! "hot-reloading")}
-  spotlight-rendering {:doc "▶ three spotlights (one mouse-driven) alpha-masked over a star field" :task (h/run-example! "spotlight-rendering")}
-  font-sdf        {:doc "▶ bitmap vs SDF font scaling side by side (SDF stays crisp via a shader)" :task (h/run-example! "font-sdf")}
-  depth-writing   {:doc "▶ a shader writing inverted gl_FragDepth into a custom depth-texture FBO" :task (h/run-example! "depth-writing")}
-  depth-rendering {:doc "▶ the scene's depth buffer visualized through a shader (free camera)" :task (h/run-example! "depth-rendering")}
-  hybrid-rendering {:doc "▶ raymarched spheres + rasterized cubes occluding each other in one scene" :task (h/run-example! "hybrid-rendering")}
-  texture-tiling  {:doc "▶ a cube model's atlas texture tiled 3x3 by a shader (first Mesh/Model!)" :task (h/run-example! "texture-tiling")}
-  model-loading   {:doc "▶ the castle OBJ loaded from disk, click to toggle its selection box" :task (h/run-example! "model-loading")}
-  model-shader    {:doc "▶ the watermill OBJ drawn grayscale via a shader riding its material" :task (h/run-example! "model-shader")}
-  heightmap-rendering {:doc "▶ terrain generated from a grayscale heightmap image (GenMeshHeightmap)" :task (h/run-example! "heightmap-rendering")}
-  cubicmap-rendering {:doc "▶ a cube maze generated from a tiny black-and-white image (GenMeshCubicmap)" :task (h/run-example! "cubicmap-rendering")}
-  mesh-generation {:doc "▶ all nine procedural mesh generators in one checked-texture gallery" :task (h/run-example! "mesh-generation")}
-  first-person-maze {:doc "▶ walk the cubicmap maze in first person with wall collision + radar" :task (h/run-example! "first-person-maze")}
+  rounded-rectangle-shader {:doc "▶ SDF rounded rects (fill/shadow/border) in a shader" :task (h/run-example! "rounded-rectangle-shader")}
+  raymarching     {:doc "▶ a raymarched SDF scene with a first-person fly-cam" :task (h/run-example! "raymarching")}
+  color-correction {:doc "▶ a shader tuning contrast/saturation/brightness" :task (h/run-example! "color-correction")}
+  custom-uniform  {:doc "▶ a mouse-steered swirl over a render-textured scene" :task (h/run-example! "custom-uniform")}
+  ascii-rendering {:doc "▶ a shader re-rendering the scene as ASCII glyphs" :task (h/run-example! "ascii-rendering")}
+  postprocessing  {:doc "▶ Twelve full-screen post-process shaders, cycled" :task (h/run-example! "postprocessing")}
+  texture-rendering {:doc "▶ a blank texture painted entirely by a fragment shader" :task (h/run-example! "texture-rendering")}
+  multi-sample2d  {:doc "▶ two textures blended in a shader via a second sampler2D" :task (h/run-example! "multi-sample2d")}
+  palette-switch  {:doc "▶ Palette-indexed bands recolored by a shader uniform" :task (h/run-example! "palette-switch")}
+  hot-reloading   {:doc "▶ hot-swap the reload.fs fragment shader while it runs" :task (h/run-example! "hot-reloading")}
+  spotlight-rendering {:doc "▶ Three spotlights alpha-masked over a sprite swarm" :task (h/run-example! "spotlight-rendering")}
+  font-sdf        {:doc "▶ bitmap vs SDF font scaling, the SDF drawn through a shader" :task (h/run-example! "font-sdf")}
+  depth-writing   {:doc "▶ Inverted gl_FragDepth into a custom depth texture" :task (h/run-example! "depth-writing")}
+  depth-rendering {:doc "▶ The scene's depth buffer visualized through a shader" :task (h/run-example! "depth-rendering")}
+  hybrid-rendering {:doc "▶ Raymarched spheres + rasterized cubes, depth-tested" :task (h/run-example! "hybrid-rendering")}
+  texture-tiling  {:doc "▶ a cube model with its texture tiled 3x3 by a shader" :task (h/run-example! "texture-tiling")}
+  model-loading   {:doc "▶ The castle OBJ model loaded from disk, ray-pick selection" :task (h/run-example! "model-loading")}
+  model-shader    {:doc "▶ The watermill OBJ drawn grayscale by a material shader" :task (h/run-example! "model-shader")}
+  heightmap-rendering {:doc "▶ terrain generated from a grayscale heightmap image" :task (h/run-example! "heightmap-rendering")}
+  cubicmap-rendering {:doc "▶ a cube maze generated from a tiny black-and-white image" :task (h/run-example! "cubicmap-rendering")}
+  mesh-generation {:doc "▶ all nine procedural mesh generators, checked-textured" :task (h/run-example! "mesh-generation")}
+  first-person-maze {:doc "▶ Walk a cubicmap maze in first person, with a radar" :task (h/run-example! "first-person-maze")}
   basic-lighting  {:doc "▶ a plane + cube lit by four toggleable point lights" :task (h/run-example! "basic-lighting")}
-  fog-rendering   {:doc "▶ torus/cube/sphere models fading into adjustable exponential fog" :task (h/run-example! "fog-rendering")}
-  cel-shading     {:doc "▶ a GLB car toon-shaded with quantized bands + a silhouette outline" :task (h/run-example! "cel-shading")}
-  normalmap-rendering {:doc "▶ a spinning plane lit per-pixel through a tangent-space normal map" :task (h/run-example! "normalmap-rendering")}
-  simple-mask     {:doc "▶ an animated mask texture eats holes in two models' plasma skin" :task (h/run-example! "simple-mask")}
-  vertex-displacement {:doc "▶ a plane mesh whose vertices ride Perlin-noise waves in the vertex shader" :task (h/run-example! "vertex-displacement")}
-  rlgl-compute    {:doc "▶ Game of Life stepped entirely on the GPU by compute shaders (first compute!)" :task (h/run-example! "rlgl-compute")}
-  mesh-instancing {:doc "▶ ten thousand lit cubes in ONE draw call via DrawMeshInstanced" :task (h/run-example! "mesh-instancing")}
-  lightmap-rendering {:doc "▶ a plane lit by a baked 16x16 lightmap through a second UV channel" :task (h/run-example! "lightmap-rendering")}
-  shadowmap-rendering {:doc "▶ real shadows: an animated robot under the shadowmapping algorithm" :task (h/run-example! "shadowmap-rendering")}
-  basic-pbr       {:doc "▶ the rusty car under physically-based rendering (albedo/normal/MRA/emissive)" :task (h/run-example! "basic-pbr")}
-  deferred-rendering {:doc "▶ a three-target G-buffer + full-screen lighting pass (deferred pipeline)" :task (h/run-example! "deferred-rendering")}
-  game-of-life    {:doc "▶ Conway's Life on a 2048x2048 world: pan/zoom, presets, draw mode (shaders complete!)" :task (h/run-example! "game-of-life")}
-  loading-gltf    {:doc "▶ the animated glTF robot - switch its animations with LEFT/RIGHT" :task (h/run-example! "loading-gltf")}
-  yaw-pitch-roll  {:doc "▶ fly a WWI plane through its three rotation axes (eases back to level)" :task (h/run-example! "yaw-pitch-roll")}
-  mesh-picking    {:doc "▶ a mouse ray picks the closest of quad/triangle/sphere/box/mesh hits" :task (h/run-example! "mesh-picking")}
-  loading-iqm     {:doc "▶ the classic IQM guy walking on loop (model + anims from separate files)" :task (h/run-example! "loading-iqm")}
-  loading-m3d     {:doc "▶ the Cesium Man in Model3D format - hold SPACE for the animated skeleton" :task (h/run-example! "loading-m3d")}
-  loading-vox     {:doc "▶ four MagicaVoxel models cycled under a fly camera + voxel lighting" :task (h/run-example! "loading-vox")}
-  animation-timing {:doc "▶ the robot with a playback timeline: switch anims, change speed, pause" :task (h/run-example! "animation-timing")}
-  bone-socket     {:doc "▶ a hat, sword and shield riding the greenman's skeleton bones" :task (h/run-example! "bone-socket")}
-  point-rendering {:doc "▶ up to 10 MILLION points: one GPU point-mode call vs per-point draws" :task (h/run-example! "point-rendering")}
-  skybox-rendering {:doc "▶ a cubemap skybox drawn from inside a unit cube (first TextureCubemap)" :task (h/run-example! "skybox-rendering")}
-  animation-blending {:doc "▶ SPACE cross-fades the robot between two animations over two seconds" :task (h/run-example! "animation-blending")}
-  animation-blend-custom {:doc "▶ per-bone blending: the greenman walks with his legs while attacking" :task (h/run-example! "animation-blend-custom")}
-  decals          {:doc "▶ click to splat logo decals onto a character (models complete!)" :task (h/run-example! "decals")}
-  raw-stream      {:doc "▶ a sine wave generated sample-by-sample into a raw audio stream" :task (h/run-example! "raw-stream")}
-  mixed-processor {:doc "▶ a DSP distortion callback on the whole audio mix (first audio callback!)" :task (h/run-example! "mixed-processor")}
-  stream-effects  {:doc "▶ stackable lowpass + delay effects attached to one music stream" :task (h/run-example! "stream-effects")}
-  stream-callback {:doc "▶ a pull-model synthesizer: the audio thread requests samples on demand" :task (h/run-example! "stream-callback")}
-  amp-envelope    {:doc "▶ an ADSR amplitude envelope on a tone - hold SPACE to play the note" :task (h/run-example! "amp-envelope")}
-  spectrum-visualizer {:doc "▶ a live FFT spectrum of the music through a shader (audio complete!)" :task (h/run-example! "spectrum-visualizer")}
-  screen-buffer   {:doc "▶ the classic DOS fire effect in a palette-indexed software buffer" :task (h/run-example! "screen-buffer")}
+  fog-rendering   {:doc "▶ torus/cube/sphere models fading into exponential fog" :task (h/run-example! "fog-rendering")}
+  cel-shading     {:doc "▶ a GLB car toon-shaded with quantized bands + outline" :task (h/run-example! "cel-shading")}
+  normalmap-rendering {:doc "▶ a spinning plane lit through a tangent-space normal map" :task (h/run-example! "normalmap-rendering")}
+  simple-mask     {:doc "▶ an animated mask eats holes in two models' skin" :task (h/run-example! "simple-mask")}
+  vertex-displacement {:doc "▶ a plane mesh riding Perlin-noise waves in the vertex shader" :task (h/run-example! "vertex-displacement")}
+  rlgl-compute    {:doc "▶ Game of Life stepped entirely on the GPU by compute shaders" :task (h/run-example! "rlgl-compute")}
+  mesh-instancing {:doc "▶ ten thousand lit cubes in one draw call (DrawMeshInstanced)" :task (h/run-example! "mesh-instancing")}
+  lightmap-rendering {:doc "▶ a plane lit by a baked lightmap through a second UV channel" :task (h/run-example! "lightmap-rendering")}
+  shadowmap-rendering {:doc "▶ Real shadows: an animated robot under a shadowmap" :task (h/run-example! "shadowmap-rendering")}
+  basic-pbr       {:doc "▶ The rusty car under physically-based rendering (PBR maps)" :task (h/run-example! "basic-pbr")}
+  deferred-rendering {:doc "▶ a three-target G-buffer + deferred lighting pass" :task (h/run-example! "deferred-rendering")}
+  game-of-life    {:doc "▶ Conway's Life on a 2048x2048 world: pan/zoom, presets" :task (h/run-example! "game-of-life")}
+  loading-gltf    {:doc "▶ The animated glTF robot, switchable animations" :task (h/run-example! "loading-gltf")}
+  yaw-pitch-roll  {:doc "▶ Fly a WWI plane through pitch/yaw/roll, easing level" :task (h/run-example! "yaw-pitch-roll")}
+  mesh-picking    {:doc "▶ a mouse ray picks the closest quad/sphere/box/mesh" :task (h/run-example! "mesh-picking")}
+  loading-iqm     {:doc "▶ The classic IQM guy walking on loop" :task (h/run-example! "loading-iqm")}
+  loading-m3d     {:doc "▶ The Cesium Man in Model3D format, skeleton view on SPACE" :task (h/run-example! "loading-m3d")}
+  loading-vox     {:doc "▶ four MagicaVoxel models under a fly camera + voxel lighting" :task (h/run-example! "loading-vox")}
+  animation-timing {:doc "▶ The robot with a playback timeline + adjustable speed" :task (h/run-example! "animation-timing")}
+  bone-socket     {:doc "▶ a hat, sword and shield riding the greenman's bones" :task (h/run-example! "bone-socket")}
+  point-rendering {:doc "▶ up to 10 million points: GPU point mode vs per-point draws" :task (h/run-example! "point-rendering")}
+  skybox-rendering {:doc "▶ a cubemap skybox drawn from inside a unit cube" :task (h/run-example! "skybox-rendering")}
+  animation-blending {:doc "▶ SPACE cross-fades the robot between two animations" :task (h/run-example! "animation-blending")}
+  animation-blend-custom {:doc "▶ per-bone blending: walking legs + attacking upper body" :task (h/run-example! "animation-blend-custom")}
+  decals          {:doc "▶ Click to splat logo decals onto a character's surface" :task (h/run-example! "decals")}
+  raw-stream      {:doc "▶ a sine wave generated sample-by-sample into a stream" :task (h/run-example! "raw-stream")}
+  mixed-processor {:doc "▶ a DSP distortion callback on the whole audio mix" :task (h/run-example! "mixed-processor")}
+  stream-effects  {:doc "▶ stackable lowpass + delay effects on one music stream" :task (h/run-example! "stream-effects")}
+  stream-callback {:doc "▶ a pull-model synth: sine/square/triangle/sawtooth on demand" :task (h/run-example! "stream-callback")}
+  amp-envelope    {:doc "▶ an ADSR envelope on a tone, with a live shape graph" :task (h/run-example! "amp-envelope")}
+  spectrum-visualizer {:doc "▶ a live FFT spectrum of the music through a shader" :task (h/run-example! "spectrum-visualizer")}
+  screen-buffer   {:doc "▶ The classic DOS fire effect in a palette-indexed buffer" :task (h/run-example! "screen-buffer")}
 
   run-all {:doc "Run every example for N seconds each (default 15): bb run-all [secs]"
            :task (h/run-all! (first *command-line-args*))}

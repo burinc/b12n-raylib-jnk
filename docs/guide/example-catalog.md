@@ -45,12 +45,12 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/monitor-detector.gif" width="80">](../demos/monitor-detector.gif) | `monitor-detector` | A scaled map of every attached monitor with its specs |
 | [<img src="../demos/input-actions.gif" width="80">](../demos/input-actions.gif) | `input-actions` | Remappable abstract actions (WASD/arrows) via a keyset map |
 | [<img src="../demos/highdpi-demo.gif" width="80">](../demos/highdpi-demo.gif) | `highdpi-demo` | Logical-points vs physical-pixels grids with live DPI scale |
-| *(none)* | `highdpi-testbed` | A HighDPI diagnostic overlay: grid, monitor/DPI info, crosshair |
-| [<img src="../demos/random-sequence.gif" width="80">](../demos/random-sequence.gif) | `random-sequence` | Colored bars in a random no-repeat permutation (LoadRandomSequence) |
+| *(none)* | `highdpi-testbed` | A HighDPI overlay: grid, monitor/DPI info, crosshair |
+| [<img src="../demos/random-sequence.gif" width="80">](../demos/random-sequence.gif) | `random-sequence` | Colored bars in a no-repeat LoadRandomSequence |
 | [<img src="../demos/clipboard-text.gif" width="80">](../demos/clipboard-text.gif) | `clipboard-text` | Type + cut/copy/paste with the system clipboard |
 | [<img src="../demos/undo-redo.gif" width="80">](../demos/undo-redo.gif) | `undo-redo` | A grid player with a 26-slot undo/redo ring buffer |
 | [<img src="../demos/directory-files.gif" width="80">](../demos/directory-files.gif) | `directory-files` | A keyboard file browser over the working directory |
-| [<img src="../demos/custom-logging.gif" width="80">](../demos/custom-logging.gif) | `custom-logging` | A custom trace-log callback timestamps + tags every raylib log line |
+| [<img src="../demos/custom-logging.gif" width="80">](../demos/custom-logging.gif) | `custom-logging` | A trace-log callback timestamps every raylib line |
 | [<img src="../demos/drop-files.gif" width="80">](../demos/drop-files.gif) | `drop-files` | Drag files onto the window to list their paths |
 | [<img src="../demos/text-file-loading.gif" width="80">](../demos/text-file-loading.gif) | `text-file-loading` | Load + word-wrap a text file, scroll it |
 | [<img src="../demos/compute-hash.gif" width="80">](../demos/compute-hash.gif) | `compute-hash` | CRC32/MD5/SHA1/SHA256 + Base64 of typed text |
@@ -61,10 +61,10 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/camera-3d-free.gif" width="80">](../demos/camera-3d-free.gif) | `camera-3d-free` | A free-look 3D camera around a cube |
 | [<img src="../demos/camera-3d-first-person.gif" width="80">](../demos/camera-3d-first-person.gif) | `camera-3d-first-person` | Walk a yard of random columns in first person |
 | [<img src="../demos/camera-3d-split-screen.gif" width="80">](../demos/camera-3d-split-screen.gif) | `camera-3d-split-screen` | Two players, two 3D cameras, split screen |
-| [<img src="../demos/camera-3d-fps.gif" width="80">](../demos/camera-3d-fps.gif) | `camera-3d-fps` | A physics FPS controller with head-bob, lean and strafe-accel |
-| [<img src="../demos/vr-simulator.gif" width="80">](../demos/vr-simulator.gif) | `vr-simulator` | A 3D scene in stereo through a simulated Oculus Rift + lens-distortion shader |
-| [<img src="../demos/automation-events.gif" width="80">](../demos/automation-events.gif) | `automation-events` | A 2D platformer with input record/replay via AutomationEventList |
-| [<img src="../demos/input-gamepad.gif" width="80">](../demos/input-gamepad.gif) | `input-gamepad` | A live controller diagram: buttons/sticks/triggers light up (Xbox/PS/generic) |
+| [<img src="../demos/camera-3d-fps.gif" width="80">](../demos/camera-3d-fps.gif) | `camera-3d-fps` | A physics FPS controller with head-bob and lean |
+| [<img src="../demos/vr-simulator.gif" width="80">](../demos/vr-simulator.gif) | `vr-simulator` | A 3D scene in stereo through a simulated Oculus Rift |
+| [<img src="../demos/automation-events.gif" width="80">](../demos/automation-events.gif) | `automation-events` | A platformer recording and replaying its own input |
+| [<img src="../demos/input-gamepad.gif" width="80">](../demos/input-gamepad.gif) | `input-gamepad` | A live controller diagram: buttons/sticks/triggers lit |
 
 ## shapes: 2D drawing, easing, rlgl (41)
 
@@ -129,8 +129,8 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/unicode-ranges.gif" width="80">](../demos/unicode-ranges.gif) | `unicode-ranges` | Grow a multilingual font atlas by unicode range |
 | [<img src="../demos/inline-styling.gif" width="80">](../demos/inline-styling.gif) | `inline-styling` | Text with inline color style tags |
 | [<img src="../demos/unicode-emojis.gif" width="80">](../demos/unicode-emojis.gif) | `unicode-emojis` | Click emojis for multilingual speech bubbles |
-| [<img src="../demos/text-3d-drawing.gif" width="80">](../demos/text-3d-drawing.gif) | `text-3d-drawing` | A bitmap font drawn as textured quads in 3D, waving the `~~World~~`-marked span |
-| [<img src="../demos/strings-management.gif" width="80">](../demos/strings-management.gif) | `strings-management` | Drag/slice/shatter/glue text particles; 1-6 run raylib's TextTo* fns |
+| [<img src="../demos/text-3d-drawing.gif" width="80">](../demos/text-3d-drawing.gif) | `text-3d-drawing` | A bitmap font as textured quads in 3D, one span waving |
+| [<img src="../demos/strings-management.gif" width="80">](../demos/strings-management.gif) | `strings-management` | Drag/slice/shatter/glue text; 1-6 run TextTo* fns |
 | [<img src="../demos/font-sdf.gif" width="80">](../demos/font-sdf.gif) | `font-sdf` | Bitmap vs SDF font scaling, the SDF drawn through a shader |
 
 ## textures: images, sprites, render textures (31)
@@ -182,26 +182,26 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/rlgl-solar-system.gif" width="80">](../demos/rlgl-solar-system.gif) | `rlgl-solar-system` | Sun/Earth/Moon via the rlgl matrix stack |
 | [<img src="../demos/textured-cube.gif" width="80">](../demos/textured-cube.gif) | `textured-cube` | Two rlgl textured 3D cubes from a shared atlas |
 | [<img src="../demos/directional-billboard.gif" width="80">](../demos/directional-billboard.gif) | `directional-billboard` | A sprite-sheet billboard that turns as the camera orbits |
-| [<img src="../demos/basic-voxel.gif" width="80">](../demos/basic-voxel.gif) | `basic-voxel` | An 8x8x8 beige voxel grid; click to ray-pick and remove cubes |
-| [<img src="../demos/rotating-cube.gif" width="80">](../demos/rotating-cube.gif) | `rotating-cube` | A textured cube spinning on a tilted axis (rlgl matrix stack) |
+| [<img src="../demos/basic-voxel.gif" width="80">](../demos/basic-voxel.gif) | `basic-voxel` | An 8x8x8 voxel grid; click to ray-pick and remove |
+| [<img src="../demos/rotating-cube.gif" width="80">](../demos/rotating-cube.gif) | `rotating-cube` | A textured cube spinning on a tilted axis (rlgl) |
 | [<img src="../demos/model-loading.gif" width="80">](../demos/model-loading.gif) | `model-loading` | The castle OBJ model loaded from disk, ray-pick selection |
 | [<img src="../demos/heightmap-rendering.gif" width="80">](../demos/heightmap-rendering.gif) | `heightmap-rendering` | Terrain generated from a grayscale heightmap image |
 | [<img src="../demos/cubicmap-rendering.gif" width="80">](../demos/cubicmap-rendering.gif) | `cubicmap-rendering` | A cube maze generated from a tiny black-and-white image |
 | [<img src="../demos/mesh-generation.gif" width="80">](../demos/mesh-generation.gif) | `mesh-generation` | All nine procedural mesh generators, checked-textured |
-| [<img src="../demos/first-person-maze.gif" width="80">](../demos/first-person-maze.gif) | `first-person-maze` | Walk the cubicmap maze in first person, wall collision + radar |
+| [<img src="../demos/first-person-maze.gif" width="80">](../demos/first-person-maze.gif) | `first-person-maze` | Walk a cubicmap maze in first person, with a radar |
 | [<img src="../demos/loading-gltf.gif" width="80">](../demos/loading-gltf.gif) | `loading-gltf` | The animated glTF robot, switchable animations |
-| [<img src="../demos/yaw-pitch-roll.gif" width="80">](../demos/yaw-pitch-roll.gif) | `yaw-pitch-roll` | Fly a WWI plane through pitch/yaw/roll, easing back to level |
-| [<img src="../demos/mesh-picking.gif" width="80">](../demos/mesh-picking.gif) | `mesh-picking` | A mouse ray picks the closest quad/triangle/sphere/box/mesh hit |
+| [<img src="../demos/yaw-pitch-roll.gif" width="80">](../demos/yaw-pitch-roll.gif) | `yaw-pitch-roll` | Fly a WWI plane through pitch/yaw/roll, easing level |
+| [<img src="../demos/mesh-picking.gif" width="80">](../demos/mesh-picking.gif) | `mesh-picking` | A mouse ray picks the closest quad/sphere/box/mesh |
 | [<img src="../demos/loading-iqm.gif" width="80">](../demos/loading-iqm.gif) | `loading-iqm` | The classic IQM guy walking on loop |
 | [<img src="../demos/loading-m3d.gif" width="80">](../demos/loading-m3d.gif) | `loading-m3d` | The Cesium Man in Model3D format, skeleton view on SPACE |
 | [<img src="../demos/loading-vox.gif" width="80">](../demos/loading-vox.gif) | `loading-vox` | Four MagicaVoxel models under a fly camera + voxel lighting |
 | [<img src="../demos/animation-timing.gif" width="80">](../demos/animation-timing.gif) | `animation-timing` | The robot with a playback timeline + adjustable speed |
-| [<img src="../demos/bone-socket.gif" width="80">](../demos/bone-socket.gif) | `bone-socket` | A hat, sword and shield riding the greenman's skeleton bones |
+| [<img src="../demos/bone-socket.gif" width="80">](../demos/bone-socket.gif) | `bone-socket` | A hat, sword and shield riding the greenman's bones |
 | [<img src="../demos/point-rendering.gif" width="80">](../demos/point-rendering.gif) | `point-rendering` | Up to 10 million points: GPU point mode vs per-point draws |
 | [<img src="../demos/skybox-rendering.gif" width="80">](../demos/skybox-rendering.gif) | `skybox-rendering` | A cubemap skybox drawn from inside a unit cube |
 | [<img src="../demos/animation-blending.gif" width="80">](../demos/animation-blending.gif) | `animation-blending` | SPACE cross-fades the robot between two animations |
 | [<img src="../demos/animation-blend-custom.gif" width="80">](../demos/animation-blend-custom.gif) | `animation-blend-custom` | Per-bone blending: walking legs + attacking upper body |
-| [<img src="../demos/decals.gif" width="80">](../demos/decals.gif) | `decals` | Click to splat logo decals clipped onto a character's surface |
+| [<img src="../demos/decals.gif" width="80">](../demos/decals.gif) | `decals` | Click to splat logo decals onto a character's surface |
 
 ## shaders: GLSL, uniforms, postprocess, lighting (35)
 
@@ -213,35 +213,35 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/julia-set.gif" width="80">](../demos/julia-set.gif) | `julia-set` | A Julia set fractal computed in a fragment shader |
 | [<img src="../demos/eratosthenes-sieve.gif" width="80">](../demos/eratosthenes-sieve.gif) | `eratosthenes-sieve` | The Sieve of Eratosthenes per-pixel in a shader |
 | [<img src="../demos/mandelbrot-set.gif" width="80">](../demos/mandelbrot-set.gif) | `mandelbrot-set` | The Mandelbrot set in a shader, deep-zoom presets |
-| [<img src="../demos/rounded-rectangle-shader.gif" width="80">](../demos/rounded-rectangle-shader.gif) | `rounded-rectangle-shader` | SDF rounded rectangles (fill/shadow/border) in a fragment shader |
-| [<img src="../demos/raymarching.gif" width="80">](../demos/raymarching.gif) | `raymarching` | A raymarched SDF scene in a fragment shader, first-person fly-cam |
-| [<img src="../demos/color-correction.gif" width="80">](../demos/color-correction.gif) | `color-correction` | A post-process shader tuning contrast/saturation/brightness of a picture |
-| [<img src="../demos/custom-uniform.gif" width="80">](../demos/custom-uniform.gif) | `custom-uniform` | A mouse-steered swirl post-process over a render-textured 3D scene |
-| [<img src="../demos/ascii-rendering.gif" width="80">](../demos/ascii-rendering.gif) | `ascii-rendering` | A post-process shader re-rendering the scene as ASCII glyphs |
-| [<img src="../demos/postprocessing.gif" width="80">](../demos/postprocessing.gif) | `postprocessing` | Twelve full-screen post-process shaders cycled over a 3D scene |
-| [<img src="../demos/texture-rendering.gif" width="80">](../demos/texture-rendering.gif) | `texture-rendering` | A blank texture painted and animated entirely by a fragment shader |
+| [<img src="../demos/rounded-rectangle-shader.gif" width="80">](../demos/rounded-rectangle-shader.gif) | `rounded-rectangle-shader` | SDF rounded rects (fill/shadow/border) in a shader |
+| [<img src="../demos/raymarching.gif" width="80">](../demos/raymarching.gif) | `raymarching` | A raymarched SDF scene with a first-person fly-cam |
+| [<img src="../demos/color-correction.gif" width="80">](../demos/color-correction.gif) | `color-correction` | A shader tuning contrast/saturation/brightness |
+| [<img src="../demos/custom-uniform.gif" width="80">](../demos/custom-uniform.gif) | `custom-uniform` | A mouse-steered swirl over a render-textured scene |
+| [<img src="../demos/ascii-rendering.gif" width="80">](../demos/ascii-rendering.gif) | `ascii-rendering` | A shader re-rendering the scene as ASCII glyphs |
+| [<img src="../demos/postprocessing.gif" width="80">](../demos/postprocessing.gif) | `postprocessing` | Twelve full-screen post-process shaders, cycled |
+| [<img src="../demos/texture-rendering.gif" width="80">](../demos/texture-rendering.gif) | `texture-rendering` | A blank texture painted entirely by a fragment shader |
 | [<img src="../demos/multi-sample2d.gif" width="80">](../demos/multi-sample2d.gif) | `multi-sample2d` | Two textures blended in a shader via a second sampler2D |
-| [<img src="../demos/palette-switch.gif" width="80">](../demos/palette-switch.gif) | `palette-switch` | Palette-indexed bands recolored by an ivec3-array shader uniform |
+| [<img src="../demos/palette-switch.gif" width="80">](../demos/palette-switch.gif) | `palette-switch` | Palette-indexed bands recolored by a shader uniform |
 | [<img src="../demos/hot-reloading.gif" width="80">](../demos/hot-reloading.gif) | `hot-reloading` | Hot-swap the reload.fs fragment shader while it runs |
-| [<img src="../demos/spotlight-rendering.gif" width="80">](../demos/spotlight-rendering.gif) | `spotlight-rendering` | Three spotlights alpha-masked over a star field + sprite swarm |
-| [<img src="../demos/depth-writing.gif" width="80">](../demos/depth-writing.gif) | `depth-writing` | Inverted gl_FragDepth into a custom depth-texture framebuffer |
+| [<img src="../demos/spotlight-rendering.gif" width="80">](../demos/spotlight-rendering.gif) | `spotlight-rendering` | Three spotlights alpha-masked over a sprite swarm |
+| [<img src="../demos/depth-writing.gif" width="80">](../demos/depth-writing.gif) | `depth-writing` | Inverted gl_FragDepth into a custom depth texture |
 | [<img src="../demos/depth-rendering.gif" width="80">](../demos/depth-rendering.gif) | `depth-rendering` | The scene's depth buffer visualized through a shader |
-| [<img src="../demos/hybrid-rendering.gif" width="80">](../demos/hybrid-rendering.gif) | `hybrid-rendering` | Raymarched spheres + rasterized cubes in one depth-tested scene |
-| [<img src="../demos/texture-tiling.gif" width="80">](../demos/texture-tiling.gif) | `texture-tiling` | A generated cube model with its texture tiled 3x3 by a shader |
-| [<img src="../demos/model-shader.gif" width="80">](../demos/model-shader.gif) | `model-shader` | The watermill OBJ drawn grayscale via a material-bound shader |
+| [<img src="../demos/hybrid-rendering.gif" width="80">](../demos/hybrid-rendering.gif) | `hybrid-rendering` | Raymarched spheres + rasterized cubes, depth-tested |
+| [<img src="../demos/texture-tiling.gif" width="80">](../demos/texture-tiling.gif) | `texture-tiling` | A cube model with its texture tiled 3x3 by a shader |
+| [<img src="../demos/model-shader.gif" width="80">](../demos/model-shader.gif) | `model-shader` | The watermill OBJ drawn grayscale by a material shader |
 | [<img src="../demos/basic-lighting.gif" width="80">](../demos/basic-lighting.gif) | `basic-lighting` | A plane + cube lit by four toggleable colored point lights |
 | [<img src="../demos/fog-rendering.gif" width="80">](../demos/fog-rendering.gif) | `fog-rendering` | Torus/cube/sphere models fading into exponential fog |
 | [<img src="../demos/cel-shading.gif" width="80">](../demos/cel-shading.gif) | `cel-shading` | A GLB car toon-shaded with quantized bands + outline |
 | [<img src="../demos/normalmap-rendering.gif" width="80">](../demos/normalmap-rendering.gif) | `normalmap-rendering` | A spinning plane lit through a tangent-space normal map |
-| [<img src="../demos/simple-mask.gif" width="80">](../demos/simple-mask.gif) | `simple-mask` | An animated mask texture eats holes in two models' plasma skin |
+| [<img src="../demos/simple-mask.gif" width="80">](../demos/simple-mask.gif) | `simple-mask` | An animated mask eats holes in two models' skin |
 | [<img src="../demos/vertex-displacement.gif" width="80">](../demos/vertex-displacement.gif) | `vertex-displacement` | A plane mesh riding Perlin-noise waves in the vertex shader |
 | *(none)* | `rlgl-compute` | Game of Life stepped entirely on the GPU by compute shaders |
 | [<img src="../demos/mesh-instancing.gif" width="80">](../demos/mesh-instancing.gif) | `mesh-instancing` | Ten thousand lit cubes in one draw call (DrawMeshInstanced) |
 | [<img src="../demos/lightmap-rendering.gif" width="80">](../demos/lightmap-rendering.gif) | `lightmap-rendering` | A plane lit by a baked lightmap through a second UV channel |
-| [<img src="../demos/shadowmap-rendering.gif" width="80">](../demos/shadowmap-rendering.gif) | `shadowmap-rendering` | Real shadows: an animated robot under the shadowmapping algorithm |
+| [<img src="../demos/shadowmap-rendering.gif" width="80">](../demos/shadowmap-rendering.gif) | `shadowmap-rendering` | Real shadows: an animated robot under a shadowmap |
 | [<img src="../demos/basic-pbr.gif" width="80">](../demos/basic-pbr.gif) | `basic-pbr` | The rusty car under physically-based rendering (PBR maps) |
-| [<img src="../demos/deferred-rendering.gif" width="80">](../demos/deferred-rendering.gif) | `deferred-rendering` | A three-target G-buffer + full-screen deferred lighting pass |
-| [<img src="../demos/game-of-life.gif" width="80">](../demos/game-of-life.gif) | `game-of-life` | Conway's Life on a 2048x2048 world: pan/zoom, presets, draw mode |
+| [<img src="../demos/deferred-rendering.gif" width="80">](../demos/deferred-rendering.gif) | `deferred-rendering` | A three-target G-buffer + deferred lighting pass |
+| [<img src="../demos/game-of-life.gif" width="80">](../demos/game-of-life.gif) | `game-of-life` | Conway's Life on a 2048x2048 world: pan/zoom, presets |
 
 ## audio: sounds, music streams (11)
 
@@ -252,11 +252,11 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/module-playing.gif" width="80">](../demos/module-playing.gif) | `module-playing` | A chiptune XM module + pulsing circle waves |
 | [<img src="../demos/sound-multi.gif" width="80">](../demos/sound-multi.gif) | `sound-multi` | Overlapping sound playback via sound aliases |
 | [<img src="../demos/sound-positioning.gif" width="80">](../demos/sound-positioning.gif) | `sound-positioning` | Spatial audio around an orbiting 3D sphere |
-| [<img src="../demos/raw-stream.gif" width="80">](../demos/raw-stream.gif) | `raw-stream` | A sine wave generated sample-by-sample into a raw audio stream |
+| [<img src="../demos/raw-stream.gif" width="80">](../demos/raw-stream.gif) | `raw-stream` | A sine wave generated sample-by-sample into a stream |
 | [<img src="../demos/mixed-processor.gif" width="80">](../demos/mixed-processor.gif) | `mixed-processor` | A DSP distortion callback on the whole audio mix |
 | [<img src="../demos/stream-effects.gif" width="80">](../demos/stream-effects.gif) | `stream-effects` | Stackable lowpass + delay effects on one music stream |
 | [<img src="../demos/stream-callback.gif" width="80">](../demos/stream-callback.gif) | `stream-callback` | A pull-model synth: sine/square/triangle/sawtooth on demand |
-| [<img src="../demos/amp-envelope.gif" width="80">](../demos/amp-envelope.gif) | `amp-envelope` | An ADSR amplitude envelope on a tone, with a live shape graph |
+| [<img src="../demos/amp-envelope.gif" width="80">](../demos/amp-envelope.gif) | `amp-envelope` | An ADSR envelope on a tone, with a live shape graph |
 | [<img src="../demos/spectrum-visualizer.gif" width="80">](../demos/spectrum-visualizer.gif) | `spectrum-visualizer` | A live FFT spectrum of the music through a shader |
 
 ## interop: jank/C++ mechanics (1)
@@ -267,7 +267,7 @@ upstream.
 
 | | `bb` name | What it shows |
 |---|---|---|
-| [<img src="../demos/opaque-boxes.gif" width="80">](../demos/opaque-boxes.gif) | `opaque-boxes` | A native `Color` returned from a fn, kept in an immutable vector and captured in a closure, via `cpp/new` + `cpp/box` + `cpp/unbox`. See [`native-value-lifetimes.md`](native-value-lifetimes.md#getting-a-native-value-out-anyway). |
+| [<img src="../demos/opaque-boxes.gif" width="80">](../demos/opaque-boxes.gif) | `opaque-boxes` | Native Colors carried across fns in opaque boxes |
 
 ## Adding an example: the four touchpoints
 

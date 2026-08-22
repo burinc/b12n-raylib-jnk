@@ -150,13 +150,13 @@ Logical-points vs physical-pixels grids with live DPI scale
 
 ### highdpi-testbed
 
-A HighDPI diagnostic overlay: grid, monitor/DPI info, crosshair
+A HighDPI overlay: grid, monitor/DPI info, crosshair
 
 ![highdpi-testbed](highdpi-testbed.gif)
 
 ### random-sequence
 
-Colored bars in a random no-repeat permutation (LoadRandomSequence)
+Colored bars in a no-repeat LoadRandomSequence
 
 ![random-sequence](random-sequence.gif)
 
@@ -180,7 +180,7 @@ A keyboard file browser over the working directory
 
 ### custom-logging
 
-A custom trace-log callback timestamps + tags every raylib log line
+A trace-log callback timestamps every raylib line
 
 ![custom-logging](custom-logging.gif)
 
@@ -246,25 +246,25 @@ Two players, two 3D cameras, split screen
 
 ### camera-3d-fps
 
-A physics FPS controller with head-bob, lean and strafe-accel
+A physics FPS controller with head-bob and lean
 
 ![camera-3d-fps](camera-3d-fps.gif)
 
 ### vr-simulator
 
-A 3D scene in stereo through a simulated Oculus Rift + lens-distortion shader
+A 3D scene in stereo through a simulated Oculus Rift
 
 ![vr-simulator](vr-simulator.gif)
 
 ### automation-events
 
-A 2D platformer with input record/replay via AutomationEventList
+A platformer recording and replaying its own input
 
 ![automation-events](automation-events.gif)
 
 ### input-gamepad
 
-A live controller diagram: buttons/sticks/triggers light up (Xbox/PS/generic)
+A live controller diagram: buttons/sticks/triggers lit
 
 ![input-gamepad](input-gamepad.gif)
 
@@ -598,13 +598,13 @@ Click emojis for multilingual speech bubbles
 
 ### text-3d-drawing
 
-A bitmap font drawn as textured quads in 3D, waving the `~~World~~`-marked span
+A bitmap font as textured quads in 3D, one span waving
 
 ![text-3d-drawing](text-3d-drawing.gif)
 
 ### strings-management
 
-Drag/slice/shatter/glue text particles; 1-6 run raylib's TextTo* fns
+Drag/slice/shatter/glue text; 1-6 run TextTo* fns
 
 ![strings-management](strings-management.gif)
 
@@ -854,13 +854,13 @@ A sprite-sheet billboard that turns as the camera orbits
 
 ### basic-voxel
 
-An 8x8x8 beige voxel grid; click to ray-pick and remove cubes
+An 8x8x8 voxel grid; click to ray-pick and remove
 
 ![basic-voxel](basic-voxel.gif)
 
 ### rotating-cube
 
-A textured cube spinning on a tilted axis (rlgl matrix stack)
+A textured cube spinning on a tilted axis (rlgl)
 
 ![rotating-cube](rotating-cube.gif)
 
@@ -890,7 +890,7 @@ All nine procedural mesh generators, checked-textured
 
 ### first-person-maze
 
-Walk the cubicmap maze in first person, wall collision + radar
+Walk a cubicmap maze in first person, with a radar
 
 ![first-person-maze](first-person-maze.gif)
 
@@ -902,13 +902,13 @@ The animated glTF robot, switchable animations
 
 ### yaw-pitch-roll
 
-Fly a WWI plane through pitch/yaw/roll, easing back to level
+Fly a WWI plane through pitch/yaw/roll, easing level
 
 ![yaw-pitch-roll](yaw-pitch-roll.gif)
 
 ### mesh-picking
 
-A mouse ray picks the closest quad/triangle/sphere/box/mesh hit
+A mouse ray picks the closest quad/sphere/box/mesh
 
 ![mesh-picking](mesh-picking.gif)
 
@@ -938,7 +938,7 @@ The robot with a playback timeline + adjustable speed
 
 ### bone-socket
 
-A hat, sword and shield riding the greenman's skeleton bones
+A hat, sword and shield riding the greenman's bones
 
 ![bone-socket](bone-socket.gif)
 
@@ -968,7 +968,7 @@ Per-bone blending: walking legs + attacking upper body
 
 ### decals
 
-Click to splat logo decals clipped onto a character's surface
+Click to splat logo decals onto a character's surface
 
 ![decals](decals.gif)
 
@@ -1012,43 +1012,43 @@ The Mandelbrot set in a shader, deep-zoom presets
 
 ### rounded-rectangle-shader
 
-SDF rounded rectangles (fill/shadow/border) in a fragment shader
+SDF rounded rects (fill/shadow/border) in a shader
 
 ![rounded-rectangle-shader](rounded-rectangle-shader.gif)
 
 ### raymarching
 
-A raymarched SDF scene in a fragment shader, first-person fly-cam
+A raymarched SDF scene with a first-person fly-cam
 
 ![raymarching](raymarching.gif)
 
 ### color-correction
 
-A post-process shader tuning contrast/saturation/brightness of a picture
+A shader tuning contrast/saturation/brightness
 
 ![color-correction](color-correction.gif)
 
 ### custom-uniform
 
-A mouse-steered swirl post-process over a render-textured 3D scene
+A mouse-steered swirl over a render-textured scene
 
 ![custom-uniform](custom-uniform.gif)
 
 ### ascii-rendering
 
-A post-process shader re-rendering the scene as ASCII glyphs
+A shader re-rendering the scene as ASCII glyphs
 
 ![ascii-rendering](ascii-rendering.gif)
 
 ### postprocessing
 
-Twelve full-screen post-process shaders cycled over a 3D scene
+Twelve full-screen post-process shaders, cycled
 
 ![postprocessing](postprocessing.gif)
 
 ### texture-rendering
 
-A blank texture painted and animated entirely by a fragment shader
+A blank texture painted entirely by a fragment shader
 
 ![texture-rendering](texture-rendering.gif)
 
@@ -1060,7 +1060,7 @@ Two textures blended in a shader via a second sampler2D
 
 ### palette-switch
 
-Palette-indexed bands recolored by an ivec3-array shader uniform
+Palette-indexed bands recolored by a shader uniform
 
 ![palette-switch](palette-switch.gif)
 
@@ -1072,13 +1072,13 @@ Hot-swap the reload.fs fragment shader while it runs
 
 ### spotlight-rendering
 
-Three spotlights alpha-masked over a star field + sprite swarm
+Three spotlights alpha-masked over a sprite swarm
 
 ![spotlight-rendering](spotlight-rendering.gif)
 
 ### depth-writing
 
-Inverted gl_FragDepth into a custom depth-texture framebuffer
+Inverted gl_FragDepth into a custom depth texture
 
 ![depth-writing](depth-writing.gif)
 
@@ -1090,19 +1090,19 @@ The scene's depth buffer visualized through a shader
 
 ### hybrid-rendering
 
-Raymarched spheres + rasterized cubes in one depth-tested scene
+Raymarched spheres + rasterized cubes, depth-tested
 
 ![hybrid-rendering](hybrid-rendering.gif)
 
 ### texture-tiling
 
-A generated cube model with its texture tiled 3x3 by a shader
+A cube model with its texture tiled 3x3 by a shader
 
 ![texture-tiling](texture-tiling.gif)
 
 ### model-shader
 
-The watermill OBJ drawn grayscale via a material-bound shader
+The watermill OBJ drawn grayscale by a material shader
 
 ![model-shader](model-shader.gif)
 
@@ -1132,7 +1132,7 @@ A spinning plane lit through a tangent-space normal map
 
 ### simple-mask
 
-An animated mask texture eats holes in two models' plasma skin
+An animated mask eats holes in two models' skin
 
 ![simple-mask](simple-mask.gif)
 
@@ -1156,7 +1156,7 @@ A plane lit by a baked lightmap through a second UV channel
 
 ### shadowmap-rendering
 
-Real shadows: an animated robot under the shadowmapping algorithm
+Real shadows: an animated robot under a shadowmap
 
 ![shadowmap-rendering](shadowmap-rendering.gif)
 
@@ -1168,13 +1168,13 @@ The rusty car under physically-based rendering (PBR maps)
 
 ### deferred-rendering
 
-A three-target G-buffer + full-screen deferred lighting pass
+A three-target G-buffer + deferred lighting pass
 
 ![deferred-rendering](deferred-rendering.gif)
 
 ### game-of-life
 
-Conway's Life on a 2048x2048 world: pan/zoom, presets, draw mode
+Conway's Life on a 2048x2048 world: pan/zoom, presets
 
 ![game-of-life](game-of-life.gif)
 
@@ -1212,7 +1212,7 @@ Spatial audio around an orbiting 3D sphere
 
 ### raw-stream
 
-A sine wave generated sample-by-sample into a raw audio stream
+A sine wave generated sample-by-sample into a stream
 
 ![raw-stream](raw-stream.gif)
 
@@ -1236,7 +1236,7 @@ A pull-model synth: sine/square/triangle/sawtooth on demand
 
 ### amp-envelope
 
-An ADSR amplitude envelope on a tone, with a live shape graph
+An ADSR envelope on a tone, with a live shape graph
 
 ![amp-envelope](amp-envelope.gif)
 

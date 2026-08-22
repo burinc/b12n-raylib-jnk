@@ -213,16 +213,16 @@
    {:profile "monitor-detector" :cat :core :desc "A scaled map of every attached monitor with its specs" :controls "ENTER next monitor · ESC"}
    {:profile "input-actions" :cat :core   :desc "Remappable abstract actions (WASD/arrows) via a keyset map" :controls "WASD/arrows move · SPACE fire · TAB swap keyset · ESC"}
    {:profile "highdpi-demo" :cat :core    :desc "Logical-points vs physical-pixels grids with live DPI scale" :controls "resize window · N next monitor · ESC"}
-   {:profile "highdpi-testbed" :cat :core :desc "A HighDPI diagnostic overlay: grid, monitor/DPI info, crosshair" :controls "SPACE borderless · F fullscreen · ESC"}
+   {:profile "highdpi-testbed" :cat :core :desc "A HighDPI overlay: grid, monitor/DPI info, crosshair" :controls "SPACE borderless · F fullscreen · ESC"}
    {:profile "textured-cube" :cat :models   :desc "Two rlgl textured 3D cubes from a shared atlas" :controls "ESC"}
    {:profile "directional-billboard" :cat :models :desc "A sprite-sheet billboard that turns as the camera orbits" :controls "ESC"}
-   {:profile "random-sequence" :cat :core :desc "Colored bars in a random no-repeat permutation (LoadRandomSequence)" :controls "SPACE shuffle, UP/DOWN count, ESC"}
-   {:profile "basic-voxel" :cat :models :desc "An 8x8x8 beige voxel grid; click to ray-pick and remove cubes" :controls "LEFT/RIGHT spin, click remove, R refill, ESC"}
-   {:profile "rotating-cube" :cat :models :desc "A textured cube spinning on a tilted axis (rlgl matrix stack)" :controls "ESC"}
+   {:profile "random-sequence" :cat :core :desc "Colored bars in a no-repeat LoadRandomSequence" :controls "SPACE shuffle, UP/DOWN count, ESC"}
+   {:profile "basic-voxel" :cat :models :desc "An 8x8x8 voxel grid; click to ray-pick and remove" :controls "LEFT/RIGHT spin, click remove, R refill, ESC"}
+   {:profile "rotating-cube" :cat :models :desc "A textured cube spinning on a tilted axis (rlgl)" :controls "ESC"}
    {:profile "clipboard-text" :cat :core :desc "Type + cut/copy/paste with the system clipboard" :controls "type, CTRL+X/C/V/R/D, ESC"}
    {:profile "undo-redo" :cat :core :desc "A grid player with a 26-slot undo/redo ring buffer" :controls "ARROWS move, SPACE color, CTRL+Z/Y undo/redo, ESC"}
    {:profile "directory-files" :cat :core :desc "A keyboard file browser over the working directory" :controls "UP/DOWN select, ENTER open dir, BACKSPACE up, ESC"}
-   {:profile "custom-logging" :cat :core :desc "A custom trace-log callback timestamps + tags every raylib log line" :controls "watch the console, ESC"}
+   {:profile "custom-logging" :cat :core :desc "A trace-log callback timestamps every raylib line" :controls "watch the console, ESC"}
    {:profile "drop-files" :cat :core :desc "Drag files onto the window to list their paths" :controls "drag & drop files, ESC"}
    {:profile "text-file-loading" :cat :core :desc "Load + word-wrap a text file, scroll it" :controls "mouse wheel scroll, ESC"}
    {:profile "rectangle-bounds" :cat :text :desc "Word-wrapped text in a mouse-resizable container" :controls "drag corner to resize, SPACE toggle wrap, ESC"}
@@ -235,75 +235,75 @@
    {:profile "unicode-ranges" :cat :text :desc "Grow a multilingual font atlas by unicode range" :controls "0-4 select range set, ESC"}
    {:profile "inline-styling" :cat :text :desc "Text with inline color style tags" :controls "watch the colors re-roll, ESC"}
    {:profile "unicode-emojis" :cat :text :desc "Click emojis for multilingual speech bubbles" :controls "hover + click emojis, SPACE re-roll, ESC"}
-   {:profile "text-3d-drawing" :cat :text :desc "A bitmap font drawn as textured quads in 3D, waving the `~~World~~`-marked span" :controls "F1/F2 boundaries, F3 camera, arrows size/spacing, Home/End layers, Tab multicolor, click cube, ESC"}
-   {:profile "strings-management" :cat :text :desc "Drag/slice/shatter/glue text particles; 1-6 run raylib's TextTo* fns" :controls "L-mouse grab/throw, R-mouse slice (+Shift shatter), M-mouse shake, L-Ctrl glue, 1-6 reset, ESC"}
+   {:profile "text-3d-drawing" :cat :text :desc "A bitmap font as textured quads in 3D, one span waving" :controls "F1/F2 boundaries, F3 camera, arrows size/spacing, Home/End layers, Tab multicolor, click cube, ESC"}
+   {:profile "strings-management" :cat :text :desc "Drag/slice/shatter/glue text; 1-6 run TextTo* fns" :controls "L-mouse grab/throw, R-mouse slice (+Shift shatter), M-mouse shake, L-Ctrl glue, 1-6 reset, ESC"}
    {:profile "shapes-textures-shader" :cat :shaders :desc "A grayscale fragment shader over shapes + a sprite" :controls "ESC"}
    {:profile "texture-outline" :cat :shaders :desc "A shader-drawn outline around a sprite" :controls "mouse wheel outline size, ESC"}
    {:profile "camera-3d-free" :cat :core :desc "A free-look 3D camera around a cube" :controls "mouse look, WHEEL zoom, wheel-press pan, Z retarget, ESC"}
    {:profile "camera-3d-first-person" :cat :core :desc "Walk a yard of random columns in first person" :controls "WASD + mouse, 1-4 camera mode, P projection, ESC"}
    {:profile "texture-waves" :cat :shaders :desc "A space texture rippled by an animated wave shader" :controls "ESC"}
    {:profile "camera-3d-split-screen" :cat :core :desc "Two players, two 3D cameras, split screen" :controls "W/S player 1, UP/DOWN player 2, ESC"}
-   {:profile "camera-3d-fps" :cat :core :desc "A physics FPS controller with head-bob, lean and strafe-accel" :controls "WASD move, SPACE jump, Left-Ctrl crouch, mouse look, ESC"}
-   {:profile "vr-simulator" :cat :core :desc "A 3D scene in stereo through a simulated Oculus Rift + lens-distortion shader" :controls "mouse look (first-person), ESC"}
-   {:profile "automation-events" :cat :core :desc "A 2D platformer with input record/replay via AutomationEventList" :controls "LEFT/RIGHT move, SPACE jump, R reset, S record, A replay, ESC"}
-   {:profile "input-gamepad" :cat :core :desc "A live controller diagram: buttons/sticks/triggers light up (Xbox/PS/generic)" :controls "plug in a gamepad, LEFT/RIGHT switch slot, click VIBRATE, ESC"}
+   {:profile "camera-3d-fps" :cat :core :desc "A physics FPS controller with head-bob and lean" :controls "WASD move, SPACE jump, Left-Ctrl crouch, mouse look, ESC"}
+   {:profile "vr-simulator" :cat :core :desc "A 3D scene in stereo through a simulated Oculus Rift" :controls "mouse look (first-person), ESC"}
+   {:profile "automation-events" :cat :core :desc "A platformer recording and replaying its own input" :controls "LEFT/RIGHT move, SPACE jump, R reset, S record, A replay, ESC"}
+   {:profile "input-gamepad" :cat :core :desc "A live controller diagram: buttons/sticks/triggers lit" :controls "plug in a gamepad, LEFT/RIGHT switch slot, click VIBRATE, ESC"}
    {:profile "julia-set" :cat :shaders :desc "A Julia set fractal computed in a fragment shader" :controls "mouse zoom/drift, 1-6 presets, LEFT/RIGHT speed, SPACE, R, F1, ESC"}
    {:profile "framebuffer-rendering" :cat :textures :desc "An observer camera watching a subject camera + frustum" :controls "WASD + mouse observer, R retarget, ESC"}
    {:profile "eratosthenes-sieve" :cat :shaders :desc "The Sieve of Eratosthenes per-pixel in a shader" :controls "ESC"}
    {:profile "mandelbrot-set" :cat :shaders :desc "The Mandelbrot set in a shader, deep-zoom presets" :controls "mouse zoom/drift, 1-6 presets, UP/DOWN iterations, R, F1, ESC"}
-   {:profile "rounded-rectangle-shader" :cat :shaders :desc "SDF rounded rectangles (fill/shadow/border) in a fragment shader" :controls "Q/ESC quit"}
-   {:profile "raymarching" :cat :shaders :desc "A raymarched SDF scene in a fragment shader, first-person fly-cam" :controls "WASD move, mouse look, Q/E down/up, ESC"}
-   {:profile "color-correction" :cat :shaders :desc "A post-process shader tuning contrast/saturation/brightness of a picture" :controls "1-4 picture, Q/W A/S Z/X sliders, R reset, ESC"}
-   {:profile "custom-uniform" :cat :shaders :desc "A mouse-steered swirl post-process over a render-textured 3D scene" :controls "move the mouse, ESC"}
-   {:profile "ascii-rendering" :cat :shaders :desc "A post-process shader re-rendering the scene as ASCII glyphs" :controls "LEFT/RIGHT cell size, ESC"}
-   {:profile "postprocessing" :cat :shaders :desc "Twelve full-screen post-process shaders cycled over a 3D scene" :controls "LEFT/RIGHT cycle effect, ESC"}
-   {:profile "texture-rendering" :cat :shaders :desc "A blank texture painted and animated entirely by a fragment shader" :controls "ESC"}
+   {:profile "rounded-rectangle-shader" :cat :shaders :desc "SDF rounded rects (fill/shadow/border) in a shader" :controls "Q/ESC quit"}
+   {:profile "raymarching" :cat :shaders :desc "A raymarched SDF scene with a first-person fly-cam" :controls "WASD move, mouse look, Q/E down/up, ESC"}
+   {:profile "color-correction" :cat :shaders :desc "A shader tuning contrast/saturation/brightness" :controls "1-4 picture, Q/W A/S Z/X sliders, R reset, ESC"}
+   {:profile "custom-uniform" :cat :shaders :desc "A mouse-steered swirl over a render-textured scene" :controls "move the mouse, ESC"}
+   {:profile "ascii-rendering" :cat :shaders :desc "A shader re-rendering the scene as ASCII glyphs" :controls "LEFT/RIGHT cell size, ESC"}
+   {:profile "postprocessing" :cat :shaders :desc "Twelve full-screen post-process shaders, cycled" :controls "LEFT/RIGHT cycle effect, ESC"}
+   {:profile "texture-rendering" :cat :shaders :desc "A blank texture painted entirely by a fragment shader" :controls "ESC"}
    {:profile "multi-sample2d" :cat :shaders :desc "Two textures blended in a shader via a second sampler2D" :controls "LEFT/RIGHT divider, ESC"}
-   {:profile "palette-switch" :cat :shaders :desc "Palette-indexed bands recolored by an ivec3-array shader uniform" :controls "LEFT/RIGHT palette, ESC"}
+   {:profile "palette-switch" :cat :shaders :desc "Palette-indexed bands recolored by a shader uniform" :controls "LEFT/RIGHT palette, ESC"}
    {:profile "hot-reloading" :cat :shaders :desc "Hot-swap the reload.fs fragment shader while it runs" :controls "A auto-reload, CLICK reload once, ESC"}
-   {:profile "spotlight-rendering" :cat :shaders :desc "Three spotlights alpha-masked over a star field + sprite swarm" :controls "move the mouse, ESC"}
+   {:profile "spotlight-rendering" :cat :shaders :desc "Three spotlights alpha-masked over a sprite swarm" :controls "move the mouse, ESC"}
    {:profile "font-sdf" :cat :text :desc "Bitmap vs SDF font scaling, the SDF drawn through a shader" :controls "MOUSE WHEEL scale, hold SPACE for SDF, ESC"}
-   {:profile "depth-writing" :cat :shaders :desc "Inverted gl_FragDepth into a custom depth-texture framebuffer" :controls "ESC"}
+   {:profile "depth-writing" :cat :shaders :desc "Inverted gl_FragDepth into a custom depth texture" :controls "ESC"}
    {:profile "depth-rendering" :cat :shaders :desc "The scene's depth buffer visualized through a shader" :controls "WASD + mouse look, Z retarget, ESC"}
-   {:profile "hybrid-rendering" :cat :shaders :desc "Raymarched spheres + rasterized cubes in one depth-tested scene" :controls "ESC"}
-   {:profile "texture-tiling" :cat :shaders :desc "A generated cube model with its texture tiled 3x3 by a shader" :controls "WASD + mouse look, Z retarget, ESC"}
+   {:profile "hybrid-rendering" :cat :shaders :desc "Raymarched spheres + rasterized cubes, depth-tested" :controls "ESC"}
+   {:profile "texture-tiling" :cat :shaders :desc "A cube model with its texture tiled 3x3 by a shader" :controls "WASD + mouse look, Z retarget, ESC"}
    {:profile "model-loading" :cat :models :desc "The castle OBJ model loaded from disk, ray-pick selection" :controls "LEFT CLICK select, ESC"}
-   {:profile "model-shader" :cat :shaders :desc "The watermill OBJ drawn grayscale via a material-bound shader" :controls "WASD + mouse look, ESC"}
+   {:profile "model-shader" :cat :shaders :desc "The watermill OBJ drawn grayscale by a material shader" :controls "WASD + mouse look, ESC"}
    {:profile "heightmap-rendering" :cat :models :desc "Terrain generated from a grayscale heightmap image" :controls "ESC"}
    {:profile "cubicmap-rendering" :cat :models :desc "A cube maze generated from a tiny black-and-white image" :controls "P pause orbit, ESC"}
    {:profile "mesh-generation" :cat :models :desc "All nine procedural mesh generators, checked-textured" :controls "CLICK or LEFT/RIGHT cycle, ESC"}
-   {:profile "first-person-maze" :cat :models :desc "Walk the cubicmap maze in first person, wall collision + radar" :controls "WASD + mouse look, ESC"}
+   {:profile "first-person-maze" :cat :models :desc "Walk a cubicmap maze in first person, with a radar" :controls "WASD + mouse look, ESC"}
    {:profile "basic-lighting" :cat :shaders :desc "A plane + cube lit by four toggleable colored point lights" :controls "Y/R/G/B toggle lights, ESC"}
    {:profile "fog-rendering" :cat :shaders :desc "Torus/cube/sphere models fading into exponential fog" :controls "UP/DOWN fog density, ESC"}
    {:profile "cel-shading" :cat :shaders :desc "A GLB car toon-shaded with quantized bands + outline" :controls "Z cel, C outline, Q/E bands, ESC"}
    {:profile "normalmap-rendering" :cat :shaders :desc "A spinning plane lit through a tangent-space normal map" :controls "N toggle, WASD light, UP/DOWN shininess, ESC"}
-   {:profile "simple-mask" :cat :shaders :desc "An animated mask texture eats holes in two models' plasma skin" :controls "WASD + mouse look, ESC"}
+   {:profile "simple-mask" :cat :shaders :desc "An animated mask eats holes in two models' skin" :controls "WASD + mouse look, ESC"}
    {:profile "vertex-displacement" :cat :shaders :desc "A plane mesh riding Perlin-noise waves in the vertex shader" :controls "WASD + mouse look, ESC"}
    {:profile "rlgl-compute" :cat :shaders :desc "Game of Life stepped entirely on the GPU by compute shaders" :controls "LEFT draw, RIGHT erase, WHEEL brush, ESC"}
    {:profile "mesh-instancing" :cat :shaders :desc "Ten thousand lit cubes in one draw call (DrawMeshInstanced)" :controls "ESC"}
    {:profile "lightmap-rendering" :cat :shaders :desc "A plane lit by a baked lightmap through a second UV channel" :controls "ESC"}
-   {:profile "shadowmap-rendering" :cat :shaders :desc "Real shadows: an animated robot under the shadowmapping algorithm" :controls "ARROWS light, F screenshot, ESC"}
+   {:profile "shadowmap-rendering" :cat :shaders :desc "Real shadows: an animated robot under a shadowmap" :controls "ARROWS light, F screenshot, ESC"}
    {:profile "basic-pbr" :cat :shaders :desc "The rusty car under physically-based rendering (PBR maps)" :controls "1-4 toggle lights, ESC"}
-   {:profile "deferred-rendering" :cat :shaders :desc "A three-target G-buffer + full-screen deferred lighting pass" :controls "Y/R/G/B lights, 1-4 views, ESC"}
-   {:profile "game-of-life" :cat :shaders :desc "Conway's Life on a 2048x2048 world: pan/zoom, presets, draw mode" :controls "1-9/0 presets, R/P/D mode, Z/X zoom, F/S speed, drag pan, ESC"}
+   {:profile "deferred-rendering" :cat :shaders :desc "A three-target G-buffer + deferred lighting pass" :controls "Y/R/G/B lights, 1-4 views, ESC"}
+   {:profile "game-of-life" :cat :shaders :desc "Conway's Life on a 2048x2048 world: pan/zoom, presets" :controls "1-9/0 presets, R/P/D mode, Z/X zoom, F/S speed, drag pan, ESC"}
    {:profile "loading-gltf" :cat :models :desc "The animated glTF robot, switchable animations" :controls "LEFT/RIGHT animation, ESC"}
-   {:profile "yaw-pitch-roll" :cat :models :desc "Fly a WWI plane through pitch/yaw/roll, easing back to level" :controls "UP/DOWN pitch, LEFT/RIGHT roll, A/S yaw, ESC"}
-   {:profile "mesh-picking" :cat :models :desc "A mouse ray picks the closest quad/triangle/sphere/box/mesh hit" :controls "mouse aim, RIGHT CLICK camera, ESC"}
+   {:profile "yaw-pitch-roll" :cat :models :desc "Fly a WWI plane through pitch/yaw/roll, easing level" :controls "UP/DOWN pitch, LEFT/RIGHT roll, A/S yaw, ESC"}
+   {:profile "mesh-picking" :cat :models :desc "A mouse ray picks the closest quad/sphere/box/mesh" :controls "mouse aim, RIGHT CLICK camera, ESC"}
    {:profile "loading-iqm" :cat :models :desc "The classic IQM guy walking on loop" :controls "ESC"}
    {:profile "loading-m3d" :cat :models :desc "The Cesium Man in Model3D format, skeleton view on SPACE" :controls "LEFT/RIGHT animation, hold SPACE skeleton, ESC"}
    {:profile "loading-vox" :cat :models :desc "Four MagicaVoxel models under a fly camera + voxel lighting" :controls "CLICK cycle, WASD/ARROWS move, MIDDLE-drag rotate, WHEEL zoom, ESC"}
    {:profile "animation-timing" :cat :models :desc "The robot with a playback timeline + adjustable speed" :controls "LEFT/RIGHT anim, UP/DOWN speed, P pause, ESC"}
-   {:profile "bone-socket" :cat :models :desc "A hat, sword and shield riding the greenman's skeleton bones" :controls "T/G anim, F/H rotate, 1/2/3 equip, ESC"}
+   {:profile "bone-socket" :cat :models :desc "A hat, sword and shield riding the greenman's bones" :controls "T/G anim, F/H rotate, 1/2/3 equip, ESC"}
    {:profile "point-rendering" :cat :models :desc "Up to 10 million points: GPU point mode vs per-point draws" :controls "UP/DOWN count, SPACE method, ESC"}
    {:profile "skybox-rendering" :cat :models :desc "A cubemap skybox drawn from inside a unit cube" :controls "WASD + mouse look, ESC"}
    {:profile "animation-blending" :cat :models :desc "SPACE cross-fades the robot between two animations" :controls "SPACE blend, LEFT/RIGHT + UP/DOWN anims, Z/X + N/M speeds, P, ESC"}
    {:profile "animation-blend-custom" :cat :models :desc "Per-bone blending: walking legs + attacking upper body" :controls "SPACE toggle blend mode, ESC"}
-   {:profile "decals" :cat :models :desc "Click to splat logo decals clipped onto a character's surface" :controls "CLICK splat, RMB-hold camera, H model, C clear, ESC"}
-   {:profile "raw-stream" :cat :audio :desc "A sine wave generated sample-by-sample into a raw audio stream" :controls "UP/DOWN frequency, LEFT/RIGHT pan, ESC"}
+   {:profile "decals" :cat :models :desc "Click to splat logo decals onto a character's surface" :controls "CLICK splat, RMB-hold camera, H model, C clear, ESC"}
+   {:profile "raw-stream" :cat :audio :desc "A sine wave generated sample-by-sample into a stream" :controls "UP/DOWN frequency, LEFT/RIGHT pan, ESC"}
    {:profile "mixed-processor" :cat :audio :desc "A DSP distortion callback on the whole audio mix" :controls "LEFT/RIGHT distortion, SPACE coin, ESC"}
    {:profile "stream-effects" :cat :audio :desc "Stackable lowpass + delay effects on one music stream" :controls "F lowpass, D delay, SPACE restart, P pause, ESC"}
    {:profile "stream-callback" :cat :audio :desc "A pull-model synth: sine/square/triangle/sawtooth on demand" :controls "LEFT/RIGHT wave, UP/DOWN frequency, ESC"}
-   {:profile "amp-envelope" :cat :audio :desc "An ADSR amplitude envelope on a tone, with a live shape graph" :controls "hold SPACE play, Q/A W/S E/D R/F params, ESC"}
+   {:profile "amp-envelope" :cat :audio :desc "An ADSR envelope on a tone, with a live shape graph" :controls "hold SPACE play, Q/A W/S E/D R/F params, ESC"}
    {:profile "spectrum-visualizer" :cat :audio :desc "A live FFT spectrum of the music through a shader" :controls "ESC"}
    {:profile "screen-buffer" :cat :textures :desc "The classic DOS fire effect in a palette-indexed buffer" :controls "ESC"}])
 
