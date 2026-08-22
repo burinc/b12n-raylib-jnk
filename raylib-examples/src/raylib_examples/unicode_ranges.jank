@@ -10,18 +10,14 @@
   Based on raylib/examples/text/text_unicode_ranges.c
 
   jank-native notes:
-  - The Font is unloaded + reloaded at runtime, so it parks in a cpp/raw
-    static (the viewport-scaling frame-crossing pattern). CRITICAL: every
-    shim call that touches that static lives in -main, because cpp/raw
-    statics are duplicated PER JANK FN - a helper fn writing the 'same'
-    static writes its own private copy (see the interop guide). That is
-    why the C's AddCodepointRange is inlined into -main's rebuild block
-    instead of being a jank helper fn.
+  - The Font is unloaded + reloaded at runtime, so it lives as an opaque
+    box in a jank atom (the viewport-scaling frame-crossing pattern),
+    which lets the box be swapped when the font is rebuilt.
   - The rebuild copies the font's current glyph values via the
     struct-array subscript (cpp/aget (.-glyphs font) (cpp/int i)) +
     .-value reads - the first committed load-bearing GlyphInfo aget -
-    then appends the new range through the static-buffer element-setter
-    (the codepoints-loading technique) and reloads with LoadFontEx.
+    then appends the new range into a cpp/MemAlloc int array (the
+    codepoints-loading technique) and reloads with LoadFontEx.
   - raylib keeps only codepoints actually present in the font
     (WARNING: 'Requested codepoints glyphs found: [x/y]'), so glyph
     counts reflect NotoSansTC's real coverage, exactly like the C.

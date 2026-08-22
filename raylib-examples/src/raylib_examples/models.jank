@@ -3,8 +3,7 @@
 
   Binding a texture or a shader into a Model's material is the single most
   repeated bit of C in this suite - `m->materials[0].maps[..].texture = tex`
-  and `m->materials[0].shader = s` appeared in 25 examples as a per-file
-  cpp/raw shim. None of it needs C.
+  and `m->materials[0].shader = s` appeared in 25 examples as a per-file cpp/raw block. None of it needs C.
 
   jank's assignment form is `cpp/=`. It takes an lvalue, so a struct field
   reached through `.-field` or an array element reached through `cpp/aget`

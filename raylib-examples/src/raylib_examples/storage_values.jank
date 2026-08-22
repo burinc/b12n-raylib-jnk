@@ -10,11 +10,12 @@
   - SaveStorageValue / LoadStorageValue are the C example's own module
     functions, not raylib API. The save half is RL_REALLOC buffer surgery
     (grow the file to fit a byte position, poke an i32 into it) with no
-    jank surface at all, so it stays C, kept verbatim in a cpp/raw shim.
+    jank surface at all, so it stays C. This is one of the examples that
+    keeps its C deliberately.
   - The load half IS expressed in jank: LoadFileData with the int*
     out-param pattern ((cpp/int 0) + (cpp/& size), the gif-player trick),
-    a one-line cpp/raw shim for the ((int*)data)[pos] read (cpp/aget can
-    subscript, but not reinterpret unsigned char* as int*), and
+    cpp/unsafe-cast to reinterpret the unsigned char* as int* before
+    cpp/aget subscripts it, and
     UnloadFileData when done (free(NULL) is safe on the missing-file path).
   - The C's TextFormat readouts become str; the storage file lands in the
     working directory like the C (gitignored)."

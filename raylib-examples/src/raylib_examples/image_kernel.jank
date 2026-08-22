@@ -6,11 +6,10 @@
   side by side with the untouched original. Q quits.
   Based on raylib/examples/textures/textures_image_kernel.c
 
-  jank-native: ImageKernelConvolution wants a `float *kernel`, which
-  jank builds by declaring the three kernels (and the normalize helper)
-  as C globals in a `cpp/raw` block - the constant-array interop
-  pattern. The kernels decay to `float*` when passed, and each Image is
-  mutated through (cpp/& img). No -sys wrapper change."
+  jank-native: ImageKernelConvolution wants a `float *kernel`. jank
+  builds one with cpp/MemAlloc plus cpp/unsafe-cast, filled element-wise
+  with cpp/aget and cpp/=; the array outlives the fn that made it because
+  MemAlloc is heap. Each Image is mutated through (cpp/& img)."
   (:include "raylib.h"))
 
 (def WIDTH 800)

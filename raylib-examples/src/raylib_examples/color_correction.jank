@@ -11,14 +11,14 @@
   jank-native notes:
   - The postprocess class (a shader wrapped around a plain DrawTexture)
     - the natural next step after the fullscreen-rect shaders. Three
-    FLOAT uniforms (contrast/saturation/brightness) ship via the same
-    scalar C setter as rounded-rectangle-shader; the shader divides each
-    by 100 internally, so the -100..100 slider range is passed raw.
+    FLOAT uniforms (contrast/saturation/brightness) go straight to
+    SetShaderValue with (cpp/new cpp/float ...) as the pointer; the
+    shader divides each by 100 internally, so the -100..100 range is
+    passed raw.
   - Four native Texture2D pictures are held as outer-let locals (native
-    values can't live in a jank vector). Rather than select a native
-    value through an if (and to keep the centering int-math in C), the
-    per-index DrawTexture happens inside a cond branch, each calling a
-    jank_draw_centered shim that reads .width/.height and centers."
+    values cannot live in a jank vector), so the per-index DrawTexture
+    happens inside a cond branch, centering from the .width/.height
+    reads inline."
   (:include "raylib.h"))
 
 (def WIDTH 800)

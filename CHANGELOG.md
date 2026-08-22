@@ -11,6 +11,14 @@ example ports that preceded it are in the git history and in
 
 ### Added
 
+- `docs/guide/numeric-performance.md`: a hot loop written the ordinary way
+  measures ~70x slower than the same loop through `cpp/` operators on native
+  types (a 1024-point FFT: 72.54 ms against 1.03 ms). C++ interop is the fast
+  path, not the slow one; boxing is the cost. Includes the per-iteration
+  numbers, when it matters, and the two loop traps that come with the fix.
+- `raylib-examples.rendertex`, depth and shadowmap render targets in pure
+  jank (`load-depth!`, `load-shadowmap!`, and their unloads).
+
 - `raylib-examples.shaders`, shader-uniform helpers in pure jank
   (`set-int!`, `set-float!`, `set-vec2!`/`3!`/`4!`, `set-shader-loc!`).
 - `raylib-examples.models`, Model material binding in pure jank
@@ -32,6 +40,15 @@ example ports that preceded it are in the git history and in
 - `CONTRIBUTING.md`, `NOTICE`, `.mailmap`, and issue/PR templates.
 
 ### Changed
+
+- **`cpp/raw` down from 78 blocks to 10**, across 214 sources. Every
+  remaining one is accounted for: four are blocked on a real jank gap (a jank
+  fn cannot become a C function pointer), two keep their C deliberately, and
+  four are ports still to do.
+- Three examples previously recorded as "measured keeps" were re-measured and
+  ported: `screen_buffer`, `spectrum_visualizer`, `animation_blend_custom`.
+  The original numbers were taken against boxed jank arithmetic and did not
+  support the conclusion drawn from them.
 
 - **raylib now comes from the official
   [`org.jank-lang.commons/raylib-sys`](https://github.com/jank-lang/commons)
@@ -56,6 +73,13 @@ example ports that preceded it are in the git history and in
 - The last MPL 2.0 files, with the wrapper. The tree is uniformly zlib.
 
 ### Fixed
+
+- **Guide claims that C shims were required are corrected throughout.**
+  Material and camera field writes are `cpp/=`; pointer arithmetic is
+  `cpp/unsafe-cast`; native arrays are `cpp/MemAlloc` + `cpp/unsafe-cast`;
+  shader uniforms are `shaders.jank`. The examples those sections cited as
+  proof had already stopped using the shims they described.
+- Example docstrings that still described removed C.
 
 - **The guide's central claim about native values was wrong.** It said a
   native `cpp` value "only stays native within the form that produced it" and

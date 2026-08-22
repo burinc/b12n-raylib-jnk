@@ -39,15 +39,17 @@ values and C's:
 Four things follow from it:
 
 1. **The value can't leave the form that produced it**: construct inline,
-   bind in an enclosing `let`, or park frame-crossing mutable state in a
-   `cpp/raw` static. ([`native-value-lifetimes.md`](native-value-lifetimes.md))
+   bind in an enclosing `let`, or hold frame-crossing mutable state as an
+   opaque box in a jank atom.
+   ([`native-value-lifetimes.md`](native-value-lifetimes.md))
 2. **The compiler enforces it at compile time, strictly**: `if`/`cond`
    branch type-checking, numeric coercion between jank and native number
    types, and struct construction all have sharp, well-defined rules.
    ([`type-checking-and-coercion.md`](type-checking-and-coercion.md))
 3. **A C-interop toolbox reaches everything the rule seems to block**:
-   pointer interop (`cpp/&`, `cpp/aget`, `cpp/new`), out-params, callbacks
-   defined inside `cpp/raw`, and shared jank helper namespaces.
+   pointer interop (`cpp/&`, `cpp/aget`, `cpp/unsafe-cast`), out-params,
+   native arrays, and shared jank helper namespaces. One genuine gap is
+   left: a jank fn cannot become a C function pointer.
    ([`cpp-interop-toolbox.md`](cpp-interop-toolbox.md))
 4. **The full raylib surface is reachable despite the rule**: fonts,
    models and animations, audio, 3D mode, rlgl, and (platform-permitting)
@@ -71,10 +73,12 @@ against one real, struct-heavy graphics API across 209 examples.
   table (`mod`/`quot`/`cpp/float`/`min`/`max`), and constructing native
   structs from jank data.
 - [`cpp-interop-toolbox.md`](cpp-interop-toolbox.md): pointer interop
-  (`cpp/&`, `cpp/aget`, `cpp/new`, `cpp/raw`), `int *` out-params,
-  callback-taking APIs, shared jank helper namespaces (`rlights`,
-  `shaders`, `models`), shader-uniform shims, and current limitations
-  (known-blocked constructs).
+  (`cpp/&`, `cpp/aget`, `cpp/unsafe-cast`), `int *` out-params, native
+  arrays, shared jank helper namespaces (`rlights`, `shaders`, `models`,
+  `rendertex`), and the one construct that is genuinely blocked.
+- [`numeric-performance.md`](numeric-performance.md): why a hot loop written
+  the ordinary way is ~70x off the same loop through `cpp/` operators, what
+  that costs per iteration, and the two loop traps that come with the fix.
 
 ### What's proven to work
 

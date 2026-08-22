@@ -98,8 +98,9 @@ than failing obscurely. You never need to run it: every GIF under
 
 Full guide at [`docs/guide/index.md`](docs/guide/index.md): the
 native-value-lifetime rule that shapes every jank/C++ interop pattern here,
-a C-interop toolbox, raylib API coverage notes, the porting workflow, and
-the full example catalog.
+a C-interop toolbox, why a hot numeric loop wants `cpp/` operators rather
+than ordinary jank arithmetic, raylib API coverage notes, the porting
+workflow, and the full example catalog.
 
 Rebuilding and republishing that guide as a site is a maintainer task:
 `bb docs-sync` (`--no-push` to build and commit without publishing

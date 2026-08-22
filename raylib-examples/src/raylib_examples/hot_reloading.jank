@@ -10,16 +10,14 @@
   jank-native notes:
   - The C reassigns its Shader when the file changes - a native value
     that must persist across frames but cannot thread through
-    loop/recur (rule 2). It lives in a cpp/raw static (the
-    viewport-scaling render-target pattern): jank_load_shader /
-    jank_try_reload / jank_get_shader. The reload keeps the old shader
-    when the new one failed to compile (id == rlGetShaderIdDefault),
-    matching the C.
+    loop/recur (rule 2). It lives as an opaque box in a jank atom (the
+    viewport-scaling render-target pattern), so the box can be swapped
+    when the file changes. The reload keeps the old shader when the new
+    one failed to compile (id == rlGetShaderIdDefault), matching the C.
   - Uniform locations DO thread through the loop as jank ints,
     re-queried after a successful swap.
-  - GetFileModTime's time_t boxes to a jank int; asctime(localtime())
-    stays a tiny C helper returning const char*, folded to a jank
-    string with str (the monitor-detector pattern).
+  - GetFileModTime's time_t boxes to a jank int; the timestamp is
+    formatted in jank rather than through asctime.
   - Native bools that feed and/or logic are boxed first via
     (if native true false) to keep both if-branch types jank."
   (:include "raylib.h" "rlgl.h" "time.h"))

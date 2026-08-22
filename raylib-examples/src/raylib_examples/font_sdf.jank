@@ -11,11 +11,10 @@
   jank-native notes:
   - The C assembles each Font by hand: LoadFileData -> LoadFontData
     (GlyphInfo* + an int* out-param) -> GenImageFontAtlas (a
-    Rectangle** out-param) -> struct field writes. That pointer
-    plumbing stays a verbatim C shim returning the finished Font
-    (the framebuffer-rendering approach); jank sees only the two
-    Font values. Deviation: the shim re-reads the TTF per font
-    instead of sharing one buffer - same result, simpler shim.
+    Rectangle** out-param) -> struct field writes. All of that is jank:
+    out-params through (cpp/& n), the Rectangle** read with cpp/aget,
+    and the Font fields written with cpp/=. Each Font is built inside
+    one let and boxed, since a Font cannot cross a fn boundary.
   - SetTextureFilter on the SDF atlas (required for SDF sampling)
     takes the Texture read straight off the Font with .-texture.
   - The %02.02f render-size readout reuses viewport-scaling's

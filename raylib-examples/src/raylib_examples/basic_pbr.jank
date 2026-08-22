@@ -9,17 +9,16 @@
   Based on raylib/examples/shaders/shaders_basic_pbr.c
 
   jank-native notes:
-  - The PBR example ships its OWN light struct (with an intensity
-    field - not rlights.h compatible), so its CreateLight/UpdateLight
-    stay a per-file cpp/raw block behind index wrappers, while
-    rlights still supplies the generic uniform setters.
-  - Material map .color / .value / .texture writes are map-slot
-    shims; the per-model uniform values (tiling, emissive, metallic,
-    roughness) are known jank constants re-sent per frame, matching
+  - This example's lights carry an intensity field that rlights.h does
+    not; rlights.jank takes it as an optional :intensity, so the whole
+    lighting path is the shared namespace.
+  - Material map .color / .value / .texture writes go through
+    models.jank; the per-model uniform values (tiling, emissive,
+    metallic, roughness) are jank constants re-sent per frame, matching
     the C reads off the material.
   - Teardown keeps the C's unbind dance (shader zeroed, material
-    unloaded manually, maps NULLed) as a Model-by-value shim so the
-    shared PBR shader isn't double-freed."
+    unloaded manually, maps NULLed) so the shared PBR shader is not
+    double-freed. Each step is a cpp/= on the material field."
   (:require [raylib-examples.models :as md])
   (:require [raylib-examples.rlights :as rl]
             [raylib-examples.shaders :as sh])

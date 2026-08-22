@@ -14,9 +14,8 @@
     of aget on an int*.
   - The C's CodepointRemoveDuplicates (calloc + memcpy + triple loop)
     becomes a jank first-occurrence dedup over a set. Writing the result
-    BACK to the int* LoadFontEx wants is the reverse problem - jank
-    can't build a native array - so a cpp/raw static buffer is filled
-    element-wise through a one-line setter shim (jank_cp_set).
+    BACK to the int* LoadFontEx wants goes through cpp/MemAlloc plus
+    cpp/unsafe-cast, filled element-wise with cpp/aget and cpp/=.
   - The TEXT literal is UTF-8 in the source, like the C. jank's lexer
     accepts UTF-8 inside string literals; the ASCII-only rule is about
     comments.

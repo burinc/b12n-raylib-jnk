@@ -15,12 +15,11 @@
   - The two ping-ponged worlds are RenderTexture let-locals selected
     per frame by a jank flip? bool - (if flip? world1 world2) binds
     the native by branch, nothing native crosses recur.
-  - Draw mode's malloc'd Image snapshot (LoadImageFromTexture,
-    GetImageColor stroke color-lock, ImageDrawPixel, UpdateTextureRec
-    upload) and the preset/random-soup loaders stay verbatim-ish C
-    shims around C-static state; jank drives them with scalars.
+  - Draw mode's Image snapshot (LoadImageFromTexture, GetImageColor
+    stroke color-lock, ImageDrawPixel, UpdateTextureRec upload) and the
+    preset/random-soup loaders are jank over an Image held boxed.
   - Pan state (previous mouse position) and the stroke color reset
-    thread as jank loop vars / shim calls instead of C statics."
+    thread as jank loop vars."
   (:include "raylib.h" "math.h"))
 
 (defn- paint-free!

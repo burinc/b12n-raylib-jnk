@@ -8,13 +8,12 @@
   Based on raylib/examples/models/models_bone_socket.c
 
   jank-native notes:
-  - Bone lookup by name (the TextIsEqual loop over skeleton.bones[])
-    is an int-returning shim; the per-socket quaternion math
-    (animation-frame bone rotation vs bind pose, then translate +
-    character transform) stays a verbatim shim ending in DrawMesh.
-  - The character's own rotate+translate transform set and its
-    meshes[0]/materials[1] DrawMesh are small shims; equip visibility
-    is three jank bools threaded through recur.
+  - Bone lookup by name walks skeleton.bones[] with cpp/TextIsEqual and
+    returns an int. The per-socket quaternion math (animation-frame bone
+    rotation against bind pose, then translate plus the character
+    transform) is jank, with the Model, equipment and animation array
+    all passed boxed.
+  - Equip visibility is three jank bools threaded through recur.
   - The C updates the animation twice per frame (once in update, once
     after setting the transform) - kept."
   (:include "raylib.h" "raymath.h"))

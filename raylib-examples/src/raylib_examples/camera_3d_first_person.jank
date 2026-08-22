@@ -13,9 +13,8 @@
     threaded as a boxed (cpp/int cpp/CAMERA_*) jank int and passed back
     through UpdateCamera's int param (the keyboard-testbed enum trick).
   - The C's camera field writes (up resets on mode keys, the whole
-    isometric/perspective switch incl. CameraYaw/CameraPitch from
-    rcamera.h) become three pointer shims - struct field writes have no
-    jank syntax.
+    isometric/perspective switch) are cpp/= on the field:
+    (cpp/= (.-up camera) (cpp/Vector3 ...)).
   - The 20 random columns are jank maps ({:h :x :z :rgba}) with packed
     colors resolved via GetColor at draw; camera.target passes straight
     from the field read into DrawCube.

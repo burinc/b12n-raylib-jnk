@@ -9,11 +9,10 @@
   Based on raylib/examples/shaders/shaders_hybrid_rendering.c
 
   jank-native notes:
-  - Same verbatim rlgl depth-texture FBO shim pair as depth-writing.
-  - The per-frame camPos/camDir VEC3 push extends raymarching's
-    Camera3D-pointer shim: camDir = normalize(target - position) *
-    camDist is computed inside the C shim (hand-written vector math,
-    no raymath include), reading fields straight off (cpp/& camera).
+  - Same rendertex.jank depth target as depth-writing.
+  - The per-frame camPos/camDir VEC3 push reads the camera fields with
+    .-position / .-target and computes camDir = normalize(target -
+    position) * camDist in jank.
   - rlEnableDepthTest is a direct rlgl call (depth testing must be
     on manually while mixing rendering methods inside the FBO)."
   (:require [raylib-examples.rendertex :as rt])

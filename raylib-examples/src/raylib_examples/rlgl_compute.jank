@@ -12,12 +12,12 @@
   - FIRST COMPUTE SHADERS: requires jank-raylib-sys built with
     OPENGL_VERSION 4.3 (same GL 3.3 feature set + compute; flipped in
     the wrapper's jank-build.bb for this port).
-  - Compute programs load through a C shim (LoadFileText ->
+  - Compute programs load with direct rlgl calls (LoadFileText ->
     rlLoadShader RL_COMPUTE_SHADER -> rlLoadShaderProgramCompute);
     the intermediate shader ids are not kept for unload - the GL
     context teardown reclaims them (simplification vs the C).
-  - The mouse-command SSBO struct (count + 48 GolUpdateCmd) lives in
-    a cpp/raw static behind buffer/count/flush wrappers; the grid
+  - The mouse-command SSBO struct (count + 48 GolUpdateCmd) is a
+    cpp/MemAlloc array behind a box; the grid
     SSBOs are plain unsigned-int ids held as JANK ints, so the
     classic ssboA<->ssboB ping-pong swap is just recur with the loop
     vars exchanged.

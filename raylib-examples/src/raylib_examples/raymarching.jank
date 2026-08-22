@@ -8,10 +8,8 @@
   Based on raylib/examples/shaders/shaders_raymarching_rendering.c
 
   jank-native notes:
-  - First VEC3 uniforms: the eye/target camera vectors. Rather than
-    read camera.position.x/y/z field-by-field in jank, a one-line C
-    shim (jank_set_view) takes the Camera3D pointer via (cpp/& camera)
-    - the proven camera-3d-free address-of - and pushes both VEC3s.
+  - First VEC3 uniforms: the eye/target camera vectors, read off the
+    camera with .-position / .-target and pushed through shaders.jank.
   - runTime accumulates as a plain jank double threaded through recur;
     the per-frame GetFrameTime is boxed via (+ 0.0 ...) before adding.
   - Simplification vs the C: the window is a fixed size, so the
