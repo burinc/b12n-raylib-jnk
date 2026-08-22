@@ -1,513 +1,259 @@
 (ns raylib-examples.text-3d-drawing
   "raylib [text] example - 3d drawing, ported to jank.
 
-  Draws a 2D bitmap font as textured quads in 3D space: each glyph is a
-  quad (or two, for the backface) whose UVs map into the font atlas, so
-  the whole string floats above a spinning cube. The `~~World~~` markup
-  waves via per-codepoint sine offsets. Controls:
-    F1 letter boundary, F2 text boundary, F3 camera (ORBITAL/FREE),
-    Left/Right font size, Up/Down font spacing, PgUp/PgDown line
-    spacing, Insert/Delete (held) layer distance, Home/End layer count,
-    Tab multicolor, click the cube for new colors, drag-drop a .ttf/.fnt
-    to swap fonts, and just type to edit the text.
-  Based on raylib/examples/text/text_3d_drawing.c (4/4 complexity).
+  Text rendered as textured quads in 3D: each glyph becomes a quad built
+  straight from rlgl, stacked into layers, with the parts wrapped in ~~
+  waving on a sine. Orbital camera by default. Type to edit the text,
+  arrows/PgUp/PgDn change size and spacing, Home/End add layers,
+  Insert/Delete change layer distance, Tab toggles multicolor, F1/F2
+  toggle the boundary boxes, F3 switches camera, click the cube to
+  recolor, and dropping a .ttf/.fnt swaps the font. ESC quits.
+  Based on raylib/examples/text/text_3d_drawing.c
 
   jank-native notes:
-  - The rlgl glyph-quad core (DrawTextCodepoint3D / DrawText3D /
-    DrawTextWave3D / MeasureTextWave3D / GenerateRandomColor) works on
-    native Font/Color/Vector3/WaveTextConfig values and the two global
-    SHOW_*_BOUNDRY toggles - none of which a jank fn may return or
-    carry through loop/recur - so they live verbatim in one C shim next
-    to the per-frame update, the 3D scene draw, and the quads-counted
-    HUD stats. jank owns the window lifecycle, the frame loop, the
-    frame boundaries, the 2D instruction text and DrawFPS. Nothing is
-    simplified: drag-drop font swap and live text typing stay faithful
-    because they run inside the C update shim jank calls each frame."
-  (:include "raylib.h" "rlgl.h" "math.h" "stddef.h"))
-
-;; The whole rlgl text engine + per-frame state, near-verbatim from the C.
-(cpp/raw "
-#define JANK_TD_LETTER_BOUNDRY_SIZE   0.25f
-#define JANK_TD_TEXT_MAX_LAYERS       32
-#define JANK_TD_LETTER_BOUNDRY_COLOR  VIOLET
-
-typedef struct JankWaveTextConfig {
-  Vector3 waveRange;
-  Vector3 waveSpeed;
-  Vector3 waveOffset;
-} JankWaveTextConfig;
-
-/* --- global toggles (F1/F2) --- */
-static bool JANK_SHOW_LETTER_BOUNDRY = false;
-static bool JANK_SHOW_TEXT_BOUNDRY = false;
-
-/* --- per-frame state (all native, so it stays C-side) --- */
-static Font jank_td_font;
-static Camera3D jank_td_camera;
-static int jank_td_camera_mode = CAMERA_ORBITAL;
-static Shader jank_td_alpha_discard;
-static JankWaveTextConfig jank_td_wcfg;
-static Color jank_td_light;
-static Color jank_td_dark;
-static Color jank_td_multi[JANK_TD_TEXT_MAX_LAYERS] = { 0 };
-static char jank_td_text[64] = \"Hello ~~World~~ in 3D!\";
-static Vector3 jank_td_tbox = { 0 };
-static Vector3 jank_td_cube_position = { 0.0f, 1.0f, 0.0f };
-static Vector3 jank_td_cube_size = { 2.0f, 2.0f, 2.0f };
-static float jank_td_font_size = 0.8f;
-static float jank_td_font_spacing = 0.05f;
-static float jank_td_line_spacing = -0.1f;
-static float jank_td_layer_distance = 0.01f;
-static float jank_td_time = 0.0f;
-static int jank_td_layers = 1;
-static int jank_td_quads = 0;
-static bool jank_td_spin = true;
-static bool jank_td_multicolor = false;
-
-/* Draw a codepoint at a position in 3D space (a textured quad). */
-static void jank_DrawTextCodepoint3D(Font font, int codepoint, Vector3 position, float fontSize, bool backface, Color tint) {
-  int index = GetGlyphIndex(font, codepoint);
-  float scale = fontSize/(float)font.baseSize;
-
-  position.x += (float)(font.glyphs[index].offsetX - font.glyphPadding)*scale;
-  position.z += (float)(font.glyphs[index].offsetY - font.glyphPadding)*scale;
-
-  Rectangle srcRec = { font.recs[index].x - (float)font.glyphPadding, font.recs[index].y - (float)font.glyphPadding,
-                       font.recs[index].width + 2.0f*font.glyphPadding, font.recs[index].height + 2.0f*font.glyphPadding };
-
-  float width = (float)(font.recs[index].width + 2.0f*font.glyphPadding)*scale;
-  float height = (float)(font.recs[index].height + 2.0f*font.glyphPadding)*scale;
-
-  if (font.texture.id > 0) {
-    const float x = 0.0f;
-    const float y = 0.0f;
-    const float z = 0.0f;
-
-    const float tx = srcRec.x/font.texture.width;
-    const float ty = srcRec.y/font.texture.height;
-    const float tw = (srcRec.x+srcRec.width)/font.texture.width;
-    const float th = (srcRec.y+srcRec.height)/font.texture.height;
-
-    if (JANK_SHOW_LETTER_BOUNDRY) DrawCubeWiresV((Vector3){ position.x + width/2, position.y, position.z + height/2}, (Vector3){ width, JANK_TD_LETTER_BOUNDRY_SIZE, height }, JANK_TD_LETTER_BOUNDRY_COLOR);
-
-    rlCheckRenderBatchLimit(4 + 4*backface);
-    rlSetTexture(font.texture.id);
-
-    rlPushMatrix();
-      rlTranslatef(position.x, position.y, position.z);
-
-      rlBegin(RL_QUADS);
-        rlColor4ub(tint.r, tint.g, tint.b, tint.a);
-
-        /* Front Face */
-        rlNormal3f(0.0f, 1.0f, 0.0f);
-        rlTexCoord2f(tx, ty); rlVertex3f(x,         y, z);
-        rlTexCoord2f(tx, th); rlVertex3f(x,         y, z + height);
-        rlTexCoord2f(tw, th); rlVertex3f(x + width, y, z + height);
-        rlTexCoord2f(tw, ty); rlVertex3f(x + width, y, z);
-
-        if (backface) {
-          /* Back Face */
-          rlNormal3f(0.0f, -1.0f, 0.0f);
-          rlTexCoord2f(tx, ty); rlVertex3f(x,         y, z);
-          rlTexCoord2f(tw, ty); rlVertex3f(x + width, y, z);
-          rlTexCoord2f(tw, th); rlVertex3f(x + width, y, z + height);
-          rlTexCoord2f(tx, th); rlVertex3f(x,         y, z + height);
-        }
-      rlEnd();
-    rlPopMatrix();
-
-    rlSetTexture(0);
-  }
-}
-
-/* Draw a 2D text in 3D space. */
-static void jank_DrawText3D(Font font, const char *text, Vector3 position, float fontSize, float fontSpacing, float lineSpacing, bool backface, Color tint) {
-  int length = TextLength(text);
-  float textOffsetY = 0.0f;
-  float textOffsetX = 0.0f;
-  float scale = fontSize/(float)font.baseSize;
-
-  for (int i = 0; i < length;) {
-    int codepointByteCount = 0;
-    int codepoint = GetCodepoint(&text[i], &codepointByteCount);
-    int index = GetGlyphIndex(font, codepoint);
-    if (codepoint == 0x3f) codepointByteCount = 1;
-
-    if (codepoint == '\\n') {
-      textOffsetY += fontSize + lineSpacing;
-      textOffsetX = 0.0f;
-    } else {
-      if ((codepoint != ' ') && (codepoint != '\\t')) {
-        jank_DrawTextCodepoint3D(font, codepoint, (Vector3){ position.x + textOffsetX, position.y, position.z + textOffsetY }, fontSize, backface, tint);
-      }
-      if (font.glyphs[index].advanceX == 0) textOffsetX += (float)font.recs[index].width*scale + fontSpacing;
-      else textOffsetX += (float)font.glyphs[index].advanceX*scale + fontSpacing;
-    }
-    i += codepointByteCount;
-  }
-}
-
-/* Draw a 2D text in 3D space, waving the parts wrapped in `~~`. */
-static void jank_DrawTextWave3D(Font font, const char *text, Vector3 position, float fontSize, float fontSpacing, float lineSpacing, bool backface, JankWaveTextConfig *config, float time, Color tint) {
-  int length = TextLength(text);
-  float textOffsetY = 0.0f;
-  float textOffsetX = 0.0f;
-  float scale = fontSize/(float)font.baseSize;
-  bool wave = false;
-
-  for (int i = 0, k = 0; i < length; ++k) {
-    int codepointByteCount = 0;
-    int codepoint = GetCodepoint(&text[i], &codepointByteCount);
-    int index = GetGlyphIndex(font, codepoint);
-    if (codepoint == 0x3f) codepointByteCount = 1;
-
-    if (codepoint == '\\n') {
-      textOffsetY += fontSize + lineSpacing;
-      textOffsetX = 0.0f;
-      k = 0;
-    } else if (codepoint == '~') {
-      if (GetCodepoint(&text[i+1], &codepointByteCount) == '~') {
-        codepointByteCount += 1;
-        wave = !wave;
-      }
-    } else {
-      if ((codepoint != ' ') && (codepoint != '\\t')) {
-        Vector3 pos = position;
-        if (wave) {
-          pos.x += sinf(time*config->waveSpeed.x-k*config->waveOffset.x)*config->waveRange.x;
-          pos.y += sinf(time*config->waveSpeed.y-k*config->waveOffset.y)*config->waveRange.y;
-          pos.z += sinf(time*config->waveSpeed.z-k*config->waveOffset.z)*config->waveRange.z;
-        }
-        jank_DrawTextCodepoint3D(font, codepoint, (Vector3){ pos.x + textOffsetX, pos.y, pos.z + textOffsetY }, fontSize, backface, tint);
-      }
-      if (font.glyphs[index].advanceX == 0) textOffsetX += (float)font.recs[index].width*scale + fontSpacing;
-      else textOffsetX += (float)font.glyphs[index].advanceX*scale + fontSpacing;
-    }
-    i += codepointByteCount;
-  }
-}
-
-/* Measure 3D text, ignoring the `~~` markup. */
-static Vector3 jank_MeasureTextWave3D(Font font, const char *text, float fontSize, float fontSpacing, float lineSpacing) {
-  int len = TextLength(text);
-  int tempLen = 0;
-  int lenCounter = 0;
-  float tempTextWidth = 0.0f;
-  float scale = fontSize/(float)font.baseSize;
-  float textHeight = scale;
-  float textWidth = 0.0f;
-  int letter = 0;
-  int index = 0;
-
-  for (int i = 0; i < len; i++) {
-    int next = 0;
-    letter = GetCodepoint(&text[i], &next);
-    index = GetGlyphIndex(font, letter);
-    if (letter == 0x3f) next = 1;
-    i += next - 1;
-
-    if (letter != '\\n') {
-      if (letter == '~' && GetCodepoint(&text[i+1], &next) == '~') {
-        i++;
-      } else {
-        lenCounter++;
-        if (font.glyphs[index].advanceX != 0) textWidth += font.glyphs[index].advanceX*scale;
-        else textWidth += (font.recs[index].width + font.glyphs[index].offsetX)*scale;
-      }
-    } else {
-      if (tempTextWidth < textWidth) tempTextWidth = textWidth;
-      lenCounter = 0;
-      textWidth = 0.0f;
-      textHeight += fontSize + lineSpacing;
-    }
-    if (tempLen < lenCounter) tempLen = lenCounter;
-  }
-  if (tempTextWidth < textWidth) tempTextWidth = textWidth;
-
-  Vector3 vec = { 0 };
-  vec.x = tempTextWidth + (float)((tempLen - 1)*fontSpacing);
-  vec.y = 0.25f;
-  vec.z = textHeight;
-  return vec;
-}
-
-/* A nice color with a random, golden-ratio-spread hue. */
-static Color jank_GenerateRandomColor(float s, float v) {
-  const float Phi = 0.618033988749895f;
-  float h = (float)GetRandomValue(0, 360);
-  h = fmodf((h + h*Phi), 360.0f);
-  return ColorFromHSV(h, s, v);
-}
-
-/* ---- jank-callable entry points ---- */
-
-static void jank_td_init(void) {
-  jank_td_camera = (Camera3D){ 0 };
-  jank_td_camera.position = (Vector3){ -10.0f, 15.0f, -10.0f };
-  jank_td_camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
-  jank_td_camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
-  jank_td_camera.fovy = 45.0f;
-  jank_td_camera.projection = CAMERA_PERSPECTIVE;
-  jank_td_camera_mode = CAMERA_ORBITAL;
-
-  jank_td_font = GetFontDefault();
-  jank_td_light = MAROON;
-  jank_td_dark = RED;
-
-  jank_td_wcfg.waveSpeed.x = jank_td_wcfg.waveSpeed.y = 3.0f; jank_td_wcfg.waveSpeed.z = 0.5f;
-  jank_td_wcfg.waveOffset.x = jank_td_wcfg.waveOffset.y = jank_td_wcfg.waveOffset.z = 0.35f;
-  jank_td_wcfg.waveRange.x = jank_td_wcfg.waveRange.y = jank_td_wcfg.waveRange.z = 0.45f;
-
-  jank_td_alpha_discard = LoadShader(NULL, \"../jank-raylib-sys/raylib/examples/text/resources/shaders/glsl330/alpha_discard.fs\");
-
-  DisableCursor();
-  SetTargetFPS(60);
-}
-
-static void jank_td_update(void) {
-  UpdateCamera(&jank_td_camera, jank_td_camera_mode);
-
-  /* Handle font files dropped */
-  if (IsFileDropped()) {
-    FilePathList droppedFiles = LoadDroppedFiles();
-    if (IsFileExtension(droppedFiles.paths[0], \".ttf\")) {
-      UnloadFont(jank_td_font);
-      jank_td_font = LoadFontEx(droppedFiles.paths[0], (int)jank_td_font_size, 0, 0);
-    } else if (IsFileExtension(droppedFiles.paths[0], \".fnt\")) {
-      UnloadFont(jank_td_font);
-      jank_td_font = LoadFont(droppedFiles.paths[0]);
-      jank_td_font_size = (float)jank_td_font.baseSize;
-    }
-    UnloadDroppedFiles(droppedFiles);
-  }
-
-  /* Handle events */
-  if (IsKeyPressed(KEY_F1)) JANK_SHOW_LETTER_BOUNDRY = !JANK_SHOW_LETTER_BOUNDRY;
-  if (IsKeyPressed(KEY_F2)) JANK_SHOW_TEXT_BOUNDRY = !JANK_SHOW_TEXT_BOUNDRY;
-  if (IsKeyPressed(KEY_F3)) {
-    jank_td_spin = !jank_td_spin;
-    jank_td_camera = (Camera3D){ 0 };
-    jank_td_camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
-    jank_td_camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
-    jank_td_camera.fovy = 45.0f;
-    jank_td_camera.projection = CAMERA_PERSPECTIVE;
-    if (jank_td_spin) {
-      jank_td_camera.position = (Vector3){ -10.0f, 15.0f, -10.0f };
-      jank_td_camera_mode = CAMERA_ORBITAL;
-    } else {
-      jank_td_camera.position = (Vector3){ 10.0f, 10.0f, -10.0f };
-      jank_td_camera_mode = CAMERA_FREE;
-    }
-  }
-
-  /* Handle clicking the cube */
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-    Ray ray = GetScreenToWorldRay(GetMousePosition(), jank_td_camera);
-    RayCollision collision = GetRayCollisionBox(ray,
-      (BoundingBox){(Vector3){ jank_td_cube_position.x - jank_td_cube_size.x/2, jank_td_cube_position.y - jank_td_cube_size.y/2, jank_td_cube_position.z - jank_td_cube_size.z/2 },
-                    (Vector3){ jank_td_cube_position.x + jank_td_cube_size.x/2, jank_td_cube_position.y + jank_td_cube_size.y/2, jank_td_cube_position.z + jank_td_cube_size.z/2 }});
-    if (collision.hit) {
-      jank_td_light = jank_GenerateRandomColor(0.5f, 0.78f);
-      jank_td_dark = jank_GenerateRandomColor(0.4f, 0.58f);
-    }
-  }
-
-  /* Handle text layers changes */
-  if (IsKeyPressed(KEY_HOME)) { if (jank_td_layers > 1) --jank_td_layers; }
-  else if (IsKeyPressed(KEY_END)) { if (jank_td_layers < JANK_TD_TEXT_MAX_LAYERS) ++jank_td_layers; }
-
-  /* Handle text changes */
-  if (IsKeyPressed(KEY_LEFT)) jank_td_font_size -= 0.5f;
-  else if (IsKeyPressed(KEY_RIGHT)) jank_td_font_size += 0.5f;
-  else if (IsKeyPressed(KEY_UP)) jank_td_font_spacing -= 0.1f;
-  else if (IsKeyPressed(KEY_DOWN)) jank_td_font_spacing += 0.1f;
-  else if (IsKeyPressed(KEY_PAGE_UP)) jank_td_line_spacing -= 0.1f;
-  else if (IsKeyPressed(KEY_PAGE_DOWN)) jank_td_line_spacing += 0.1f;
-  else if (IsKeyDown(KEY_INSERT)) jank_td_layer_distance -= 0.001f;
-  else if (IsKeyDown(KEY_DELETE)) jank_td_layer_distance += 0.001f;
-  else if (IsKeyPressed(KEY_TAB)) {
-    jank_td_multicolor = !jank_td_multicolor;
-    if (jank_td_multicolor) {
-      for (int i = 0; i < JANK_TD_TEXT_MAX_LAYERS; i++) {
-        jank_td_multi[i] = jank_GenerateRandomColor(0.5f, 0.8f);
-        jank_td_multi[i].a = GetRandomValue(0, 255);
-      }
-    }
-  }
-
-  /* Handle text input */
-  int ch = GetCharPressed();
-  if (IsKeyPressed(KEY_BACKSPACE)) {
-    int len = TextLength(jank_td_text);
-    if (len > 0) jank_td_text[len - 1] = '\\0';
-  } else if (IsKeyPressed(KEY_ENTER)) {
-    int len = TextLength(jank_td_text);
-    if (len < (int)sizeof(jank_td_text) - 1) {
-      jank_td_text[len] = '\\n';
-      jank_td_text[len+1] = '\\0';
-    }
-  } else {
-    int len = TextLength(jank_td_text);
-    if (len < (int)sizeof(jank_td_text) - 1) {
-      jank_td_text[len] = ch;
-      jank_td_text[len+1] = '\\0';
-    }
-  }
-
-  /* Measure 3D text so we can center it */
-  jank_td_tbox = jank_MeasureTextWave3D(jank_td_font, jank_td_text, jank_td_font_size, jank_td_font_spacing, jank_td_line_spacing);
-
-  jank_td_quads = 0;
-  jank_td_time += GetFrameTime();
-}
-
-static void jank_td_draw_3d(void) {
-  BeginMode3D(jank_td_camera);
-    DrawCubeV(jank_td_cube_position, jank_td_cube_size, jank_td_dark);
-    DrawCubeWires(jank_td_cube_position, 2.1f, 2.1f, 2.1f, jank_td_light);
-    DrawGrid(10, 2.0f);
-
-    BeginShaderMode(jank_td_alpha_discard);
-      /* The 3D text above the cube */
-      rlPushMatrix();
-        rlRotatef(90.0f, 1.0f, 0.0f, 0.0f);
-        rlRotatef(90.0f, 0.0f, 0.0f, -1.0f);
-        for (int i = 0; i < jank_td_layers; i++) {
-          Color clr = jank_td_light;
-          if (jank_td_multicolor) clr = jank_td_multi[i];
-          jank_DrawTextWave3D(jank_td_font, jank_td_text, (Vector3){ -jank_td_tbox.x/2.0f, jank_td_layer_distance*i, -4.5f }, jank_td_font_size, jank_td_font_spacing, jank_td_line_spacing, true, &jank_td_wcfg, jank_td_time, clr);
-        }
-        if (JANK_SHOW_TEXT_BOUNDRY) DrawCubeWiresV((Vector3){ 0.0f, 0.0f, -4.5f + jank_td_tbox.z/2 }, jank_td_tbox, jank_td_dark);
-      rlPopMatrix();
-
-      /* Don't draw the letter boundaries for the option/info text below */
-      bool slb = JANK_SHOW_LETTER_BOUNDRY;
-      JANK_SHOW_LETTER_BOUNDRY = false;
-
-      /* 3D option text (default font) */
-      rlPushMatrix();
-        rlRotatef(180.0f, 0.0f, 1.0f, 0.0f);
-        char *opt = (char *)TextFormat(\"< SIZE: %2.1f >\", jank_td_font_size);
-        jank_td_quads += TextLength(opt);
-        Vector2 m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
-        Vector3 pos = { -m.x/2.0f, 0.01f, 2.0f};
-        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, BLUE);
-        pos.z += 0.5f + m.y;
-
-        opt = (char *)TextFormat(\"< SPACING: %2.1f >\", jank_td_font_spacing);
-        jank_td_quads += TextLength(opt);
-        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
-        pos.x = -m.x/2.0f;
-        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, BLUE);
-        pos.z += 0.5f + m.y;
-
-        opt = (char *)TextFormat(\"< LINE: %2.1f >\", jank_td_line_spacing);
-        jank_td_quads += TextLength(opt);
-        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
-        pos.x = -m.x/2.0f;
-        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, BLUE);
-        pos.z += 0.5f + m.y;
-
-        opt = (char *)TextFormat(\"< LBOX: %3s >\", slb? \"ON\" : \"OFF\");
-        jank_td_quads += TextLength(opt);
-        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
-        pos.x = -m.x/2.0f;
-        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, RED);
-        pos.z += 0.5f + m.y;
-
-        opt = (char *)TextFormat(\"< TBOX: %3s >\", JANK_SHOW_TEXT_BOUNDRY? \"ON\" : \"OFF\");
-        jank_td_quads += TextLength(opt);
-        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
-        pos.x = -m.x/2.0f;
-        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, RED);
-        pos.z += 0.5f + m.y;
-
-        opt = (char *)TextFormat(\"< LAYER DISTANCE: %.3f >\", jank_td_layer_distance);
-        jank_td_quads += TextLength(opt);
-        m = MeasureTextEx(GetFontDefault(), opt, 0.8f, 0.1f);
-        pos.x = -m.x/2.0f;
-        jank_DrawText3D(GetFontDefault(), opt, pos, 0.8f, 0.1f, 0.0f, false, DARKPURPLE);
-      rlPopMatrix();
-
-      /* 3D info text (default font) */
-      opt = (char *)\"All the text displayed here is in 3D\";
-      jank_td_quads += 36;
-      m = MeasureTextEx(GetFontDefault(), opt, 1.0f, 0.05f);
-      pos = (Vector3){-m.x/2.0f, 0.01f, 2.0f};
-      jank_DrawText3D(GetFontDefault(), opt, pos, 1.0f, 0.05f, 0.0f, false, DARKBLUE);
-      pos.z += 1.5f + m.y;
-
-      opt = (char *)\"press [Left]/[Right] to change the font size\";
-      jank_td_quads += 44;
-      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
-      pos.x = -m.x/2.0f;
-      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
-      pos.z += 0.5f + m.y;
-
-      opt = (char *)\"press [Up]/[Down] to change the font spacing\";
-      jank_td_quads += 44;
-      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
-      pos.x = -m.x/2.0f;
-      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
-      pos.z += 0.5f + m.y;
-
-      opt = (char *)\"press [PgUp]/[PgDown] to change the line spacing\";
-      jank_td_quads += 48;
-      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
-      pos.x = -m.x/2.0f;
-      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
-      pos.z += 0.5f + m.y;
-
-      opt = (char *)\"press [F1] to toggle the letter boundry\";
-      jank_td_quads += 39;
-      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
-      pos.x = -m.x/2.0f;
-      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
-      pos.z += 0.5f + m.y;
-
-      opt = (char *)\"press [F2] to toggle the text boundry\";
-      jank_td_quads += 37;
-      m = MeasureTextEx(GetFontDefault(), opt, 0.6f, 0.05f);
-      pos.x = -m.x/2.0f;
-      jank_DrawText3D(GetFontDefault(), opt, pos, 0.6f, 0.05f, 0.0f, false, DARKBLUE);
-
-      JANK_SHOW_LETTER_BOUNDRY = slb;
-    EndShaderMode();
-  EndMode3D();
-}
-
-/* The quads-dependent, right-aligned 2D HUD stats. */
-static void jank_td_draw_stats(int screenWidth) {
-  jank_td_quads += TextLength(jank_td_text)*2*jank_td_layers;
-  char *tmp = (char *)TextFormat(\"%2i layer(s) | %s camera | %4i quads (%4i verts)\", jank_td_layers, jank_td_spin? \"ORBITAL\" : \"FREE\", jank_td_quads, jank_td_quads*4);
-  int width = MeasureText(tmp, 10);
-  DrawText(tmp, screenWidth - 20 - width, 10, 10, DARKGREEN);
-
-  tmp = (char *)\"[Home]/[End] to add/remove 3D text layers\";
-  width = MeasureText(tmp, 10);
-  DrawText(tmp, screenWidth - 20 - width, 25, 10, DARKGRAY);
-
-  tmp = (char *)\"[Insert]/[Delete] to increase/decrease distance between layers\";
-  width = MeasureText(tmp, 10);
-  DrawText(tmp, screenWidth - 20 - width, 40, 10, DARKGRAY);
-
-  tmp = (char *)\"click the [CUBE] for a random color\";
-  width = MeasureText(tmp, 10);
-  DrawText(tmp, screenWidth - 20 - width, 55, 10, DARKGRAY);
-
-  tmp = (char *)\"[Tab] to toggle multicolor mode\";
-  width = MeasureText(tmp, 10);
-  DrawText(tmp, screenWidth - 20 - width, 70, 10, DARKGRAY);
-}
-
-static void jank_td_cleanup(void) {
-  UnloadShader(jank_td_alpha_discard);
-  UnloadFont(jank_td_font);
-}")
+  - Three values are genuinely native and boxed: the Camera3D (UpdateCamera
+    mutates it and F3 rebuilds it), the Font (a dropped file replaces it at
+    runtime, so its box lives in an atom), and the alpha-discard Shader.
+    Everything else - the wave config, the colours, the layer stack, the
+    text itself - is plain jank data threaded through recur.
+  - The glyph quads are direct rlgl: rlBegin RL_QUADS, rlTexCoord2f /
+    rlVertex3f per corner, inside rlPushMatrix. No wrapper needed.
+  - Codepoint iteration takes a const char* for the whole string once and
+    offsets it with cpp/+, rather than re-slicing the jank string per
+    character (the gif-player pointer-arithmetic pattern).
+  - TextFormat is variadic and unavailable, so the readouts use small
+    fixed-decimal helpers.
+  - A jank fn takes at most 10 parameters, so the glyph-drawing fns take
+    their position as an [x y z] vector rather than three arguments."
+  (:include "raylib.h" "rlgl.h"))
 
 (def WIDTH 800)
 (def HEIGHT 450)
+(def ^:private RES "../jank-raylib-sys/raylib/examples/text/resources/")
+
+(def ^:private LETTER-BOUNDRY-SIZE 0.25)
+(def ^:private MAX-LAYERS 32)
+(def ^:private CUBE-POS [0.0 1.0 0.0])
+(def ^:private CUBE-SIZE [2.0 2.0 2.0])
+(def ^:private PHI 0.618033988749895)
+
+(def ^:private WAVE
+  {:sx 3.0 :sy 3.0 :sz 0.5 :ox 0.35 :oy 0.35 :oz 0.35 :rx 0.45 :ry 0.45 :rz 0.45})
+
+;; A Color cannot be returned from a jank fn (rule 1), so colours are
+;; carried as [r g b] and the cpp/Color is built inline at each use.
+;; Characters 32..126 in code order; jank has no char literals.
+(def ^:private ASCII " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")
+
+(defn- char-str [code] (subs ASCII (- code 32) (- code 31)))
+
+(defn- fmt
+  "Fixed-decimal, standing in for the C's %2.1f / %.3f (TextFormat is
+  variadic, so it is unavailable here)."
+  [v places]
+  (let [scale (loop [i 0 acc 1.0] (if (< i places) (recur (inc i) (* acc 10.0)) acc))
+        s (str (/ (+ 0.0 (cpp/round (* v scale))) scale))
+        s (if (loop [i 0] (if (< i (count s)) (if (= (subs s i (inc i)) ".") true (recur (inc i))) false))
+            s (str s "."))
+        d (loop [i 0] (if (= (subs s i (inc i)) ".") i (recur (inc i))))
+        frac (- (count s) d 1)]
+    (if (> frac places)
+      (subs s 0 (+ d places 1))
+      (str s (subs "000" 0 (- places frac))))))
+
+(defn- random-color
+  "A nice colour with a random, golden-ratio-spread hue. Returns [r g b]."
+  [s v]
+  (let [h0 (+ 0.0 (cpp/GetRandomValue 0 360))
+        h (- (+ h0 (* h0 PHI)) (* 360.0 (int (quot (+ h0 (* h0 PHI)) 360.0))))
+        c (cpp/ColorFromHSV (cpp/float h) (cpp/float s) (cpp/float v))]
+    [(int (cpp/cast cpp/int (.-r c)))
+     (int (cpp/cast cpp/int (.-g c)))
+     (int (cpp/cast cpp/int (.-b c)))]))
+
+(defn- draw-codepoint-3d!
+  "One glyph as a textured quad, built directly from rlgl."
+  [font-box codepoint px py pz font-size backface? color letter-boundary?]
+  (let [f (cpp/* (cpp/unbox (:* cpp/Font) font-box))
+        idx (cpp/GetGlyphIndex f (cpp/int codepoint))
+        gl (cpp/aget (.-glyphs f) idx)
+        rc (cpp/aget (.-recs f) idx)
+        pad (+ 0.0 (.-glyphPadding f))
+        scale (/ font-size (+ 0.0 (.-baseSize f)))
+        px (+ px (* (- (+ 0.0 (.-offsetX gl)) pad) scale))
+        pz (+ pz (* (- (+ 0.0 (.-offsetY gl)) pad) scale))
+        sx (- (+ 0.0 (.-x rc)) pad)
+        sy (- (+ 0.0 (.-y rc)) pad)
+        sw (+ (+ 0.0 (.-width rc)) (* 2.0 pad))
+        sh (+ (+ 0.0 (.-height rc)) (* 2.0 pad))
+        w (* sw scale)
+        h (* sh scale)
+        tex-w (+ 0.0 (.-width (.-texture f)))
+        tex-h (+ 0.0 (.-height (.-texture f)))]
+    (when (> (int (cpp/cast cpp/int (.-id (.-texture f)))) 0)
+      (let [tx (/ sx tex-w) ty (/ sy tex-h)
+            tw (/ (+ sx sw) tex-w) th (/ (+ sy sh) tex-h)]
+        (when letter-boundary?
+          (cpp/DrawCubeWiresV (cpp/Vector3 (cpp/float (+ px (/ w 2.0))) (cpp/float py)
+                                           (cpp/float (+ pz (/ h 2.0))))
+                              (cpp/Vector3 (cpp/float w) (cpp/float LETTER-BOUNDRY-SIZE)
+                                           (cpp/float h))
+                              cpp/VIOLET))
+        (cpp/rlCheckRenderBatchLimit (cpp/int (if backface? 8 4)))
+        (cpp/rlSetTexture (.-id (.-texture f)))
+        (cpp/rlPushMatrix)
+        (cpp/rlTranslatef (cpp/float px) (cpp/float py) (cpp/float pz))
+        (cpp/rlBegin cpp/RL_QUADS)
+        (cpp/rlColor4ub (cpp/cast (:unsigned cpp/char) (nth color 0))
+                        (cpp/cast (:unsigned cpp/char) (nth color 1))
+                        (cpp/cast (:unsigned cpp/char) (nth color 2))
+                        (cpp/cast (:unsigned cpp/char) (nth color 3)))
+        ;; front face
+        (cpp/rlNormal3f (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+        (cpp/rlTexCoord2f (cpp/float tx) (cpp/float ty))
+        (cpp/rlVertex3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+        (cpp/rlTexCoord2f (cpp/float tx) (cpp/float th))
+        (cpp/rlVertex3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float h))
+        (cpp/rlTexCoord2f (cpp/float tw) (cpp/float th))
+        (cpp/rlVertex3f (cpp/float w) (cpp/float 0.0) (cpp/float h))
+        (cpp/rlTexCoord2f (cpp/float tw) (cpp/float ty))
+        (cpp/rlVertex3f (cpp/float w) (cpp/float 0.0) (cpp/float 0.0))
+        (when backface?
+          (cpp/rlNormal3f (cpp/float 0.0) (cpp/float -1.0) (cpp/float 0.0))
+          (cpp/rlTexCoord2f (cpp/float tx) (cpp/float ty))
+          (cpp/rlVertex3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+          (cpp/rlTexCoord2f (cpp/float tw) (cpp/float ty))
+          (cpp/rlVertex3f (cpp/float w) (cpp/float 0.0) (cpp/float 0.0))
+          (cpp/rlTexCoord2f (cpp/float tw) (cpp/float th))
+          (cpp/rlVertex3f (cpp/float w) (cpp/float 0.0) (cpp/float h))
+          (cpp/rlTexCoord2f (cpp/float tx) (cpp/float th))
+          (cpp/rlVertex3f (cpp/float 0.0) (cpp/float 0.0) (cpp/float h)))
+        (cpp/rlEnd)
+        (cpp/rlPopMatrix)
+        (cpp/rlSetTexture (cpp/cast cpp/uint 0)))))
+  nil)
+
+(defn- advance-of
+  "The C's advanceX-or-recs-width step for one glyph index."
+  [font-box idx scale spacing]
+  (let [f (cpp/* (cpp/unbox (:* cpp/Font) font-box))
+        gl (cpp/aget (.-glyphs f) (cpp/int idx))
+        adv (+ 0.0 (.-advanceX gl))]
+    (if (zero? adv)
+      (+ (* (+ 0.0 (.-width (cpp/aget (.-recs f) (cpp/int idx)))) scale) spacing)
+      (+ (* adv scale) spacing))))
+
+(defn- codepoint-at
+  "GetCodepoint on the i'th byte, returning [codepoint byte-count]. The
+  const char* arrives BOXED: passed bare it reaches here as an object_ref
+  and cpp/+ has no overload for that."
+  [cstr-box i]
+  (let [cstr (cpp/unbox (:* (:const cpp/char)) cstr-box)
+        n (cpp/int 0)
+        cp (int (cpp/GetCodepoint (cpp/+ cstr (cpp/int i)) (cpp/& n)))]
+    [cp (if (= cp 0x3f) 1 (int (+ 0.0 n)))]))
+
+(defn- draw-text-3d!
+  "The C's DrawText3D: lay glyphs out left to right, newline resets."
+  [font-box text pos font-size spacing line-spacing backface? color]
+  (let [[px py pz] pos
+        cstr (cpp/box (cpp/cast (:* (:const cpp/char)) text))
+        len (int (cpp/TextLength text))
+        f (cpp/* (cpp/unbox (:* cpp/Font) font-box))
+        scale (/ font-size (+ 0.0 (.-baseSize f)))]
+    (loop [i 0 ox 0.0 oy 0.0]
+      (when (< i len)
+        (let [[cp bc] (codepoint-at cstr i)
+              idx (int (cpp/GetGlyphIndex f (cpp/int cp)))]
+          (if (= cp 10) ;; newline
+            (recur (+ i bc) 0.0 (+ oy font-size line-spacing))
+            (do
+              (when (and (not= cp 32) (not= cp 9))
+                (draw-codepoint-3d! font-box cp (+ px ox) py (+ pz oy)
+                                    font-size backface? color false))
+              (recur (+ i bc) (+ ox (advance-of font-box idx scale spacing)) oy)))))))
+  nil)
+
+(defn- draw-text-wave-3d!
+  "The C's DrawTextWave3D: as above, but glyphs between ~~ pairs ride a
+  sine on all three axes."
+  [font-box text pos font-size spacing line-spacing color time letter-boundary?]
+  (let [[px py pz] pos
+        cstr (cpp/box (cpp/cast (:* (:const cpp/char)) text))
+        len (int (cpp/TextLength text))
+        f (cpp/* (cpp/unbox (:* cpp/Font) font-box))
+        scale (/ font-size (+ 0.0 (.-baseSize f)))]
+    (loop [i 0 k 0 ox 0.0 oy 0.0 wave? false]
+      (when (< i len)
+        (let [[cp bc] (codepoint-at cstr i)
+              idx (int (cpp/GetGlyphIndex f (cpp/int cp)))]
+          (cond
+            (= cp 10)
+            (recur (+ i bc) 0 0.0 (+ oy font-size line-spacing) wave?)
+
+            (= cp 126) ;; '~'
+            (let [[nxt nbc] (codepoint-at cstr (inc i))]
+              (if (= nxt 126)
+                (recur (+ i nbc 1) (inc k) ox oy (not wave?))
+                (recur (+ i bc) (inc k) ox oy wave?)))
+
+            :else
+            (do
+              (when (and (not= cp 32) (not= cp 9))
+                (let [wx (if wave? (* (cpp/sin (- (* time (:sx WAVE)) (* k (:ox WAVE)))) (:rx WAVE)) 0.0)
+                      wy (if wave? (* (cpp/sin (- (* time (:sy WAVE)) (* k (:oy WAVE)))) (:ry WAVE)) 0.0)
+                      wz (if wave? (* (cpp/sin (- (* time (:sz WAVE)) (* k (:oz WAVE)))) (:rz WAVE)) 0.0)]
+                  (draw-codepoint-3d! font-box cp (+ px wx ox) (+ py wy) (+ pz wz oy)
+                                      font-size true color letter-boundary?)))
+              (recur (+ i bc) (inc k)
+                     (+ ox (advance-of font-box idx scale spacing)) oy wave?)))))))
+  nil)
+
+(defn- measure-text-wave-3d
+  "The C's MeasureTextWave3D, ignoring the ~~ markup. Returns [x y z]."
+  [font-box text font-size spacing line-spacing]
+  (let [cstr (cpp/box (cpp/cast (:* (:const cpp/char)) text))
+        len (int (cpp/TextLength text))
+        f (cpp/* (cpp/unbox (:* cpp/Font) font-box))
+        scale (/ font-size (+ 0.0 (.-baseSize f)))]
+    (loop [i 0 temp-len 0 counter 0 temp-w 0.0 w 0.0 h scale]
+      (if (< i len)
+        (let [[cp bc] (codepoint-at cstr i)
+              idx (int (cpp/GetGlyphIndex f (cpp/int cp)))]
+          (if (= cp 10)
+            (recur (+ i bc) (max temp-len counter) 0 (max temp-w w) 0.0
+                   (+ h font-size line-spacing))
+            (let [[skip? bc2] (if (= cp 126)
+                                (let [[nxt _] (codepoint-at cstr (+ i bc))]
+                                  (if (= nxt 126) [true (* bc 2)] [false bc]))
+                                [false bc])]
+              (if skip?
+                (recur (+ i bc2) temp-len counter temp-w w h)
+                (let [gl (cpp/aget (.-glyphs f) (cpp/int idx))
+                      adv (+ 0.0 (.-advanceX gl))
+                      dw (if (zero? adv)
+                           (* (+ (+ 0.0 (.-width (cpp/aget (.-recs f) (cpp/int idx))))
+                                 (+ 0.0 (.-offsetX gl))) scale)
+                           (* adv scale))
+                      c (inc counter)]
+                  (recur (+ i bc2) (max temp-len c) c temp-w (+ w dw) h))))))
+        [(+ (max temp-w w) (* (- (max temp-len counter) 1) spacing)) 0.25 h]))))
+
+(defn- make-camera!
+  [cam-box px py pz]
+  (let [c (cpp/* (cpp/unbox (:* cpp/Camera3D) cam-box))]
+    (cpp/= (.-x (.-position c)) (cpp/float px))
+    (cpp/= (.-y (.-position c)) (cpp/float py))
+    (cpp/= (.-z (.-position c)) (cpp/float pz))
+    (cpp/= (.-x (.-target c)) (cpp/float 0.0))
+    (cpp/= (.-y (.-target c)) (cpp/float 0.0))
+    (cpp/= (.-z (.-target c)) (cpp/float 0.0))
+    (cpp/= (.-x (.-up c)) (cpp/float 0.0))
+    (cpp/= (.-y (.-up c)) (cpp/float 1.0))
+    (cpp/= (.-z (.-up c)) (cpp/float 0.0))
+    (cpp/= (.-fovy c) (cpp/float 45.0))
+    (cpp/= (.-projection c) (cpp/int cpp/CAMERA_PERSPECTIVE)))
+  nil)
 
 (defn -main [& args]
   ;; SetConfigFlags ORs internally, so separate calls stack (MSAA + VSYNC
@@ -517,23 +263,237 @@ static void jank_td_cleanup(void) {
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI)
   (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - 3d drawing (jank)")
 
-  (cpp/jank_td_init)
+  (let [cam-box (cpp/box (cpp/new cpp/Camera3D))
+        ;; a dropped font replaces this, so the box lives in an atom
+        font-atom (atom (cpp/box (cpp/new cpp/Font (cpp/GetFontDefault))))
+        default-box (cpp/box (cpp/new cpp/Font (cpp/GetFontDefault)))
+        shader (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/alpha_discard.fs"))]
+    (make-camera! cam-box -10.0 15.0 -10.0)
+    (cpp/DisableCursor)
+    (cpp/SetTargetFPS 60)
 
-  (loop []
-    (when (cpp/! (cpp/WindowShouldClose))
-      (cpp/jank_td_update)
+    ;; Thread the whole configurable state.
+    (loop [text "Hello ~~World~~ in 3D!"
+           font-size 0.8
+           spacing 0.05
+           line-spacing -0.1
+           layer-dist 0.01
+           layers 1
+           tm 0.0
+           spin? true
+           multicolor? false
+           lbox? false
+           tbox? false
+           light [190 33 55]
+           dark [230 41 55]
+           multi (vec (repeat MAX-LAYERS [190 33 55 255]))]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/unbox (:* cpp/Camera3D) cam-box)
+                          (cpp/int (if spin? cpp/CAMERA_ORBITAL cpp/CAMERA_FREE)))
 
-      (cpp/BeginDrawing)
-      (cpp/ClearBackground cpp/RAYWHITE)
-      (cpp/jank_td_draw_3d)
+        (let [;; dropped .ttf / .fnt swaps the font
+              font-size
+              (if (cpp/IsFileDropped)
+                (let [dropped (cpp/LoadDroppedFiles)
+                      path (cpp/aget (.-paths dropped) (cpp/int 0))
+                      fs (cond
+                           (cpp/IsFileExtension path ".ttf")
+                           (do (cpp/UnloadFont (cpp/* (cpp/unbox (:* cpp/Font) @font-atom)))
+                               (reset! font-atom
+                                       (cpp/box (cpp/new cpp/Font
+                                                         (cpp/LoadFontEx path (cpp/int (int font-size))
+                                                                         cpp/nullptr (cpp/int 0)))))
+                               font-size)
+                           (cpp/IsFileExtension path ".fnt")
+                           (do (cpp/UnloadFont (cpp/* (cpp/unbox (:* cpp/Font) @font-atom)))
+                               (reset! font-atom
+                                       (cpp/box (cpp/new cpp/Font (cpp/LoadFont path))))
+                               (+ 0.0 (.-baseSize (cpp/* (cpp/unbox (:* cpp/Font) @font-atom)))))
+                           :else font-size)]
+                  (cpp/UnloadDroppedFiles dropped)
+                  fs)
+                font-size)
 
-      ;; 2D instruction text + stats (jank owns the frame HUD)
-      (cpp/DrawText "Drag & drop a font file to change the font!\nType something, see what happens!\n\nPress [F3] to toggle the camera"
-                    10 35 10 cpp/BLACK)
-      (cpp/jank_td_draw_stats WIDTH)
-      (cpp/DrawFPS 10 10)
-      (cpp/EndDrawing)
-      (recur)))
+              lbox? (if (cpp/IsKeyPressed cpp/KEY_F1) (not lbox?) lbox?)
+              tbox? (if (cpp/IsKeyPressed cpp/KEY_F2) (not tbox?) tbox?)
+              spin? (if (cpp/IsKeyPressed cpp/KEY_F3) (not spin?) spin?)
+              _ (when (cpp/IsKeyPressed cpp/KEY_F3)
+                  (if spin?
+                    (make-camera! cam-box -10.0 15.0 -10.0)
+                    (make-camera! cam-box 10.0 10.0 -10.0)))
 
-  (cpp/jank_td_cleanup)
+              ;; clicking the cube recolours it
+              [light dark]
+              (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+                (let [[cx cy cz] CUBE-POS
+                      [sx sy sz] CUBE-SIZE
+                      ray (cpp/GetScreenToWorldRay (cpp/GetMousePosition)
+                                                   (cpp/* (cpp/unbox (:* cpp/Camera3D) cam-box)))
+                      col (cpp/GetRayCollisionBox
+                           ray
+                           (cpp/BoundingBox
+                            (cpp/Vector3 (cpp/float (- cx (/ sx 2.0))) (cpp/float (- cy (/ sy 2.0)))
+                                         (cpp/float (- cz (/ sz 2.0))))
+                            (cpp/Vector3 (cpp/float (+ cx (/ sx 2.0))) (cpp/float (+ cy (/ sy 2.0)))
+                                         (cpp/float (+ cz (/ sz 2.0))))))]
+                  (if (.-hit col)
+                    [(random-color 0.5 0.78) (random-color 0.4 0.58)]
+                    [light dark]))
+                [light dark])
+
+              layers (cond (cpp/IsKeyPressed cpp/KEY_HOME) (max 1 (dec layers))
+                           (cpp/IsKeyPressed cpp/KEY_END) (min MAX-LAYERS (inc layers))
+                           :else layers)
+
+              [font-size spacing line-spacing layer-dist multicolor? multi]
+              (cond
+                (cpp/IsKeyPressed cpp/KEY_LEFT)
+                [(- font-size 0.5) spacing line-spacing layer-dist multicolor? multi]
+                (cpp/IsKeyPressed cpp/KEY_RIGHT)
+                [(+ font-size 0.5) spacing line-spacing layer-dist multicolor? multi]
+                (cpp/IsKeyPressed cpp/KEY_UP)
+                [font-size (- spacing 0.1) line-spacing layer-dist multicolor? multi]
+                (cpp/IsKeyPressed cpp/KEY_DOWN)
+                [font-size (+ spacing 0.1) line-spacing layer-dist multicolor? multi]
+                (cpp/IsKeyPressed cpp/KEY_PAGE_UP)
+                [font-size spacing (- line-spacing 0.1) layer-dist multicolor? multi]
+                (cpp/IsKeyPressed cpp/KEY_PAGE_DOWN)
+                [font-size spacing (+ line-spacing 0.1) layer-dist multicolor? multi]
+                (cpp/IsKeyDown cpp/KEY_INSERT)
+                [font-size spacing line-spacing (- layer-dist 0.001) multicolor? multi]
+                (cpp/IsKeyDown cpp/KEY_DELETE)
+                [font-size spacing line-spacing (+ layer-dist 0.001) multicolor? multi]
+                (cpp/IsKeyPressed cpp/KEY_TAB)
+                (let [on? (not multicolor?)]
+                  [font-size spacing line-spacing layer-dist on?
+                   (if on?
+                     (vec (loop [i 0 acc []]
+                            (if (< i MAX-LAYERS)
+                              (recur (inc i) (conj acc (conj (random-color 0.5 0.8)
+                                                             (int (cpp/GetRandomValue 0 255)))))
+                              acc)))
+                     multi)])
+                :else [font-size spacing line-spacing layer-dist multicolor? multi])
+
+              ;; typed text
+              ch (int (cpp/GetCharPressed))
+              text (cond
+                     (cpp/IsKeyPressed cpp/KEY_BACKSPACE)
+                     (if (pos? (count text)) (subs text 0 (dec (count text))) text)
+                     (cpp/IsKeyPressed cpp/KEY_ENTER)
+                     (if (< (count text) 63) (str text "\n") text)
+                     (and (>= ch 32) (<= ch 126) (< (count text) 63))
+                     (str text (char-str ch))
+                     :else text)
+
+              [tbx tby tbz] (measure-text-wave-3d @font-atom text font-size spacing line-spacing)
+              tm (+ tm (+ 0.0 (cpp/GetFrameTime)))]
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (cpp/BeginMode3D (cpp/* (cpp/unbox (:* cpp/Camera3D) cam-box)))
+          (let [[cx cy cz] CUBE-POS [sx sy sz] CUBE-SIZE]
+            (cpp/DrawCubeV (cpp/Vector3 (cpp/float cx) (cpp/float cy) (cpp/float cz))
+                           (cpp/Vector3 (cpp/float sx) (cpp/float sy) (cpp/float sz))
+                           (cpp/Color (cpp/cast cpp/uint8_t (nth dark 0)) (cpp/cast cpp/uint8_t (nth dark 1))
+                       (cpp/cast cpp/uint8_t (nth dark 2)) (cpp/cast cpp/uint8_t 255)))
+            (cpp/DrawCubeWires (cpp/Vector3 (cpp/float cx) (cpp/float cy) (cpp/float cz))
+                               (cpp/float 2.1) (cpp/float 2.1) (cpp/float 2.1)
+                               (cpp/Color (cpp/cast cpp/uint8_t (nth light 0)) (cpp/cast cpp/uint8_t (nth light 1))
+                       (cpp/cast cpp/uint8_t (nth light 2)) (cpp/cast cpp/uint8_t 255))))
+          (cpp/DrawGrid 10 (cpp/float 2.0))
+
+          (cpp/BeginShaderMode shader)
+
+          (cpp/rlPushMatrix)
+          (cpp/rlRotatef (cpp/float 90.0) (cpp/float 1.0) (cpp/float 0.0) (cpp/float 0.0))
+          (cpp/rlRotatef (cpp/float 90.0) (cpp/float 0.0) (cpp/float 0.0) (cpp/float -1.0))
+          (loop [i 0]
+            (when (< i layers)
+              (draw-text-wave-3d! @font-atom text
+                                  [(/ (- 0.0 tbx) 2.0) (* layer-dist i) -4.5]
+                                  font-size spacing line-spacing
+                                  (if multicolor? (nth multi i) (conj light 255))
+                                  tm lbox?)
+              (recur (inc i))))
+          (when tbox?
+            (cpp/DrawCubeWiresV (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0)
+                                             (cpp/float (+ -4.5 (/ tbz 2.0))))
+                                (cpp/Vector3 (cpp/float tbx) (cpp/float tby) (cpp/float tbz))
+                                (cpp/Color (cpp/cast cpp/uint8_t (nth dark 0)) (cpp/cast cpp/uint8_t (nth dark 1))
+                       (cpp/cast cpp/uint8_t (nth dark 2)) (cpp/cast cpp/uint8_t 255))))
+          (cpp/rlPopMatrix)
+
+          ;; the option readouts, facing the other way. The C accumulates a
+          ;; quad count from these strings, whose lengths change with the
+          ;; values, so it has to be summed rather than assumed constant.
+          (cpp/rlPushMatrix)
+          (cpp/rlRotatef (cpp/float 180.0) (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+          (let [opt-quads
+                (let [opts [[(str "< SIZE: " (fmt font-size 1) " >") [0 121 241]]
+                      [(str "< SPACING: " (fmt spacing 1) " >") [0 121 241]]
+                      [(str "< LINE: " (fmt line-spacing 1) " >") [0 121 241]]
+                      [(str "< LBOX: " (if lbox? " ON" "OFF") " >") [230 41 55]]
+                      [(str "< TBOX: " (if tbox? " ON" "OFF") " >") [230 41 55]]
+                            [(str "< LAYER DISTANCE: " (fmt layer-dist 3) " >") [112 31 126]]]]
+                  (loop [i 0 z 2.0 quads 0]
+                    (if (< i (count opts))
+                      (let [[s c] (nth opts i)
+                            m (cpp/MeasureTextEx (cpp/* (cpp/unbox (:* cpp/Font) default-box))
+                                                 s (cpp/float 0.8) (cpp/float 0.1))
+                            mx (+ 0.0 (.-x m)) my (+ 0.0 (.-y m))]
+                        (draw-text-3d! default-box s [(/ (- 0.0 mx) 2.0) 0.01 z]
+                                       0.8 0.1 0.0 false (conj c 255))
+                        (recur (inc i) (+ z 0.5 my) (+ quads (int (cpp/TextLength s)))))
+                      quads)))]
+          (cpp/rlPopMatrix)
+
+          ;; the info lines
+          (let [info [["All the text displayed here is in 3D" 1.0 0.05]
+                      ["press [Left]/[Right] to change the font size" 0.6 0.05]
+                      ["press [Up]/[Down] to change the font spacing" 0.6 0.05]
+                      ["press [PgUp]/[PgDown] to change the line spacing" 0.6 0.05]
+                      ["press [F1] to toggle the letter boundry" 0.6 0.05]
+                      ["press [F2] to toggle the text boundry" 0.6 0.05]]]
+            (loop [i 0 z 2.0]
+              (when (< i (count info))
+                (let [[s fs sp] (nth info i)
+                      m (cpp/MeasureTextEx (cpp/* (cpp/unbox (:* cpp/Font) default-box))
+                                           s (cpp/float fs) (cpp/float sp))
+                      mx (+ 0.0 (.-x m)) my (+ 0.0 (.-y m))]
+                  (draw-text-3d! default-box s [(/ (- 0.0 mx) 2.0) 0.01 z]
+                                 fs sp 0.0 false [0 82 172 255])
+                  (recur (inc i) (+ z (if (zero? i) 1.5 0.5) my))))))
+
+          (cpp/EndShaderMode)
+          (cpp/EndMode3D)
+
+          (cpp/DrawText "Drag & drop a font file to change the font!\nType something, see what happens!\n\nPress [F3] to toggle the camera"
+                        10 35 10 cpp/BLACK)
+
+          ;; 248 = the C's fixed per-info-line counts (36+44+44+48+39+37)
+          (let [quads (+ opt-quads 248 (* (int (cpp/TextLength text)) 2 layers))
+                stats (str layers " layer(s) | " (if spin? "ORBITAL" "FREE")
+                           " camera | " quads " quads (" (* quads 4) " verts)")
+                lines [[stats 10 [0 117 44]]
+                       ["[Home]/[End] to add/remove 3D text layers" 25 [80 80 80]]
+                       ["[Insert]/[Delete] to increase/decrease distance between layers" 40 [80 80 80]]
+                       ["click the [CUBE] for a random color" 55 [80 80 80]]
+                       ["[Tab] to toggle multicolor mode" 70 [80 80 80]]]]
+            (loop [i 0]
+              (when (< i (count lines))
+                (let [[s y c] (nth lines i)
+                      w (int (cpp/MeasureText s 10))]
+                  (cpp/DrawText s (- WIDTH 20 w) y 10 (cpp/Color (cpp/cast cpp/uint8_t (nth c 0)) (cpp/cast cpp/uint8_t (nth c 1))
+                       (cpp/cast cpp/uint8_t (nth c 2)) (cpp/cast cpp/uint8_t 255))))
+                (recur (inc i)))))
+
+          (cpp/EndDrawing))
+          (recur text font-size spacing line-spacing layer-dist layers tm
+                 spin? multicolor? lbox? tbox? light dark multi))))
+
+    (cpp/UnloadShader shader)
+    (cpp/UnloadFont (cpp/* (cpp/unbox (:* cpp/Font) @font-atom))))
+
   (cpp/CloseWindow))
