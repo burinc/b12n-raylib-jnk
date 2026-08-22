@@ -11,257 +11,288 @@
   Based on raylib/examples/text/text_strings_management.c (3/4).
 
   jank-native notes:
-  - Everything is native: a TextParticle struct (char[] + Rectangle +
-    Vector2 + Color), a TextParticle[100] pool, a grabbed-particle
-    pointer, and the string ops themselves (TextCopy / TextSubtext /
-    TextSplit / TextTo{Upper,Lower,Pascal,Snake,Camel} return C strings,
-    not jank strings). None of that crosses the jank<->C boundary, so
-    the pool, the seven particle helpers, the grab/slice/shatter/glue
-    state machine, the bounce physics and the draw all live verbatim in
-    one cpp/raw shim; jank owns the window lifecycle, the frame loop and
-    the frame boundaries. The port proves raylib's whole TextX API is
-    reachable from jank even though jank has its own string fns."
-  (:include "raylib.h" "stdlib.h"))
-
-;; The text-particle pool + physics + raylib-string-API state machine.
-(cpp/raw "
-#define JANK_TSM_MAX_TEXT_LENGTH    100
-#define JANK_TSM_MAX_PARTICLES      100
-#define JANK_TSM_FONT_SIZE           30
-#define JANK_TSM_SW                 800
-#define JANK_TSM_SH                 450
-
-typedef struct {
-  char text[JANK_TSM_MAX_TEXT_LENGTH];
-  Rectangle rect;
-  Vector2 vel;
-  Vector2 ppos;
-  float padding;
-  float borderWidth;
-  float friction;
-  float elasticity;
-  Color color;
-  bool grabbed;
-} JankTsmParticle;
-
-static JankTsmParticle jank_tsm_particles[JANK_TSM_MAX_PARTICLES] = { 0 };
-static int jank_tsm_count = 0;
-static JankTsmParticle *jank_tsm_grabbed = NULL;
-static Vector2 jank_tsm_pressOffset = { 0 };
-
-static JankTsmParticle jank_tsm_create(const char *text, float x, float y, Color color) {
-  JankTsmParticle tp = {
-    .text = \"\",
-    .rect = { x, y, 30, 30 },
-    .vel = { (float)GetRandomValue(-200, 200), (float)GetRandomValue(-200, 200) },
-    .ppos = { 0 },
-    .padding = 5.0f,
-    .borderWidth = 5.0f,
-    .friction = 0.99f,
-    .elasticity = 0.9f,
-    .color = color,
-    .grabbed = false
-  };
-  TextCopy(tp.text, text);
-  tp.rect.width = MeasureText(tp.text, JANK_TSM_FONT_SIZE)+tp.padding*2;
-  tp.rect.height = JANK_TSM_FONT_SIZE+tp.padding*2;
-  return tp;
-}
-
-static void jank_tsm_prepare_first(const char *text, JankTsmParticle *tps, int *particleCount) {
-  tps[0] = jank_tsm_create(text, GetScreenWidth()/2.0f, GetScreenHeight()/2.0f, RAYWHITE);
-  *particleCount = 1;
-}
-
-static void jank_tsm_realocate(JankTsmParticle *tps, int particlePos, int *particleCount) {
-  for (int i = particlePos+1; i < *particleCount; i++) tps[i-1] = tps[i];
-  (*particleCount)--;
-}
-
-static void jank_tsm_slice(JankTsmParticle *tp, int particlePos, int sliceLength, JankTsmParticle *tps, int *particleCount) {
-  int length = TextLength(tp->text);
-  if ((length > 1) && ((*particleCount+length) < JANK_TSM_MAX_PARTICLES)) {
-    for (int i = 0; i < length; i += sliceLength) {
-      const char *text = sliceLength == 1 ? TextFormat(\"%c\", tp->text[i]) : TextSubtext(tp->text, i, sliceLength);
-      tps[(*particleCount)++] = jank_tsm_create(text, tp->rect.x + i * tp->rect.width/length, tp->rect.y,
-        (Color){ GetRandomValue(0, 255), GetRandomValue(0, 255), GetRandomValue(0, 255), 255 });
-    }
-    jank_tsm_realocate(tps, particlePos, particleCount);
-  }
-}
-
-static void jank_tsm_slice_by_char(JankTsmParticle *tp, char charToSlice, JankTsmParticle *tps, int *particleCount) {
-  int tokenCount = 0;
-  char **tokens = TextSplit(tp->text, charToSlice, &tokenCount);
-  if (tokenCount > 1) {
-    int textLength = TextLength(tp->text);
-    for (int i = 0; i < textLength; i++) {
-      if (tp->text[i] == charToSlice) {
-        tps[(*particleCount)++] = jank_tsm_create(TextFormat(\"%c\", charToSlice), tp->rect.x, tp->rect.y,
-          (Color){ GetRandomValue(0, 255), GetRandomValue(0, 255), GetRandomValue(0, 255), 255 });
-      }
-    }
-    for (int i = 0; i < tokenCount; i++) {
-      int tokenLength = TextLength(tokens[i]);
-      tps[(*particleCount)++] = jank_tsm_create(TextFormat(\"%s\", tokens[i]), tp->rect.x + i * tp->rect.width/tokenLength, tp->rect.y,
-        (Color){ GetRandomValue(0, 255), GetRandomValue(0, 255), GetRandomValue(0, 255), 255 });
-    }
-    if (tokenCount) jank_tsm_realocate(tps, 0, particleCount);
-  }
-}
-
-static void jank_tsm_shatter(JankTsmParticle *tp, int particlePos, JankTsmParticle *tps, int *particleCount) {
-  jank_tsm_slice(tp, particlePos, 1, tps, particleCount);
-}
-
-static void jank_tsm_glue(JankTsmParticle *grabbed, JankTsmParticle *target, JankTsmParticle *tps, int *particleCount) {
-  int p1 = -1, p2 = -1;
-  for (int i = 0; i < *particleCount; i++) {
-    if (&tps[i] == grabbed) p1 = i;
-    if (&tps[i] == target) p2 = i;
-  }
-  if ((p1 != -1) && (p2 != -1)) {
-    JankTsmParticle tp = jank_tsm_create(TextFormat(\"%s%s\", grabbed->text, target->text), grabbed->rect.x, grabbed->rect.y, RAYWHITE);
-    tp.grabbed = true;
-    tps[(*particleCount)++] = tp;
-    grabbed->grabbed = false;
-    if (p1 < p2) { jank_tsm_realocate(tps, p2, particleCount); jank_tsm_realocate(tps, p1, particleCount); }
-    else { jank_tsm_realocate(tps, p1, particleCount); jank_tsm_realocate(tps, p2, particleCount); }
-  }
-}
-
-/* ---- jank-callable entry points ---- */
-
-static void jank_tsm_init(void) {
-  jank_tsm_prepare_first(\"raylib => fun videogames programming!\", jank_tsm_particles, &jank_tsm_count);
-  SetTargetFPS(60);
-}
-
-static void jank_tsm_update(void) {
-  float delta = GetFrameTime();
-  Vector2 mousePos = GetMousePosition();
-
-  /* Grab a text particle */
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-    for (int i = jank_tsm_count - 1; i >= 0; i--) {
-      JankTsmParticle *tp = &jank_tsm_particles[i];
-      jank_tsm_pressOffset.x = mousePos.x - tp->rect.x;
-      jank_tsm_pressOffset.y = mousePos.y - tp->rect.y;
-      if (CheckCollisionPointRec(mousePos, tp->rect)) { tp->grabbed = true; jank_tsm_grabbed = tp; break; }
-    }
-  }
-
-  /* Release a grabbed particle */
-  if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-    if (jank_tsm_grabbed != NULL) { jank_tsm_grabbed->grabbed = false; jank_tsm_grabbed = NULL; }
-  }
-
-  /* Slice or shatter */
-  if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-    for (int i = jank_tsm_count - 1; i >= 0; i--) {
-      JankTsmParticle *tp = &jank_tsm_particles[i];
-      if (CheckCollisionPointRec(mousePos, tp->rect)) {
-        if (IsKeyDown(KEY_LEFT_SHIFT)) jank_tsm_shatter(tp, i, jank_tsm_particles, &jank_tsm_count);
-        else jank_tsm_slice(tp, i, TextLength(tp->text)/2, jank_tsm_particles, &jank_tsm_count);
-        break;
-      }
-    }
-  }
-
-  /* Shake all */
-  if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)) {
-    for (int i = 0; i < jank_tsm_count; i++) {
-      if (!jank_tsm_particles[i].grabbed) jank_tsm_particles[i].vel = (Vector2){ (float)GetRandomValue(-2000, 2000), (float)GetRandomValue(-2000, 2000) };
-    }
-  }
-
-  /* Reset via the TextTo* functions */
-  if (IsKeyPressed(KEY_ONE)) jank_tsm_prepare_first(\"raylib => fun videogames programming!\", jank_tsm_particles, &jank_tsm_count);
-  if (IsKeyPressed(KEY_TWO)) jank_tsm_prepare_first(TextToUpper(\"raylib => fun videogames programming!\"), jank_tsm_particles, &jank_tsm_count);
-  if (IsKeyPressed(KEY_THREE)) jank_tsm_prepare_first(TextToLower(\"raylib => fun videogames programming!\"), jank_tsm_particles, &jank_tsm_count);
-  if (IsKeyPressed(KEY_FOUR)) jank_tsm_prepare_first(TextToPascal(\"raylib_fun_videogames_programming\"), jank_tsm_particles, &jank_tsm_count);
-  if (IsKeyPressed(KEY_FIVE)) jank_tsm_prepare_first(TextToSnake(\"RaylibFunVideogamesProgramming\"), jank_tsm_particles, &jank_tsm_count);
-  if (IsKeyPressed(KEY_SIX)) jank_tsm_prepare_first(TextToCamel(\"raylib_fun_videogames_programming\"), jank_tsm_particles, &jank_tsm_count);
-
-  /* Slice by typed char when only one particle remains */
-  char charPressed = GetCharPressed();
-  if ((charPressed >= 'A') && (charPressed <= 'z') && (jank_tsm_count == 1)) {
-    jank_tsm_slice_by_char(&jank_tsm_particles[0], charPressed, jank_tsm_particles, &jank_tsm_count);
-  }
-
-  /* Physics per particle */
-  for (int i = 0; i < jank_tsm_count; i++) {
-    JankTsmParticle *tp = &jank_tsm_particles[i];
-    if (!tp->grabbed) {
-      tp->rect.x += tp->vel.x * delta;
-      tp->rect.y += tp->vel.y * delta;
-
-      if ((tp->rect.x + tp->rect.width) >= JANK_TSM_SW) { tp->rect.x = JANK_TSM_SW - tp->rect.width; tp->vel.x = -tp->vel.x*tp->elasticity; }
-      else if (tp->rect.x <= 0) { tp->rect.x = 0.0f; tp->vel.x = -tp->vel.x*tp->elasticity; }
-
-      if ((tp->rect.y + tp->rect.height) >= JANK_TSM_SH) { tp->rect.y = JANK_TSM_SH - tp->rect.height; tp->vel.y = -tp->vel.y*tp->elasticity; }
-      else if (tp->rect.y <= 0) { tp->rect.y = 0.0f; tp->vel.y = -tp->vel.y*tp->elasticity; }
-
-      tp->vel.x = tp->vel.x*tp->friction;
-      tp->vel.y = tp->vel.y*tp->friction;
-    } else {
-      tp->rect.x = mousePos.x - jank_tsm_pressOffset.x;
-      tp->rect.y = mousePos.y - jank_tsm_pressOffset.y;
-      tp->vel.x = (tp->rect.x - tp->ppos.x)/delta;
-      tp->vel.y = (tp->rect.y - tp->ppos.y)/delta;
-      tp->ppos.x = tp->rect.x;
-      tp->ppos.y = tp->rect.y;
-
-      /* Glue on drag + Left-Ctrl */
-      if (IsKeyDown(KEY_LEFT_CONTROL)) {
-        for (int j = 0; j < jank_tsm_count; j++) {
-          if (&jank_tsm_particles[j] != jank_tsm_grabbed && jank_tsm_grabbed->grabbed) {
-            if (CheckCollisionRecs(jank_tsm_grabbed->rect, jank_tsm_particles[j].rect)) {
-              jank_tsm_glue(jank_tsm_grabbed, &jank_tsm_particles[j], jank_tsm_particles, &jank_tsm_count);
-              jank_tsm_grabbed = &jank_tsm_particles[jank_tsm_count-1];
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-static void jank_tsm_draw(void) {
-  ClearBackground(RAYWHITE);
-
-  for (int i = 0; i < jank_tsm_count; i++) {
-    JankTsmParticle *tp = &jank_tsm_particles[i];
-    DrawRectangleRec((Rectangle){ tp->rect.x - tp->borderWidth, tp->rect.y - tp->borderWidth, tp->rect.width + tp->borderWidth * 2, tp->rect.height + tp->borderWidth * 2 }, BLACK);
-    DrawRectangleRec(tp->rect, tp->color);
-    DrawText(tp->text, (int)(tp->rect.x+tp->padding), (int)(tp->rect.y+tp->padding), JANK_TSM_FONT_SIZE, BLACK);
-  }
-
-  DrawText(\"grab a text particle by pressing with the mouse and throw it by releasing\", 10, 10, 10, DARKGRAY);
-  DrawText(\"slice a text particle by pressing it with the mouse right button\", 10, 30, 10, DARKGRAY);
-  DrawText(\"shatter a text particle keeping left shift pressed and pressing it with the mouse right button\", 10, 50, 10, DARKGRAY);
-  DrawText(\"glue text particles by grabbing than and keeping left control pressed\", 10, 70, 10, DARKGRAY);
-  DrawText(\"1 to 6 to reset\", 10, 90, 10, DARKGRAY);
-  DrawText(\"when you have only one text particle, you can slice it by pressing a char\", 10, 110, 10, DARKGRAY);
-  DrawText(TextFormat(\"TEXT PARTICLE COUNT: %d\", jank_tsm_count), 10, GetScreenHeight() - 30, 20, BLACK);
-}")
+  - raylib's TextX API is called directly, since demonstrating it is the
+    point of the example: TextToUpper/Lower/Pascal/Snake/Camel,
+    TextSubtext, TextSplit, TextLength and MeasureText all take a jank
+    string (which converts to const char*) and their const char* returns
+    fold back with str. TextSplit's const char** plus int* out-param
+    reads back with (cpp/& n) and cpp/aget.
+  - TextFormat is the exception: it is variadic, and jank has no va_list
+    handling. Its two uses here are a one-char substring and a
+    concatenation, so they are subs and str.
+  - A particle is a plain jank map. The C's struct is a char[] plus a
+    Rectangle, two Vector2s, floats, a Color and a bool - all of which
+    are strings or numbers, so nothing needs boxing and the pool is an
+    ordinary jank vector threaded through recur. The grabbed pointer
+    becomes an index.
+  - padding / borderWidth / friction / elasticity are per-particle
+    fields in the C that it never varies, so they are constants here."
+  (:include "raylib.h"))
 
 (def WIDTH 800)
 (def HEIGHT 450)
+
+(def ^:private MAX-PARTICLES 100)
+(def ^:private FONT-SIZE 30)
+(def ^:private PADDING 5.0)
+(def ^:private BORDER 5.0)
+(def ^:private FRICTION 0.99)
+(def ^:private ELASTICITY 0.9)
+(def ^:private PHRASE "raylib => fun videogames programming!")
+
+(defn- random-color []
+  [(int (cpp/GetRandomValue 0 255))
+   (int (cpp/GetRandomValue 0 255))
+   (int (cpp/GetRandomValue 0 255))])
+
+(defn- make-particle
+  "The C's jank_tsm_create. MeasureText sizes the box, so the default
+  font must already be loaded (i.e. after InitWindow)."
+  [text x y color]
+  {:text text
+   :x x :y y
+   :w (+ (+ 0.0 (cpp/MeasureText text (cpp/int FONT-SIZE))) (* PADDING 2.0))
+   :h (+ (+ 0.0 FONT-SIZE) (* PADDING 2.0))
+   :vx (+ 0.0 (cpp/GetRandomValue -200 200))
+   :vy (+ 0.0 (cpp/GetRandomValue -200 200))
+   :px 0.0 :py 0.0
+   :color color
+   :grabbed? false})
+
+(defn- prepare-first [text]
+  [(make-particle text (/ WIDTH 2.0) (/ HEIGHT 2.0) [245 245 245])])
+
+(defn- text-length [s] (int (cpp/TextLength s)))
+
+;; Characters 32..126 in code order. jank has no char literals, so a code
+;; indexes into this via subs to yield a one-char string (the ascii-rendering
+;; and input-box pattern).
+(def ^:private ASCII " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")
+
+(defn- char-str [code] (subs ASCII (- code 32) (- code 31)))
+
+(defn- slice-parts
+  "The C's jank_tsm_slice: cut the particle's text into sliceLength-wide
+  chunks, each becoming its own particle. Returns the new particles, or
+  nil when the C's guards decline."
+  [p slice-len total]
+  (let [text (:text p)
+        length (text-length text)]
+    (when (and (> length 1) (< (+ total length) MAX-PARTICLES))
+      (loop [i 0 acc []]
+        (if (< i length)
+          (let [chunk (if (= slice-len 1)
+                        (subs text i (inc i))
+                        (str (cpp/TextSubtext text (cpp/int i) (cpp/int slice-len))))]
+            (recur (+ i slice-len)
+                   (conj acc (make-particle chunk
+                                            (+ (:x p) (/ (* i (:w p)) length))
+                                            (:y p)
+                                            (random-color)))))
+          acc)))))
+
+(defn- slice-by-char-parts
+  "The C's jank_tsm_slice_by_char: split on a typed character, emitting
+  one particle per occurrence of the character and one per token."
+  [p ch]
+  (let [text (:text p)
+        n (cpp/int 0)
+        toks (cpp/TextSplit text (cpp/cast cpp/char (cpp/int ch)) (cpp/& n))
+        token-count (int (+ 0.0 n))]
+    (when (> token-count 1)
+      (let [length (text-length text)
+            seps (loop [i 0 acc []]
+                   (if (< i length)
+                     (recur (inc i)
+                            (if (= (subs text i (inc i)) (char-str ch))
+                              (conj acc (make-particle (subs text i (inc i))
+                                                       (:x p) (:y p) (random-color)))
+                              acc))
+                     acc))]
+        (loop [i 0 acc seps]
+          (if (< i token-count)
+            (let [tok (str (cpp/aget toks (cpp/int i)))
+                  tl (text-length tok)]
+              (recur (inc i)
+                     (conj acc (make-particle tok
+                                              (+ (:x p) (/ (* i (:w p)) (max 1 tl)))
+                                              (:y p)
+                                              (random-color)))))
+            acc))))))
+
+(defn- drop-at [v i]
+  (vec (concat (subvec v 0 i) (subvec v (inc i)))))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - strings management (jank)")
 
-  (cpp/jank_tsm_init)
+  (cpp/SetTargetFPS 60)
 
-  (loop []
+  ;; Thread [particles grabbed-index press-offset-x press-offset-y].
+  (loop [ps (prepare-first PHRASE)
+         grabbed nil
+         off-x 0.0
+         off-y 0.0]
     (when (cpp/! (cpp/WindowShouldClose))
-      (cpp/jank_tsm_update)
+      (let [delta (+ 0.0 (cpp/GetFrameTime))
+            mouse (cpp/GetMousePosition)
+            mx (+ 0.0 (.-x mouse))
+            my (+ 0.0 (.-y mouse))
+            hit-idx (fn [coll]
+                      ;; topmost first, like the C's reverse scan
+                      (loop [i (dec (count coll))]
+                        (when (>= i 0)
+                          (let [q (nth coll i)]
+                            (if (cpp/CheckCollisionPointRec
+                                 (cpp/Vector2 (cpp/float mx) (cpp/float my))
+                                 (cpp/Rectangle (cpp/float (:x q)) (cpp/float (:y q))
+                                                (cpp/float (:w q)) (cpp/float (:h q))))
+                              i
+                              (recur (dec i)))))))
 
-      (cpp/BeginDrawing)
-      (cpp/jank_tsm_draw)
-      (cpp/EndDrawing)
-      (recur)))
+            ;; grab
+            [ps grabbed off-x off-y]
+            (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+              (if-let [i (hit-idx ps)]
+                [(assoc ps i (assoc (nth ps i) :grabbed? true)) i
+                 (- mx (:x (nth ps i))) (- my (:y (nth ps i)))]
+                [ps grabbed off-x off-y])
+              [ps grabbed off-x off-y])
+
+            ;; release
+            [ps grabbed]
+            (if (and (cpp/IsMouseButtonReleased cpp/MOUSE_BUTTON_LEFT) grabbed)
+              [(assoc ps grabbed (assoc (nth ps grabbed) :grabbed? false)) nil]
+              [ps grabbed])
+
+            ;; slice / shatter
+            ps (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_RIGHT)
+                 (if-let [i (hit-idx ps)]
+                   (let [p (nth ps i)
+                         len (if (cpp/IsKeyDown cpp/KEY_LEFT_SHIFT)
+                               1
+                               (max 1 (int (quot (text-length (:text p)) 2))))]
+                     (if-let [new-ps (slice-parts p len (count ps))]
+                       (drop-at (vec (concat ps new-ps)) i)
+                       ps))
+                   ps)
+                 ps)
+
+            ;; shake all
+            ps (if (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_MIDDLE)
+                 (mapv (fn [p]
+                         (if (:grabbed? p)
+                           p
+                           (assoc p :vx (+ 0.0 (cpp/GetRandomValue -2000 2000))
+                                    :vy (+ 0.0 (cpp/GetRandomValue -2000 2000)))))
+                       ps)
+                 ps)
+
+            ;; 1-6 reset through the TextTo* family
+            [ps grabbed]
+            (cond
+              (cpp/IsKeyPressed cpp/KEY_ONE)   [(prepare-first PHRASE) nil]
+              (cpp/IsKeyPressed cpp/KEY_TWO)   [(prepare-first (str (cpp/TextToUpper PHRASE))) nil]
+              (cpp/IsKeyPressed cpp/KEY_THREE) [(prepare-first (str (cpp/TextToLower PHRASE))) nil]
+              (cpp/IsKeyPressed cpp/KEY_FOUR)
+              [(prepare-first (str (cpp/TextToPascal "raylib_fun_videogames_programming"))) nil]
+              (cpp/IsKeyPressed cpp/KEY_FIVE)
+              [(prepare-first (str (cpp/TextToSnake "RaylibFunVideogamesProgramming"))) nil]
+              (cpp/IsKeyPressed cpp/KEY_SIX)
+              [(prepare-first (str (cpp/TextToCamel "raylib_fun_videogames_programming"))) nil]
+              :else [ps grabbed])
+
+            ;; slice on a typed char, only while one particle remains
+            ch (int (cpp/GetCharPressed))
+            [ps grabbed]
+            (if (and (>= ch 65) (<= ch 122) (= (count ps) 1))
+              (if-let [new-ps (slice-by-char-parts (nth ps 0) ch)]
+                [(vec new-ps) nil]
+                [ps grabbed])
+              [ps grabbed])
+
+            ;; physics
+            ps (mapv (fn [p]
+                       (if (:grabbed? p)
+                         (let [nx (- mx off-x)
+                               ny (- my off-y)]
+                           (assoc p :x nx :y ny
+                                    :vx (/ (- nx (:px p)) delta)
+                                    :vy (/ (- ny (:py p)) delta)
+                                    :px nx :py ny))
+                         (let [nx (+ (:x p) (* (:vx p) delta))
+                               ny (+ (:y p) (* (:vy p) delta))
+                               [nx vx] (cond (>= (+ nx (:w p)) WIDTH)
+                                             [(- WIDTH (:w p)) (* (- (:vx p)) ELASTICITY)]
+                                             (<= nx 0.0) [0.0 (* (- (:vx p)) ELASTICITY)]
+                                             :else [nx (:vx p)])
+                               [ny vy] (cond (>= (+ ny (:h p)) HEIGHT)
+                                             [(- HEIGHT (:h p)) (* (- (:vy p)) ELASTICITY)]
+                                             (<= ny 0.0) [0.0 (* (- (:vy p)) ELASTICITY)]
+                                             :else [ny (:vy p)])]
+                           (assoc p :x nx :y ny
+                                    :vx (* vx FRICTION) :vy (* vy FRICTION)))))
+                     ps)
+
+            ;; glue on drag + Left-Ctrl
+            [ps grabbed]
+            (if (and grabbed (cpp/IsKeyDown cpp/KEY_LEFT_CONTROL) (> (count ps) 1))
+              (let [g (nth ps grabbed)
+                    other (loop [j 0]
+                            (when (< j (count ps))
+                              (if (and (not= j grabbed)
+                                       (cpp/CheckCollisionRecs
+                                        (cpp/Rectangle (cpp/float (:x g)) (cpp/float (:y g))
+                                                       (cpp/float (:w g)) (cpp/float (:h g)))
+                                        (let [o (nth ps j)]
+                                          (cpp/Rectangle (cpp/float (:x o)) (cpp/float (:y o))
+                                                         (cpp/float (:w o)) (cpp/float (:h o))))))
+                                j
+                                (recur (inc j)))))]
+                (if other
+                  (let [t (nth ps other)
+                        glued (assoc (make-particle (str (:text g) (:text t))
+                                                    (:x g) (:y g) [245 245 245])
+                                     :grabbed? true)
+                        ;; drop the higher index first so the lower stays valid
+                        [hi lo] (if (> grabbed other) [grabbed other] [other grabbed])
+                        kept (drop-at (drop-at (vec (concat ps [glued])) hi) lo)]
+                    [kept (dec (count kept))])
+                  [ps grabbed]))
+              [ps grabbed])]
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (loop [i 0]
+          (when (< i (count ps))
+            (let [p (nth ps i)
+                  [r g b] (:color p)]
+              (cpp/DrawRectangleRec
+               (cpp/Rectangle (cpp/float (- (:x p) BORDER)) (cpp/float (- (:y p) BORDER))
+                              (cpp/float (+ (:w p) (* BORDER 2.0)))
+                              (cpp/float (+ (:h p) (* BORDER 2.0))))
+               cpp/BLACK)
+              (cpp/DrawRectangleRec
+               (cpp/Rectangle (cpp/float (:x p)) (cpp/float (:y p))
+                              (cpp/float (:w p)) (cpp/float (:h p)))
+               (cpp/Color (cpp/cast cpp/uint8_t r) (cpp/cast cpp/uint8_t g)
+                          (cpp/cast cpp/uint8_t b) (cpp/cast cpp/uint8_t 255)))
+              (cpp/DrawText (:text p)
+                            (int (+ (:x p) PADDING)) (int (+ (:y p) PADDING))
+                            FONT-SIZE cpp/BLACK))
+            (recur (inc i))))
+
+        (cpp/DrawText "grab a text particle by pressing with the mouse and throw it by releasing" 10 10 10 cpp/DARKGRAY)
+        (cpp/DrawText "slice a text particle by pressing it with the mouse right button" 10 30 10 cpp/DARKGRAY)
+        (cpp/DrawText "shatter a text particle keeping left shift pressed and pressing it with the mouse right button" 10 50 10 cpp/DARKGRAY)
+        (cpp/DrawText "glue text particles by grabbing than and keeping left control pressed" 10 70 10 cpp/DARKGRAY)
+        (cpp/DrawText "1 to 6 to reset" 10 90 10 cpp/DARKGRAY)
+        (cpp/DrawText "when you have only one text particle, you can slice it by pressing a char" 10 110 10 cpp/DARKGRAY)
+        (cpp/DrawText (str "TEXT PARTICLE COUNT: " (count ps)) 10 (- HEIGHT 30) 20 cpp/BLACK)
+
+        (cpp/EndDrawing)
+        (recur ps grabbed off-x off-y))))
 
   (cpp/CloseWindow))
