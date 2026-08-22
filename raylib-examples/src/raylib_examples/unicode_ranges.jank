@@ -32,23 +32,6 @@
     codepoints-loading); comments stay ASCII."
   (:include "raylib.h"))
 
-;; Frame-crossing, runtime-reloaded Font + a codepoint scratch buffer big
-;; enough for the full CJK cascade (~41k codepoints). Only -main calls
-;; these (per-fn static duplication - see the docstring).
-(cpp/raw "static Font jank_font;
-static int jank_cp_buf[65536] = { 0 };
-static void jank_cp_set(int i, int v) { jank_cp_buf[i] = v; }
-static void jank_font_load_default(const char* path) {
-  UnloadFont(jank_font);
-  jank_font = LoadFont(path);
-}
-static void jank_font_reload(const char* path, int count) {
-  UnloadFont(jank_font);
-  jank_font = LoadFontEx(path, 32, jank_cp_buf, count);
-}
-static void jank_font_unload(void) { UnloadFont(jank_font); }
-static Font jank_font_get(void) { return jank_font; }")
-
 (def WIDTH 800)
 (def HEIGHT 450)
 (def FONT-PATH "../jank-raylib-sys/raylib/examples/text/resources/NotoSansTC-Regular.ttf")
@@ -75,10 +58,12 @@ static Font jank_font_get(void) { return jank_font; }")
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [text] example - unicode ranges (jank)")
-  (cpp/jank_font_load_default FONT-PATH)
-  (let [f0 (cpp/jank_font_get)]
-    (cpp/SetTextureFilter (.-texture f0) cpp/TEXTURE_FILTER_BILINEAR))
-  (cpp/SetTargetFPS 60)
+  ;; the font is reloaded at runtime as ranges are added, so it can be
+  ;; neither a create-once let-local nor loop/recur state. A box in an
+  ;; atom carries it.
+  (let [font-box (atom (cpp/box (cpp/new cpp/Font (cpp/LoadFont FONT-PATH))))]
+    (cpp/SetTextureFilter (.-texture (cpp/* (cpp/unbox (:* cpp/Font) @font-box))) cpp/TEXTURE_FILTER_BILINEAR)
+    (cpp/SetTargetFPS 60)
 
   ;; Thread [selected-range previously-built-range].
   (loop [range 0 prev 0]
@@ -88,7 +73,8 @@ static Font jank_font_get(void) { return jank_font; }")
             ;; blocking rebuild. The whole rebuild is inline in -main so
             ;; every access hits -main's copy of the cpp/raw statics.
             _ (when (not= range prev)
-                (cpp/jank_font_load_default FONT-PATH)
+                (cpp/UnloadFont (cpp/* (cpp/unbox (:* cpp/Font) @font-box)))
+                (reset! font-box (cpp/box (cpp/new cpp/Font (cpp/LoadFont FONT-PATH))))
                 (let [rs (ranges-for range)]
                   (loop [ri 0]
                     (when (< ri (count rs))
@@ -97,22 +83,31 @@ static Font jank_font_get(void) { return jank_font; }")
                       (let [pr (nth rs ri)
                             start (nth pr 0)
                             stop (nth pr 1)
-                            font (cpp/jank_font_get)
+                            font (cpp/* (cpp/unbox (:* cpp/Font) @font-box))
                             cur (int (+ 0.0 (.-glyphCount font)))
-                            glyphs (.-glyphs font)]
+                            glyphs (.-glyphs font)
+                            total (+ cur (- stop start) 1)
+                            ;; sized to what is actually needed; the C used a
+                            ;; fixed int[65536] for a few thousand codepoints
+                            cps (cpp/unsafe-cast (:* cpp/int)
+                                                 (cpp/MemAlloc (cpp/cast cpp/uint (* total 4))))]
                         (loop [i 0]
                           (when (< i cur)
-                            (let [g (cpp/aget glyphs (cpp/int i))]
-                              (cpp/jank_cp_set i (int (.-value g))))
+                            (cpp/= (cpp/aget cps (cpp/int i))
+                                   (cpp/int (int (+ 0.0 (.-value (cpp/aget glyphs (cpp/int i)))))))
                             (recur (inc i))))
                         (loop [c start i cur]
                           (when (<= c stop)
-                            (cpp/jank_cp_set i c)
+                            (cpp/= (cpp/aget cps (cpp/int i)) (cpp/int c))
                             (recur (inc c) (inc i))))
-                        (cpp/jank_font_reload FONT-PATH (+ cur (- stop start) 1)))
+                        (cpp/UnloadFont (cpp/* (cpp/unbox (:* cpp/Font) @font-box)))
+                        (reset! font-box
+                                (cpp/box (cpp/new cpp/Font
+                                                  (cpp/LoadFontEx FONT-PATH 32 cps (cpp/int total)))))
+                        (cpp/MemFree (cpp/unsafe-cast (:* cpp/void) cps)))
                       (recur (inc ri)))))
-                (let [f (cpp/jank_font_get)]
-                  (cpp/SetTextureFilter (.-texture f) cpp/TEXTURE_FILTER_BILINEAR)))
+                (cpp/SetTextureFilter (.-texture (cpp/* (cpp/unbox (:* cpp/Font) @font-box)))
+                                      cpp/TEXTURE_FILTER_BILINEAR))
             ;; (int range) forces a COPY. Binding prev to range directly
             ;; leaves it aliasing the loop slot, and recur writes slot 0
             ;; (range) before slot 1 (prev), so prev would read the NEW
@@ -130,7 +125,7 @@ static Font jank_font_get(void) { return jank_font; }")
 
         (cpp/DrawText "ADD CODEPOINTS: [1][2][3][4]" 20 20 20 cpp/MAROON)
 
-        (let [font (cpp/jank_font_get)
+        (let [font (cpp/* (cpp/unbox (:* cpp/Font) @font-box))
               tex (.-texture font)
               tw (+ 0.0 (.-width tex))
               th (+ 0.0 (.-height tex))
@@ -185,5 +180,5 @@ static Font jank_font_get(void) { return jank_font; }")
 
         (recur range prev))))
 
-  (cpp/jank_font_unload)
+    (cpp/UnloadFont (cpp/* (cpp/unbox (:* cpp/Font) @font-box))))
   (cpp/CloseWindow))
