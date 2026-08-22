@@ -11,242 +11,290 @@
   Based on raylib/examples/core/core_input_gamepad.c (2/4 complexity).
 
   jank-native notes:
-  - The two controller-photo Texture2Ds and the ~200-line button/axis
-    draw (native DrawCircle/DrawRectangle/DrawTriangle/DrawTexture plus
-    every IsGamepadButtonDown / GetGamepadAxisMovement check and the
-    Xbox/PS name match via TextFindIndex(TextToLower(...))) are all
-    native C that can't cross the jank<->C boundary, so init, the input
-    update and the whole draw ride verbatim in one cpp/raw shim; jank
-    owns the window lifecycle, the frame loop and the frame boundaries.
-  - Smoke here can only exercise the no-gamepad path (this box has no
-    controller): it verifies the textures load and the 'NOT DETECTED'
-    diagram renders. The gamepad-interaction branches are verbatim C in
-    the shim, so the clean compile+link verifies them; they have no
-    jank/C boundary where the interop failure classes could bite."
+  - Nothing here needed to stay in C. The gamepad API returns ints,
+    floats, bools and C strings, all of which cross a jank fn boundary
+    freely, and the two controller photos are ordinary let-local
+    Texture2Ds used inline.
+  - The C repeats a button-lit-up draw about sixty times, one `if` per
+    button. Here each layout is a vector of [button x y radius colour]
+    rows walked by one loop. Same draws in the same order, expressed
+    once. Colours travel as [r g b] taken from raylib.h, since a Color
+    cannot live in a jank vector.
+  - Deadzones, the axis readout and the Xbox/PS name match via
+    TextFindIndex(TextToLower(...)) are all plain jank."
   (:include "raylib.h"))
-
-;; The controller textures + live button/axis diagram.
-(cpp/raw "
-#define JANK_GP_XBOX_ALIAS_1 \"xbox\"
-#define JANK_GP_XBOX_ALIAS_2 \"x-box\"
-#define JANK_GP_PS_ALIAS_1   \"playstation\"
-#define JANK_GP_PS_ALIAS_2   \"sony\"
-
-static Texture2D jank_gp_ps3 = { 0 };
-static Texture2D jank_gp_xbox = { 0 };
-static Rectangle jank_gp_vibrateButton = { 0 };
-static int jank_gp_gamepad = 0;
-
-static const float jank_gp_leftStickDeadzoneX = 0.1f;
-static const float jank_gp_leftStickDeadzoneY = 0.1f;
-static const float jank_gp_rightStickDeadzoneX = 0.1f;
-static const float jank_gp_rightStickDeadzoneY = 0.1f;
-static const float jank_gp_leftTriggerDeadzone = -0.9f;
-static const float jank_gp_rightTriggerDeadzone = -0.9f;
-
-static void jank_gp_init(void) {
-  jank_gp_ps3 = LoadTexture(\"../jank-raylib-sys/raylib/examples/core/resources/ps3.png\");
-  jank_gp_xbox = LoadTexture(\"../jank-raylib-sys/raylib/examples/core/resources/xbox.png\");
-  SetTargetFPS(60);
-}
-
-static void jank_gp_update(void) {
-  if (IsKeyPressed(KEY_LEFT) && jank_gp_gamepad > 0) jank_gp_gamepad--;
-  if (IsKeyPressed(KEY_RIGHT)) jank_gp_gamepad++;
-  Vector2 mousePosition = GetMousePosition();
-
-  jank_gp_vibrateButton = (Rectangle){ 10, 70.0f + 20*GetGamepadAxisCount(jank_gp_gamepad) + 20, 75, 24 };
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mousePosition, jank_gp_vibrateButton)) SetGamepadVibration(jank_gp_gamepad, 1.0, 1.0, 1.0);
-}
-
-static void jank_gp_draw(void) {
-  int gamepad = jank_gp_gamepad;
-  ClearBackground(RAYWHITE);
-
-  if (IsGamepadAvailable(gamepad)) {
-    DrawText(TextFormat(\"GP%d: %s\", gamepad, GetGamepadName(gamepad)), 10, 10, 10, BLACK);
-
-    float leftStickX = GetGamepadAxisMovement(gamepad, GAMEPAD_AXIS_LEFT_X);
-    float leftStickY = GetGamepadAxisMovement(gamepad, GAMEPAD_AXIS_LEFT_Y);
-    float rightStickX = GetGamepadAxisMovement(gamepad, GAMEPAD_AXIS_RIGHT_X);
-    float rightStickY = GetGamepadAxisMovement(gamepad, GAMEPAD_AXIS_RIGHT_Y);
-    float leftTrigger = GetGamepadAxisMovement(gamepad, GAMEPAD_AXIS_LEFT_TRIGGER);
-    float rightTrigger = GetGamepadAxisMovement(gamepad, GAMEPAD_AXIS_RIGHT_TRIGGER);
-
-    if (leftStickX > -jank_gp_leftStickDeadzoneX && leftStickX < jank_gp_leftStickDeadzoneX) leftStickX = 0.0f;
-    if (leftStickY > -jank_gp_leftStickDeadzoneY && leftStickY < jank_gp_leftStickDeadzoneY) leftStickY = 0.0f;
-    if (rightStickX > -jank_gp_rightStickDeadzoneX && rightStickX < jank_gp_rightStickDeadzoneX) rightStickX = 0.0f;
-    if (rightStickY > -jank_gp_rightStickDeadzoneY && rightStickY < jank_gp_rightStickDeadzoneY) rightStickY = 0.0f;
-    if (leftTrigger < jank_gp_leftTriggerDeadzone) leftTrigger = -1.0f;
-    if (rightTrigger < jank_gp_rightTriggerDeadzone) rightTrigger = -1.0f;
-
-    if ((TextFindIndex(TextToLower(GetGamepadName(gamepad)), JANK_GP_XBOX_ALIAS_1) > -1) ||
-        (TextFindIndex(TextToLower(GetGamepadName(gamepad)), JANK_GP_XBOX_ALIAS_2) > -1)) {
-      DrawTexture(jank_gp_xbox, 0, 0, DARKGRAY);
-
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_MIDDLE)) DrawCircle(394, 89, 19, RED);
-
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_MIDDLE_RIGHT)) DrawCircle(436, 150, 9, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_MIDDLE_LEFT)) DrawCircle(352, 150, 9, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_LEFT)) DrawCircle(501, 151, 15, BLUE);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_DOWN)) DrawCircle(536, 187, 15, LIME);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT)) DrawCircle(572, 151, 15, MAROON);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_UP)) DrawCircle(536, 115, 15, GOLD);
-
-      DrawRectangle(317, 202, 19, 71, BLACK);
-      DrawRectangle(293, 228, 69, 19, BLACK);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_UP)) DrawRectangle(317, 202, 19, 26, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_DOWN)) DrawRectangle(317, 202 + 45, 19, 26, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_LEFT)) DrawRectangle(292, 228, 25, 19, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) DrawRectangle(292 + 44, 228, 26, 19, RED);
-
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_TRIGGER_1)) DrawCircle(259, 61, 20, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) DrawCircle(536, 61, 20, RED);
-
-      Color leftGamepadColor = BLACK;
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_THUMB)) leftGamepadColor = RED;
-      DrawCircle(259, 152, 39, BLACK);
-      DrawCircle(259, 152, 34, LIGHTGRAY);
-      DrawCircle(259 + (int)(leftStickX*20), 152 + (int)(leftStickY*20), 25, leftGamepadColor);
-
-      Color rightGamepadColor = BLACK;
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_THUMB)) rightGamepadColor = RED;
-      DrawCircle(461, 237, 38, BLACK);
-      DrawCircle(461, 237, 33, LIGHTGRAY);
-      DrawCircle(461 + (int)(rightStickX*20), 237 + (int)(rightStickY*20), 25, rightGamepadColor);
-
-      DrawRectangle(170, 30, 15, 70, GRAY);
-      DrawRectangle(604, 30, 15, 70, GRAY);
-      DrawRectangle(170, 30, 15, (int)(((1 + leftTrigger)/2)*70), RED);
-      DrawRectangle(604, 30, 15, (int)(((1 + rightTrigger)/2)*70), RED);
-    } else if ((TextFindIndex(TextToLower(GetGamepadName(gamepad)), JANK_GP_PS_ALIAS_1) > -1) ||
-               (TextFindIndex(TextToLower(GetGamepadName(gamepad)), JANK_GP_PS_ALIAS_2) > -1)) {
-      DrawTexture(jank_gp_ps3, 0, 0, DARKGRAY);
-
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_MIDDLE)) DrawCircle(396, 222, 13, RED);
-
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_MIDDLE_LEFT)) DrawRectangle(328, 170, 32, 13, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_MIDDLE_RIGHT)) DrawTriangle((Vector2){ 436, 168 }, (Vector2){ 436, 185 }, (Vector2){ 464, 177 }, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_UP)) DrawCircle(557, 144, 13, LIME);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT)) DrawCircle(586, 173, 13, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_DOWN)) DrawCircle(557, 203, 13, VIOLET);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_LEFT)) DrawCircle(527, 173, 13, PINK);
-
-      DrawRectangle(225, 132, 24, 84, BLACK);
-      DrawRectangle(195, 161, 84, 25, BLACK);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_UP)) DrawRectangle(225, 132, 24, 29, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_DOWN)) DrawRectangle(225, 132 + 54, 24, 30, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_LEFT)) DrawRectangle(195, 161, 30, 25, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) DrawRectangle(195 + 54, 161, 30, 25, RED);
-
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_TRIGGER_1)) DrawCircle(239, 82, 20, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) DrawCircle(557, 82, 20, RED);
-
-      Color leftGamepadColor = BLACK;
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_THUMB)) leftGamepadColor = RED;
-      DrawCircle(319, 255, 35, BLACK);
-      DrawCircle(319, 255, 31, LIGHTGRAY);
-      DrawCircle(319 + (int)(leftStickX*20), 255 + (int)(leftStickY*20), 25, leftGamepadColor);
-
-      Color rightGamepadColor = BLACK;
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_THUMB)) rightGamepadColor = RED;
-      DrawCircle(475, 255, 35, BLACK);
-      DrawCircle(475, 255, 31, LIGHTGRAY);
-      DrawCircle(475 + (int)(rightStickX*20), 255 + (int)(rightStickY*20), 25, rightGamepadColor);
-
-      DrawRectangle(169, 48, 15, 70, GRAY);
-      DrawRectangle(611, 48, 15, 70, GRAY);
-      DrawRectangle(169, 48, 15, (int)(((1 + leftTrigger)/2)*70), RED);
-      DrawRectangle(611, 48, 15, (int)(((1 + rightTrigger)/2)*70), RED);
-    } else {
-      DrawRectangleRounded((Rectangle){ 175, 110, 460, 220}, 0.3f, 16, DARKGRAY);
-
-      DrawCircle(365, 170, 12, RAYWHITE);
-      DrawCircle(405, 170, 12, RAYWHITE);
-      DrawCircle(445, 170, 12, RAYWHITE);
-      DrawCircle(516, 191, 17, RAYWHITE);
-      DrawCircle(551, 227, 17, RAYWHITE);
-      DrawCircle(587, 191, 17, RAYWHITE);
-      DrawCircle(551, 155, 17, RAYWHITE);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_MIDDLE_LEFT)) DrawCircle(365, 170, 10, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_MIDDLE)) DrawCircle(405, 170, 10, GREEN);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_MIDDLE_RIGHT)) DrawCircle(445, 170, 10, BLUE);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_LEFT)) DrawCircle(516, 191, 15, GOLD);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_DOWN)) DrawCircle(551, 227, 15, BLUE);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT)) DrawCircle(587, 191, 15, GREEN);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_FACE_UP)) DrawCircle(551, 155, 15, RED);
-
-      DrawRectangle(245, 145, 28, 88, RAYWHITE);
-      DrawRectangle(215, 174, 88, 29, RAYWHITE);
-      DrawRectangle(247, 147, 24, 84, BLACK);
-      DrawRectangle(217, 176, 84, 25, BLACK);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_UP)) DrawRectangle(247, 147, 24, 29, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_DOWN)) DrawRectangle(247, 147 + 54, 24, 30, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_LEFT)) DrawRectangle(217, 176, 30, 25, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) DrawRectangle(217 + 54, 176, 30, 25, RED);
-
-      DrawRectangleRounded((Rectangle){ 215, 98, 100, 10}, 0.5f, 16, DARKGRAY);
-      DrawRectangleRounded((Rectangle){ 495, 98, 100, 10}, 0.5f, 16, DARKGRAY);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_TRIGGER_1)) DrawRectangleRounded((Rectangle){ 215, 98, 100, 10}, 0.5f, 16, RED);
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) DrawRectangleRounded((Rectangle){ 495, 98, 100, 10}, 0.5f, 16, RED);
-
-      Color leftGamepadColor = BLACK;
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_LEFT_THUMB)) leftGamepadColor = RED;
-      DrawCircle(345, 260, 40, BLACK);
-      DrawCircle(345, 260, 35, LIGHTGRAY);
-      DrawCircle(345 + (int)(leftStickX*20), 260 + (int)(leftStickY*20), 25, leftGamepadColor);
-
-      Color rightGamepadColor = BLACK;
-      if (IsGamepadButtonDown(gamepad, GAMEPAD_BUTTON_RIGHT_THUMB)) rightGamepadColor = RED;
-      DrawCircle(465, 260, 40, BLACK);
-      DrawCircle(465, 260, 35, LIGHTGRAY);
-      DrawCircle(465 + (int)(rightStickX*20), 260 + (int)(rightStickY*20), 25, rightGamepadColor);
-
-      DrawRectangle(151, 110, 15, 70, GRAY);
-      DrawRectangle(644, 110, 15, 70, GRAY);
-      DrawRectangle(151, 110, 15, (int)(((1 + leftTrigger)/2)*70), RED);
-      DrawRectangle(644, 110, 15, (int)(((1 + rightTrigger)/2)*70), RED);
-    }
-
-    DrawText(TextFormat(\"DETECTED AXIS [%i]:\", GetGamepadAxisCount(gamepad)), 10, 50, 10, MAROON);
-    for (int i = 0; i < GetGamepadAxisCount(gamepad); i++) {
-      DrawText(TextFormat(\"AXIS %i: %.02f\", i, GetGamepadAxisMovement(gamepad, i)), 20, 70 + 20*i, 10, DARKGRAY);
-    }
-
-    DrawRectangleRec(jank_gp_vibrateButton, SKYBLUE);
-    DrawText(\"VIBRATE\", (int)(jank_gp_vibrateButton.x + 14), (int)(jank_gp_vibrateButton.y + 1), 10, DARKGRAY);
-
-    if (GetGamepadButtonPressed() != GAMEPAD_BUTTON_UNKNOWN) DrawText(TextFormat(\"DETECTED BUTTON: %i\", GetGamepadButtonPressed()), 10, 430, 10, RED);
-    else DrawText(\"DETECTED BUTTON: NONE\", 10, 430, 10, GRAY);
-  } else {
-    DrawText(TextFormat(\"GP%d: NOT DETECTED\", gamepad), 10, 10, 10, GRAY);
-    DrawTexture(jank_gp_xbox, 0, 0, LIGHTGRAY);
-  }
-}
-
-static void jank_gp_cleanup(void) {
-  UnloadTexture(jank_gp_ps3);
-  UnloadTexture(jank_gp_xbox);
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
+(def ^:private RES "../jank-raylib-sys/raylib/examples/core/resources/")
+
+;; raylib.h values. A Color cannot live in a jank vector, nor be returned
+;; from a jank fn, so colours travel as [r g b] and the cpp/Color is built
+;; inline wherever it is passed.
+(def ^:private C-RED [230 41 55])
+(def ^:private C-BLUE [0 121 241])
+(def ^:private C-LIME [0 158 47])
+(def ^:private C-GOLD [255 203 0])
+(def ^:private C-VIOLET [135 60 190])
+(def ^:private C-PINK [255 109 194])
+(def ^:private C-GREEN [0 228 48])
+(def ^:private C-BLACK [0 0 0])
+(def ^:private C-LIGHTGRAY [200 200 200])
+(def ^:private C-RAYWHITE [245 245 245])
+
+(def ^:private STICK-DEADZONE 0.1)
+(def ^:private TRIGGER-DEADZONE -0.9)
+
+(defn- deaden
+  "The C's stick deadzone: snap to 0 inside the band."
+  [v dz]
+  (if (and (> v (- dz)) (< v dz)) 0.0 v))
+
+(defn- circles!
+  "Rows of [button cx cy radius colour], drawn when that button is down."
+  [gp rows]
+  (loop [i 0]
+    (when (< i (count rows))
+      (let [[b x y r c] (nth rows i)]
+        (when (cpp/IsGamepadButtonDown (cpp/int gp) (cpp/int b))
+          (cpp/DrawCircle (cpp/int x) (cpp/int y) (cpp/float r) (cpp/Color (cpp/cast cpp/uint8_t (nth c 0)) (cpp/cast cpp/uint8_t (nth c 1))
+                             (cpp/cast cpp/uint8_t (nth c 2)) (cpp/cast cpp/uint8_t 255)))))
+      (recur (inc i))))
+  nil)
+
+(defn- rects!
+  "Rows of [button x y w h colour], drawn when that button is down."
+  [gp rows]
+  (loop [i 0]
+    (when (< i (count rows))
+      (let [[b x y w h c] (nth rows i)]
+        (when (cpp/IsGamepadButtonDown (cpp/int gp) (cpp/int b))
+          (cpp/DrawRectangle (cpp/int x) (cpp/int y) (cpp/int w) (cpp/int h) (cpp/Color (cpp/cast cpp/uint8_t (nth c 0)) (cpp/cast cpp/uint8_t (nth c 1))
+                             (cpp/cast cpp/uint8_t (nth c 2)) (cpp/cast cpp/uint8_t 255)))))
+      (recur (inc i))))
+  nil)
+
+(defn- stick!
+  "Base disc plus the thumbstick puck, offset by the axis and reddened
+  while the stick is clicked in."
+  [gp cx cy outer inner ax ay btn]
+  (cpp/DrawCircle (cpp/int cx) (cpp/int cy) (cpp/float outer) (cpp/Color (cpp/cast cpp/uint8_t (nth C-BLACK 0)) (cpp/cast cpp/uint8_t (nth C-BLACK 1))
+                             (cpp/cast cpp/uint8_t (nth C-BLACK 2)) (cpp/cast cpp/uint8_t 255)))
+  (cpp/DrawCircle (cpp/int cx) (cpp/int cy) (cpp/float inner) (cpp/Color (cpp/cast cpp/uint8_t (nth C-LIGHTGRAY 0)) (cpp/cast cpp/uint8_t (nth C-LIGHTGRAY 1))
+                             (cpp/cast cpp/uint8_t (nth C-LIGHTGRAY 2)) (cpp/cast cpp/uint8_t 255)))
+  (cpp/DrawCircle (cpp/int (+ cx (int (* ax 20.0)))) (cpp/int (+ cy (int (* ay 20.0))))
+                  (cpp/float 25.0)
+                  (let [k (if (cpp/IsGamepadButtonDown (cpp/int gp) (cpp/int btn))
+                            C-RED C-BLACK)]
+                    (cpp/Color (cpp/cast cpp/uint8_t (nth k 0)) (cpp/cast cpp/uint8_t (nth k 1))
+                               (cpp/cast cpp/uint8_t (nth k 2)) (cpp/cast cpp/uint8_t 255))))
+  nil)
+
+(defn- triggers!
+  "Two grey tracks with a red fill proportional to the trigger axis."
+  [lx rx y w h lt rt]
+  (cpp/DrawRectangle (cpp/int lx) (cpp/int y) (cpp/int w) (cpp/int h) cpp/GRAY)
+  (cpp/DrawRectangle (cpp/int rx) (cpp/int y) (cpp/int w) (cpp/int h) cpp/GRAY)
+  (cpp/DrawRectangle (cpp/int lx) (cpp/int y) (cpp/int w)
+                     (cpp/int (int (* (/ (+ 1.0 lt) 2.0) h))) (cpp/Color (cpp/cast cpp/uint8_t (nth C-RED 0)) (cpp/cast cpp/uint8_t (nth C-RED 1))
+                             (cpp/cast cpp/uint8_t (nth C-RED 2)) (cpp/cast cpp/uint8_t 255)))
+  (cpp/DrawRectangle (cpp/int rx) (cpp/int y) (cpp/int w)
+                     (cpp/int (int (* (/ (+ 1.0 rt) 2.0) h))) (cpp/Color (cpp/cast cpp/uint8_t (nth C-RED 0)) (cpp/cast cpp/uint8_t (nth C-RED 1))
+                             (cpp/cast cpp/uint8_t (nth C-RED 2)) (cpp/cast cpp/uint8_t 255)))
+  nil)
+
+(defn- fmt2
+  "The C's %.02f."
+  [v]
+  (let [s (str (/ (+ 0.0 (cpp/round (* v 100.0))) 100.0))
+        s (if (loop [i 0] (if (< i (count s)) (if (= (subs s i (inc i)) ".") true (recur (inc i))) false))
+            s (str s "."))
+        d (loop [i 0] (if (= (subs s i (inc i)) ".") i (recur (inc i))))
+        frac (- (count s) d 1)]
+    (if (> frac 2) (subs s 0 (+ d 3)) (str s (subs "00" 0 (- 2 frac))))))
+
+(defn- pad-name-has?
+  "The C's TextFindIndex(TextToLower(GetGamepadName(gp)), alias) > -1."
+  [gp alias]
+  (> (int (cpp/TextFindIndex (cpp/TextToLower (cpp/GetGamepadName (cpp/int gp))) alias)) -1))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_MSAA_4X_HINT)
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - input gamepad (jank)")
 
-  (cpp/jank_gp_init)
+  (let [ps3 (cpp/LoadTexture (str RES "ps3.png"))
+        xbox (cpp/LoadTexture (str RES "xbox.png"))]
+    (cpp/SetTargetFPS 60)
 
-  (loop []
-    (when (cpp/! (cpp/WindowShouldClose))
-      (cpp/jank_gp_update)
+    ;; Thread [gamepad-slot].
+    (loop [gp 0]
+      (when (cpp/! (cpp/WindowShouldClose))
+        (let [gp (cond (and (cpp/IsKeyPressed cpp/KEY_LEFT) (> gp 0)) (dec gp)
+                       (cpp/IsKeyPressed cpp/KEY_RIGHT) (inc gp)
+                       :else gp)
+              axis-count (int (cpp/GetGamepadAxisCount (cpp/int gp)))
+              vib-y (+ 70.0 (* 20 axis-count) 20)
+              mouse (cpp/GetMousePosition)]
 
-      (cpp/BeginDrawing)
-      (cpp/jank_gp_draw)
-      (cpp/EndDrawing)
-      (recur)))
+          (when (and (cpp/IsMouseButtonPressed cpp/MOUSE_BUTTON_LEFT)
+                     (cpp/CheckCollisionPointRec
+                      mouse
+                      (cpp/Rectangle (cpp/float 10.0) (cpp/float vib-y)
+                                     (cpp/float 75.0) (cpp/float 24.0))))
+            (cpp/SetGamepadVibration (cpp/int gp) (cpp/float 1.0) (cpp/float 1.0)
+                                     (cpp/float 1.0)))
 
-  (cpp/jank_gp_cleanup)
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (if (cpp/IsGamepadAvailable (cpp/int gp))
+            (let [nm (str (cpp/GetGamepadName (cpp/int gp)))
+                  ax (deaden (+ 0.0 (cpp/GetGamepadAxisMovement (cpp/int gp) cpp/GAMEPAD_AXIS_LEFT_X)) STICK-DEADZONE)
+                  ay (deaden (+ 0.0 (cpp/GetGamepadAxisMovement (cpp/int gp) cpp/GAMEPAD_AXIS_LEFT_Y)) STICK-DEADZONE)
+                  bx (deaden (+ 0.0 (cpp/GetGamepadAxisMovement (cpp/int gp) cpp/GAMEPAD_AXIS_RIGHT_X)) STICK-DEADZONE)
+                  by (deaden (+ 0.0 (cpp/GetGamepadAxisMovement (cpp/int gp) cpp/GAMEPAD_AXIS_RIGHT_Y)) STICK-DEADZONE)
+                  lt0 (+ 0.0 (cpp/GetGamepadAxisMovement (cpp/int gp) cpp/GAMEPAD_AXIS_LEFT_TRIGGER))
+                  rt0 (+ 0.0 (cpp/GetGamepadAxisMovement (cpp/int gp) cpp/GAMEPAD_AXIS_RIGHT_TRIGGER))
+                  lt (if (< lt0 TRIGGER-DEADZONE) -1.0 lt0)
+                  rt (if (< rt0 TRIGGER-DEADZONE) -1.0 rt0)
+                  xbox? (or (pad-name-has? gp "xbox") (pad-name-has? gp "x-box"))
+                  ps? (or (pad-name-has? gp "playstation") (pad-name-has? gp "sony"))]
+
+              (cpp/DrawText (str "GP" gp ": " nm) 10 10 10 cpp/BLACK)
+
+              (cond
+                xbox?
+                (do
+                  (cpp/DrawTexture xbox 0 0 cpp/DARKGRAY)
+                  (circles! gp [[cpp/GAMEPAD_BUTTON_MIDDLE 394 89 19.0 C-RED]
+                                [cpp/GAMEPAD_BUTTON_MIDDLE_RIGHT 436 150 9.0 C-RED]
+                                [cpp/GAMEPAD_BUTTON_MIDDLE_LEFT 352 150 9.0 C-RED]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_LEFT 501 151 15.0 C-BLUE]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_DOWN 536 187 15.0 C-LIME]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_RIGHT 572 151 15.0 [190 33 55]]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_UP 536 115 15.0 C-GOLD]])
+                  (cpp/DrawRectangle 317 202 19 71 cpp/BLACK)
+                  (cpp/DrawRectangle 293 228 69 19 cpp/BLACK)
+                  (rects! gp [[cpp/GAMEPAD_BUTTON_LEFT_FACE_UP 317 202 19 26 C-RED]
+                              [cpp/GAMEPAD_BUTTON_LEFT_FACE_DOWN 317 247 19 26 C-RED]
+                              [cpp/GAMEPAD_BUTTON_LEFT_FACE_LEFT 292 228 25 19 C-RED]
+                              [cpp/GAMEPAD_BUTTON_LEFT_FACE_RIGHT 336 228 26 19 C-RED]])
+                  (circles! gp [[cpp/GAMEPAD_BUTTON_LEFT_TRIGGER_1 259 61 20.0 C-RED]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_TRIGGER_1 536 61 20.0 C-RED]])
+                  (stick! gp 259 152 39.0 34.0 ax ay cpp/GAMEPAD_BUTTON_LEFT_THUMB)
+                  (stick! gp 461 237 38.0 33.0 bx by cpp/GAMEPAD_BUTTON_RIGHT_THUMB)
+                  (triggers! 170 604 30 15 70 lt rt))
+
+                ps?
+                (do
+                  (cpp/DrawTexture ps3 0 0 cpp/DARKGRAY)
+                  (circles! gp [[cpp/GAMEPAD_BUTTON_MIDDLE 396 222 13.0 C-RED]])
+                  (rects! gp [[cpp/GAMEPAD_BUTTON_MIDDLE_LEFT 328 170 32 13 C-RED]])
+                  (when (cpp/IsGamepadButtonDown (cpp/int gp) cpp/GAMEPAD_BUTTON_MIDDLE_RIGHT)
+                    (cpp/DrawTriangle (cpp/Vector2 (cpp/float 436.0) (cpp/float 168.0))
+                                      (cpp/Vector2 (cpp/float 436.0) (cpp/float 185.0))
+                                      (cpp/Vector2 (cpp/float 464.0) (cpp/float 177.0))
+                                      (cpp/Color (cpp/cast cpp/uint8_t (nth C-RED 0)) (cpp/cast cpp/uint8_t (nth C-RED 1))
+                             (cpp/cast cpp/uint8_t (nth C-RED 2)) (cpp/cast cpp/uint8_t 255))))
+                  (circles! gp [[cpp/GAMEPAD_BUTTON_RIGHT_FACE_UP 557 144 13.0 C-LIME]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_RIGHT 586 173 13.0 C-RED]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_DOWN 557 203 13.0 C-VIOLET]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_LEFT 527 173 13.0 C-PINK]])
+                  (cpp/DrawRectangle 225 132 24 84 cpp/BLACK)
+                  (cpp/DrawRectangle 195 161 84 25 cpp/BLACK)
+                  (rects! gp [[cpp/GAMEPAD_BUTTON_LEFT_FACE_UP 225 132 24 29 C-RED]
+                              [cpp/GAMEPAD_BUTTON_LEFT_FACE_DOWN 225 186 24 30 C-RED]
+                              [cpp/GAMEPAD_BUTTON_LEFT_FACE_LEFT 195 161 30 25 C-RED]
+                              [cpp/GAMEPAD_BUTTON_LEFT_FACE_RIGHT 249 161 30 25 C-RED]])
+                  (circles! gp [[cpp/GAMEPAD_BUTTON_LEFT_TRIGGER_1 239 82 20.0 C-RED]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_TRIGGER_1 557 82 20.0 C-RED]])
+                  (stick! gp 319 255 35.0 31.0 ax ay cpp/GAMEPAD_BUTTON_LEFT_THUMB)
+                  (stick! gp 475 255 35.0 31.0 bx by cpp/GAMEPAD_BUTTON_RIGHT_THUMB)
+                  (triggers! 169 611 48 15 70 lt rt))
+
+                :else
+                (do
+                  (cpp/DrawRectangleRounded
+                   (cpp/Rectangle (cpp/float 175.0) (cpp/float 110.0)
+                                  (cpp/float 460.0) (cpp/float 220.0))
+                   (cpp/float 0.3) 16 cpp/DARKGRAY)
+                  (loop [i 0]
+                    (when (< i (count [[365 170 12.0] [405 170 12.0] [445 170 12.0]
+                                       [516 191 17.0] [551 227 17.0] [587 191 17.0]
+                                       [551 155 17.0]]))
+                      (let [[x y r] (nth [[365 170 12.0] [405 170 12.0] [445 170 12.0]
+                                          [516 191 17.0] [551 227 17.0] [587 191 17.0]
+                                          [551 155 17.0]] i)]
+                        (cpp/DrawCircle (cpp/int x) (cpp/int y) (cpp/float r) (cpp/Color (cpp/cast cpp/uint8_t (nth C-RAYWHITE 0)) (cpp/cast cpp/uint8_t (nth C-RAYWHITE 1))
+                             (cpp/cast cpp/uint8_t (nth C-RAYWHITE 2)) (cpp/cast cpp/uint8_t 255))))
+                      (recur (inc i))))
+                  (circles! gp [[cpp/GAMEPAD_BUTTON_MIDDLE_LEFT 365 170 10.0 C-RED]
+                                [cpp/GAMEPAD_BUTTON_MIDDLE 405 170 10.0 C-GREEN]
+                                [cpp/GAMEPAD_BUTTON_MIDDLE_RIGHT 445 170 10.0 C-BLUE]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_LEFT 516 191 15.0 C-GOLD]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_DOWN 551 227 15.0 C-BLUE]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_RIGHT 587 191 15.0 C-GREEN]
+                                [cpp/GAMEPAD_BUTTON_RIGHT_FACE_UP 551 155 15.0 C-RED]])
+                  (cpp/DrawRectangle 245 145 28 88 cpp/RAYWHITE)
+                  (cpp/DrawRectangle 215 174 88 29 cpp/RAYWHITE)
+                  (cpp/DrawRectangle 247 147 24 84 cpp/BLACK)
+                  (cpp/DrawRectangle 217 176 84 25 cpp/BLACK)
+                  (rects! gp [[cpp/GAMEPAD_BUTTON_LEFT_FACE_UP 247 147 24 29 C-RED]
+                              [cpp/GAMEPAD_BUTTON_LEFT_FACE_DOWN 247 201 24 30 C-RED]
+                              [cpp/GAMEPAD_BUTTON_LEFT_FACE_LEFT 217 176 30 25 C-RED]
+                              [cpp/GAMEPAD_BUTTON_LEFT_FACE_RIGHT 271 176 30 25 C-RED]])
+                  (cpp/DrawRectangleRounded
+                   (cpp/Rectangle (cpp/float 215.0) (cpp/float 98.0)
+                                  (cpp/float 100.0) (cpp/float 10.0))
+                   (cpp/float 0.5) 16 cpp/DARKGRAY)
+                  (cpp/DrawRectangleRounded
+                   (cpp/Rectangle (cpp/float 495.0) (cpp/float 98.0)
+                                  (cpp/float 100.0) (cpp/float 10.0))
+                   (cpp/float 0.5) 16 cpp/DARKGRAY)
+                  (when (cpp/IsGamepadButtonDown (cpp/int gp) cpp/GAMEPAD_BUTTON_LEFT_TRIGGER_1)
+                    (cpp/DrawRectangleRounded
+                     (cpp/Rectangle (cpp/float 215.0) (cpp/float 98.0)
+                                    (cpp/float 100.0) (cpp/float 10.0))
+                     (cpp/float 0.5) 16 (cpp/Color (cpp/cast cpp/uint8_t (nth C-RED 0)) (cpp/cast cpp/uint8_t (nth C-RED 1))
+                             (cpp/cast cpp/uint8_t (nth C-RED 2)) (cpp/cast cpp/uint8_t 255))))
+                  (when (cpp/IsGamepadButtonDown (cpp/int gp) cpp/GAMEPAD_BUTTON_RIGHT_TRIGGER_1)
+                    (cpp/DrawRectangleRounded
+                     (cpp/Rectangle (cpp/float 495.0) (cpp/float 98.0)
+                                    (cpp/float 100.0) (cpp/float 10.0))
+                     (cpp/float 0.5) 16 (cpp/Color (cpp/cast cpp/uint8_t (nth C-RED 0)) (cpp/cast cpp/uint8_t (nth C-RED 1))
+                             (cpp/cast cpp/uint8_t (nth C-RED 2)) (cpp/cast cpp/uint8_t 255))))
+                  (stick! gp 345 260 40.0 35.0 ax ay cpp/GAMEPAD_BUTTON_LEFT_THUMB)
+                  (stick! gp 465 260 40.0 35.0 bx by cpp/GAMEPAD_BUTTON_RIGHT_THUMB)
+                  (triggers! 151 644 110 15 70 lt rt)))
+
+              (cpp/DrawText (str "DETECTED AXIS [" axis-count "]:") 10 50 10 cpp/MAROON)
+              (loop [i 0]
+                (when (< i axis-count)
+                  (cpp/DrawText (str "AXIS " i ": "
+                                     (fmt2 (+ 0.0 (cpp/GetGamepadAxisMovement (cpp/int gp) (cpp/int i)))))
+                                20 (+ 70 (* 20 i)) 10 cpp/DARKGRAY)
+                  (recur (inc i))))
+
+              (cpp/DrawRectangleRec (cpp/Rectangle (cpp/float 10.0) (cpp/float vib-y)
+                                                   (cpp/float 75.0) (cpp/float 24.0))
+                                    cpp/SKYBLUE)
+              (cpp/DrawText "VIBRATE" 24 (int (+ vib-y 1)) 10 cpp/DARKGRAY)
+
+              (let [pressed (int (cpp/GetGamepadButtonPressed))]
+                ;; jank's int does not accept a C enum value; cast first
+                (if (not= pressed (+ 0 (cpp/cast cpp/int cpp/GAMEPAD_BUTTON_UNKNOWN)))
+                  (cpp/DrawText (str "DETECTED BUTTON: " pressed) 10 430 10 cpp/RED)
+                  (cpp/DrawText "DETECTED BUTTON: NONE" 10 430 10 cpp/GRAY))))
+
+            (do
+              (cpp/DrawText (str "GP" gp ": NOT DETECTED") 10 10 10 cpp/GRAY)
+              (cpp/DrawTexture xbox 0 0 cpp/LIGHTGRAY)))
+
+          (cpp/EndDrawing)
+          (recur gp))))
+
+    (cpp/UnloadTexture ps3)
+    (cpp/UnloadTexture xbox))
+
   (cpp/CloseWindow))
