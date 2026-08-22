@@ -70,20 +70,28 @@ algorithm assumes it (`screen_buffer.jank`, `spectrum_visualizer.jank`).
 Worked examples: `screen_buffer.jank` (fire simulation, 90k cells twice a
 frame), `spectrum_visualizer.jank` (1024-point FFT a frame).
 
-## Two traps that only bite native-slot loops
+## Two loop traps
 
-**An inner `loop` binding that shadows an outer native-int slot initialises
-to 0**, not to the outer value. These differ by one identifier:
+**An inner `loop` binding that shadows an outer `loop` binding may silently
+initialise to zero/empty instead of the outer value.** These differ by one
+identifier:
 
 ```clojure
 (loop [j j bit ...] ...)     ; -> [512 512 512 512 512]
 (loop [jj j bit ...] ...)    ; -> [512 256 768 128 640]  correct
 ```
 
-The idiomatic Clojure form is the broken one. Rename the inner binding. The
-boxed equivalent is correct, so this needs native slots. Silent: a wrong
-permutation still produced a spectrum that looked like a spectrum
-(`spectrum_visualizer.jank`).
+The idiomatic Clojure form is the broken one. Rename the inner binding.
+
+Seen twice: a native `cpp/int` counter in `spectrum_visualizer.jank`, and a
+**boxed jank vector** accumulator in `decals.jank`, where an inner loop
+counted 3666 elements while the outer received 0. So it is not about native
+types. In both cases the inner loop **recurs**; an inner loop that returns
+without recurring has behaved correctly. Which of those is load-bearing is
+not yet established.
+
+Silent either way: a wrong permutation still produced a spectrum that looked
+like a spectrum.
 
 **`recur` assigns loop slots in order, without temporaries.** An argument that
 reads a slot written earlier in the same `recur` sees the new value:

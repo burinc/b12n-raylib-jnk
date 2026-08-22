@@ -41,14 +41,21 @@ example ports that preceded it are in the git history and in
 
 ### Changed
 
-- **`cpp/raw` down from 78 blocks to 10**, across 214 sources. Every
-  remaining one is accounted for: four are blocked on a real jank gap (a jank
-  fn cannot become a C function pointer), two keep their C deliberately, and
-  four are ports still to do.
-- Three examples previously recorded as "measured keeps" were re-measured and
-  ported: `screen_buffer`, `spectrum_visualizer`, `animation_blend_custom`.
-  The original numbers were taken against boxed jank arithmetic and did not
-  support the conclusion drawn from them.
+- **`cpp/raw` down from 78 blocks to 6**, across 214 sources. Four are
+  blocked on a real jank gap (a jank fn cannot become a C function pointer,
+  and `custom_logging` is variadic on top of that); `point_rendering` keeps
+  its C deliberately, since porting it would make the CPU path slower than
+  raylib's real cost and misrepresent the comparison the example exists to
+  demonstrate; `input_gamepad` awaits a gamepad to verify against.
+- Four examples previously recorded as "measured keeps" were re-examined and
+  ported: `screen_buffer`, `spectrum_visualizer`, `animation_blend_custom`
+  and `strings_management`. Three had numbers taken against boxed jank
+  arithmetic that did not support the conclusion drawn from them;
+  `animation_blend_custom`'s number had never been measured at all, and
+  `strings_management`'s stated reason was backwards, since jank strings and
+  `const char *` convert both ways.
+- `automation_events`, `text_3d_drawing` and `decals` ported: the last three
+  whole-example C blocks that were only ever a matter of work.
 
 - **raylib now comes from the official
   [`org.jank-lang.commons/raylib-sys`](https://github.com/jank-lang/commons)
@@ -73,6 +80,10 @@ example ports that preceded it are in the git history and in
 - The last MPL 2.0 files, with the wrapper. The tree is uniformly zlib.
 
 ### Fixed
+
+- Four examples allocated with `cpp/MemAlloc` and never freed, where the C
+  they replaced did (`spectrum_visualizer`'s FFT buffers most notably, which
+  the C's own `jank_fft_free` released).
 
 - **Guide claims that C shims were required are corrected throughout.**
   Material and camera field writes are `cpp/=`; pointer arithmetic is

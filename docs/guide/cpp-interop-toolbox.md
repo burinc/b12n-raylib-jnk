@@ -101,7 +101,8 @@ error: No matching call to 'AttachAudioMixedProcessor' function.
        With argument 0 having type 'jank::runtime::object_ref &'.
 ```
 
-This is the only remaining reason any example here still carries `cpp/raw`.
+This is the only remaining *limitation* reason any example here carries
+`cpp/raw`: 4 of the 6 blocks left in 214 sources.
 A callback defined inside a `cpp/raw` block is ordinary C, and a sibling
 wrapper attaches it:
 

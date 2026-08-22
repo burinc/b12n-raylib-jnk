@@ -56,6 +56,12 @@ Four things follow from it:
    compute shaders all work, proven example by example.
    ([`raylib-api-coverage.md`](raylib-api-coverage.md))
 
+**Where that leaves the C.** 6 `cpp/raw` blocks remain across 214 sources,
+down from 78. Four are blocked on one real gap (a jank fn cannot become a C
+function pointer); one keeps its C deliberately, because porting it would
+misrepresent the CPU-versus-GPU comparison the example exists to show; one is
+unported for want of a gamepad to verify against.
+
 Nothing about jank's C++ interop is raylib-specific: `(:include "header.h")`
 and `cpp/` reach any C/C++ library. This repo just happens to exercise it
 against one real, struct-heavy graphics API across 209 examples.

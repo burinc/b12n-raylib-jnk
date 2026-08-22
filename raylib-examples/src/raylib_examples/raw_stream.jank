@@ -128,7 +128,8 @@
           (cpp/EndDrawing)
           (recur freq new-freq pan'))))
 
-    (cpp/UnloadAudioStream stream))
+    (cpp/UnloadAudioStream stream)
+    (cpp/MemFree (cpp/unbox (:* cpp/float) buf-box)))
 
   (cpp/CloseAudioDevice)
   (cpp/CloseWindow))
