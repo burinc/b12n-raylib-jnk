@@ -19,23 +19,8 @@
     Vector3Barycenter on the native point complete the collision-API
     coverage."
   (:require [clojure.string :as string])
+  (:require [raylib-examples.models :as md])
   (:include "raylib.h" "raymath.h"))
-
-;; Material texture write + the C's per-mesh collision loop.
-(cpp/raw "static void jank_model_set_texture(Model* m, Texture2D tex) {
-  m->materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
-}
-static BoundingBox jank_model_bounds(Model* m) {
-  return GetMeshBoundingBox(m->meshes[0]);
-}
-static RayCollision jank_ray_vs_model(Ray ray, Model* m) {
-  RayCollision meshHitInfo = { 0 };
-  for (int i = 0; i < m->meshCount; i++) {
-    meshHitInfo = GetRayCollisionMesh(ray, m->meshes[i], m->transform);
-    if (meshHitInfo.hit) break;
-  }
-  return meshHitInfo;
-}")
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -66,9 +51,10 @@ static RayCollision jank_ray_vs_model(Ray ray, Model* m) {
                              cpp/CAMERA_PERSPECTIVE)
         tower (cpp/LoadModel (str RES "models/obj/turret.obj"))
         texture (cpp/LoadTexture (str RES "models/obj/turret_diffuse.png"))
-        bounds (cpp/jank_model_bounds (cpp/& tower))]
+        bounds (cpp/GetMeshBoundingBox (cpp/aget (.-meshes tower) (cpp/int 0)))]
 
-    (cpp/jank_model_set_texture (cpp/& tower) texture)
+    (md/set-texture! (cpp/box (cpp/new cpp/Model tower))
+                     (cpp/box (cpp/new cpp/Texture2D texture)))
 
     (cpp/SetTargetFPS 60)
 
@@ -143,10 +129,27 @@ static RayCollision jank_ray_vs_model(Ray ray, Model* m) {
               best (closer best sphere)
               ;; the box gates the expensive mesh test; a mesh hit overrides
               best (if (and (:hit? box) (< (:dist box) (:dist best)))
-                     (let [mc (cpp/jank_ray_vs_model ray (cpp/& tower))
+                     ;; The C looped the meshes and returned the first hit.
+                     ;; A RayCollision cannot leave a loop or a fn, so the
+                     ;; loop yields the hit INDEX as a jank int and the
+                     ;; collision is recomputed for that one mesh. One extra
+                     ;; GetRayCollisionMesh, and only when the box test passes.
+                     (let [nmesh (int (+ 0.0 (.-meshCount tower)))
+                           hit-i (loop [i 0]
+                                   (if (>= i nmesh)
+                                     -1
+                                     (if (.-hit (cpp/GetRayCollisionMesh
+                                                 ray (cpp/aget (.-meshes tower) (cpp/int i))
+                                                 (.-transform tower)))
+                                       i
+                                       (recur (inc i)))))
+                           mc (cpp/GetRayCollisionMesh
+                               ray (cpp/aget (.-meshes tower)
+                                             (cpp/int (if (>= hit-i 0) hit-i 0)))
+                               (.-transform tower))
                            mp (.-point mc)
                            mn (.-normal mc)]
-                       (if (.-hit mc)
+                       (if (>= hit-i 0)
                          {:hit? true
                           :dist (+ 0.0 (.-distance mc))
                           :px (+ 0.0 (.-x mp)) :py (+ 0.0 (.-y mp)) :pz (+ 0.0 (.-z mp))

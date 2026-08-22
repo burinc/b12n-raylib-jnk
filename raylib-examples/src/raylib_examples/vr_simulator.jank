@@ -21,126 +21,114 @@
     frame loop, the frame boundaries and DrawFPS."
   (:include "raylib.h"))
 
-;; The VR device + stereo config + distortion shader + stereo render.
-(cpp/raw "
-static VrDeviceInfo jank_vr_device = { 0 };
-static VrStereoConfig jank_vr_config = { 0 };
-static Shader jank_vr_distortion = { 0 };
-static RenderTexture2D jank_vr_target = { 0 };
-static Camera jank_vr_camera = { 0 };
-static Rectangle jank_vr_sourceRec = { 0 };
-static Rectangle jank_vr_destRec = { 0 };
-static Vector3 jank_vr_cubePosition = { 0.0f, 0.0f, 0.0f };
-
-static void jank_vr_init(void) {
-  /* Oculus Rift CV1 parameters for the simulator */
-  jank_vr_device.hResolution = 2160;
-  jank_vr_device.vResolution = 1200;
-  jank_vr_device.hScreenSize = 0.133793f;
-  jank_vr_device.vScreenSize = 0.0669f;
-  jank_vr_device.eyeToScreenDistance = 0.041f;
-  jank_vr_device.lensSeparationDistance = 0.07f;
-  jank_vr_device.interpupillaryDistance = 0.07f;
-  /* CV1 lens distortion / chroma approximation */
-  jank_vr_device.lensDistortionValues[0] = 1.0f;
-  jank_vr_device.lensDistortionValues[1] = 0.22f;
-  jank_vr_device.lensDistortionValues[2] = 0.24f;
-  jank_vr_device.lensDistortionValues[3] = 0.0f;
-  jank_vr_device.chromaAbCorrection[0] = 0.996f;
-  jank_vr_device.chromaAbCorrection[1] = -0.004f;
-  jank_vr_device.chromaAbCorrection[2] = 1.014f;
-  jank_vr_device.chromaAbCorrection[3] = 0.0f;
-
-  jank_vr_config = LoadVrStereoConfig(jank_vr_device);
-
-  jank_vr_distortion = LoadShader(0, \"../jank-raylib-sys/raylib/examples/core/resources/shaders/glsl330/distortion.fs\");
-
-  /* Feed lens + distortion-scale params (float-array pointers -> void*) */
-  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"leftLensCenter\"),
-                 jank_vr_config.leftLensCenter, SHADER_UNIFORM_VEC2);
-  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"rightLensCenter\"),
-                 jank_vr_config.rightLensCenter, SHADER_UNIFORM_VEC2);
-  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"leftScreenCenter\"),
-                 jank_vr_config.leftScreenCenter, SHADER_UNIFORM_VEC2);
-  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"rightScreenCenter\"),
-                 jank_vr_config.rightScreenCenter, SHADER_UNIFORM_VEC2);
-  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"scale\"),
-                 jank_vr_config.scale, SHADER_UNIFORM_VEC2);
-  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"scaleIn\"),
-                 jank_vr_config.scaleIn, SHADER_UNIFORM_VEC2);
-  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"deviceWarpParam\"),
-                 jank_vr_device.lensDistortionValues, SHADER_UNIFORM_VEC4);
-  SetShaderValue(jank_vr_distortion, GetShaderLocation(jank_vr_distortion, \"chromaAbParam\"),
-                 jank_vr_device.chromaAbCorrection, SHADER_UNIFORM_VEC4);
-
-  /* HMD-sized framebuffer for the stereo render */
-  jank_vr_target = LoadRenderTexture(jank_vr_device.hResolution, jank_vr_device.vResolution);
-
-  /* Source height is flipped (OpenGL); dest fills the window */
-  jank_vr_sourceRec = (Rectangle){ 0.0f, 0.0f, (float)jank_vr_target.texture.width, -(float)jank_vr_target.texture.height };
-  jank_vr_destRec = (Rectangle){ 0.0f, 0.0f, (float)GetScreenWidth(), (float)GetScreenHeight() };
-
-  jank_vr_camera.position = (Vector3){ 5.0f, 2.0f, 5.0f };
-  jank_vr_camera.target = (Vector3){ 0.0f, 2.0f, 0.0f };
-  jank_vr_camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
-  jank_vr_camera.fovy = 60.0f;
-  jank_vr_camera.projection = CAMERA_PERSPECTIVE;
-
-  DisableCursor();
-  SetTargetFPS(60);
-}
-
-static void jank_vr_update(void) {
-  UpdateCamera(&jank_vr_camera, CAMERA_FIRST_PERSON);
-}
-
-/* Render the 3D scene twice (one eye each) into the HMD framebuffer. */
-static void jank_vr_draw_target(void) {
-  BeginTextureMode(jank_vr_target);
-    ClearBackground(RAYWHITE);
-    BeginVrStereoMode(jank_vr_config);
-      BeginMode3D(jank_vr_camera);
-        DrawCube(jank_vr_cubePosition, 2.0f, 2.0f, 2.0f, RED);
-        DrawCubeWires(jank_vr_cubePosition, 2.0f, 2.0f, 2.0f, MAROON);
-        DrawGrid(40, 1.0f);
-      EndMode3D();
-    EndVrStereoMode();
-  EndTextureMode();
-}
-
-/* Warp the stereo framebuffer onto the window via the distortion shader. */
-static void jank_vr_draw_screen(void) {
-  BeginShaderMode(jank_vr_distortion);
-    DrawTexturePro(jank_vr_target.texture, jank_vr_sourceRec, jank_vr_destRec, (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE);
-  EndShaderMode();
-}
-
-static void jank_vr_cleanup(void) {
-  UnloadVrStereoConfig(jank_vr_config);
-  UnloadRenderTexture(jank_vr_target);
-  UnloadShader(jank_vr_distortion);
-}")
-
 (def WIDTH 800)
 (def HEIGHT 450)
+(def RES "../jank-raylib-sys/raylib/examples/core/resources/")
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
   (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - vr simulator (jank)")
 
-  (cpp/jank_vr_init)
+  ;; Every one of these is created once and used for the whole run, so they
+  ;; are plain outer-let locals captured by the frame loop. No cpp/raw
+  ;; statics and no boxes: nothing here is ever recreated or has to cross a
+  ;; fn boundary.
+  (let [dev (cpp/new cpp/VrDeviceInfo)
+        _ (do
+            ;; Oculus Rift CV1 parameters for the simulator
+            (cpp/= (.-hResolution (cpp/* dev)) (cpp/int 2160))
+            (cpp/= (.-vResolution (cpp/* dev)) (cpp/int 1200))
+            (cpp/= (.-hScreenSize (cpp/* dev)) (cpp/float 0.133793))
+            (cpp/= (.-vScreenSize (cpp/* dev)) (cpp/float 0.0669))
+            (cpp/= (.-eyeToScreenDistance (cpp/* dev)) (cpp/float 0.041))
+            (cpp/= (.-lensSeparationDistance (cpp/* dev)) (cpp/float 0.07))
+            (cpp/= (.-interpupillaryDistance (cpp/* dev)) (cpp/float 0.07))
+            ;; CV1 lens distortion / chroma approximation
+            (doseq [[i v] (map-indexed vector [1.0 0.22 0.24 0.0])]
+              (cpp/= (cpp/aget (.-lensDistortionValues (cpp/* dev)) (cpp/int i)) (cpp/float v)))
+            (doseq [[i v] (map-indexed vector [0.996 -0.004 1.014 0.0])]
+              (cpp/= (cpp/aget (.-chromaAbCorrection (cpp/* dev)) (cpp/int i)) (cpp/float v)))
+            nil)
+        config (cpp/LoadVrStereoConfig (cpp/* dev))
+        distortion (cpp/LoadShader cpp/nullptr (str RES "shaders/glsl330/distortion.fs"))
+        ;; the lens/scale params are already float[2] and float[4] members,
+        ;; so they pass straight to SetShaderValue's const void*
+        _ (do
+            (cpp/SetShaderValue distortion
+                                (cpp/GetShaderLocation distortion "leftLensCenter")
+                                (.-leftLensCenter config) cpp/SHADER_UNIFORM_VEC2)
+            (cpp/SetShaderValue distortion
+                                (cpp/GetShaderLocation distortion "rightLensCenter")
+                                (.-rightLensCenter config) cpp/SHADER_UNIFORM_VEC2)
+            (cpp/SetShaderValue distortion
+                                (cpp/GetShaderLocation distortion "leftScreenCenter")
+                                (.-leftScreenCenter config) cpp/SHADER_UNIFORM_VEC2)
+            (cpp/SetShaderValue distortion
+                                (cpp/GetShaderLocation distortion "rightScreenCenter")
+                                (.-rightScreenCenter config) cpp/SHADER_UNIFORM_VEC2)
+            (cpp/SetShaderValue distortion
+                                (cpp/GetShaderLocation distortion "scale")
+                                (.-scale config) cpp/SHADER_UNIFORM_VEC2)
+            (cpp/SetShaderValue distortion
+                                (cpp/GetShaderLocation distortion "scaleIn")
+                                (.-scaleIn config) cpp/SHADER_UNIFORM_VEC2)
+            (cpp/SetShaderValue distortion
+                                (cpp/GetShaderLocation distortion "deviceWarpParam")
+                                (.-lensDistortionValues (cpp/* dev)) cpp/SHADER_UNIFORM_VEC4)
+            (cpp/SetShaderValue distortion
+                                (cpp/GetShaderLocation distortion "chromaAbParam")
+                                (.-chromaAbCorrection (cpp/* dev)) cpp/SHADER_UNIFORM_VEC4)
+            nil)
+        ;; HMD-sized framebuffer for the stereo render
+        target (cpp/LoadRenderTexture (.-hResolution (cpp/* dev)) (.-vResolution (cpp/* dev)))
+        camera (cpp/Camera3D (cpp/Vector3 (cpp/float 5.0) (cpp/float 2.0) (cpp/float 5.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 2.0) (cpp/float 0.0))
+                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 1.0) (cpp/float 0.0))
+                             (cpp/float 60.0)
+                             cpp/CAMERA_PERSPECTIVE)]
 
-  (loop []
-    (when (cpp/! (cpp/WindowShouldClose))
-      (cpp/jank_vr_update)
-      (cpp/jank_vr_draw_target)
+    (cpp/DisableCursor)
+    (cpp/SetTargetFPS 60)
 
-      (cpp/BeginDrawing)
-      (cpp/ClearBackground cpp/RAYWHITE)
-      (cpp/jank_vr_draw_screen)
-      (cpp/DrawFPS 10 10)
-      (cpp/EndDrawing)
-      (recur)))
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+        (cpp/UpdateCamera (cpp/& camera) cpp/CAMERA_FIRST_PERSON)
 
-  (cpp/jank_vr_cleanup)
+        ;; render the scene twice, one eye each, into the HMD framebuffer
+        (cpp/BeginTextureMode target)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        (cpp/BeginVrStereoMode config)
+        (cpp/BeginMode3D camera)
+        (cpp/DrawCube (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                      (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/RED)
+        (cpp/DrawCubeWires (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0) (cpp/float 0.0))
+                           (cpp/float 2.0) (cpp/float 2.0) (cpp/float 2.0) cpp/MAROON)
+        (cpp/DrawGrid 40 (cpp/float 1.0))
+        (cpp/EndMode3D)
+        (cpp/EndVrStereoMode)
+        (cpp/EndTextureMode)
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+        ;; warp the stereo framebuffer onto the window; source height is
+        ;; negative because render textures are stored upside down
+        (cpp/BeginShaderMode distortion)
+        (cpp/DrawTexturePro (.-texture target)
+                            (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                           (cpp/float (+ 0.0 (.-width (.-texture target))))
+                                           (cpp/float (- 0.0 (+ 0.0 (.-height (.-texture target))))))
+                            (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                           (cpp/float (+ 0.0 (cpp/GetScreenWidth)))
+                                           (cpp/float (+ 0.0 (cpp/GetScreenHeight))))
+                            (cpp/Vector2 (cpp/float 0.0) (cpp/float 0.0))
+                            (cpp/float 0.0) cpp/WHITE)
+        (cpp/EndShaderMode)
+        (cpp/DrawFPS 10 10)
+        (cpp/EndDrawing)
+        (recur)))
+
+    (cpp/UnloadVrStereoConfig config)
+    (cpp/UnloadRenderTexture target)
+    (cpp/UnloadShader distortion))
+
   (cpp/CloseWindow))
