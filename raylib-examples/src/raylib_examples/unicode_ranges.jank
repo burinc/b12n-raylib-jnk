@@ -113,7 +113,11 @@ static Font jank_font_get(void) { return jank_font; }")
                       (recur (inc ri)))))
                 (let [f (cpp/jank_font_get)]
                   (cpp/SetTextureFilter (.-texture f) cpp/TEXTURE_FILTER_BILINEAR)))
-            prev range
+            ;; (int range) forces a COPY. Binding prev to range directly
+            ;; leaves it aliasing the loop slot, and recur writes slot 0
+            ;; (range) before slot 1 (prev), so prev would read the NEW
+            ;; range and (not= range prev) could never fire.
+            prev (int range)
             range (cond (cpp/IsKeyPressed cpp/KEY_ZERO) 0
                         (cpp/IsKeyPressed cpp/KEY_ONE) 1
                         (cpp/IsKeyPressed cpp/KEY_TWO) 2
