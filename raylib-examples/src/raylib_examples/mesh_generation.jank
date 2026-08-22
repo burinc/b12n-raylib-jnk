@@ -13,11 +13,11 @@
     (rule 2); nine outer-let locals + a per-index cond dispatching
     DrawModel (the postprocessing per-index pattern, scaled to
     models). Only the index threads through recur.
-  - GenMeshCustom (MemAlloc'd vertex/normal/texcoord arrays filled
-    by hand) stays a verbatim C shim returning the Mesh.
+  - GenMeshCustom's vertex/normal/texcoord arrays are cpp/MemAlloc
+    plus cpp/unsafe-cast, filled element-wise with cpp/aget and cpp/=.
   - GenImageChecked takes the two Colors inline; the atlas texture is
-    assigned to all nine materials by nine explicit shim calls (a
-    jank loop cannot carry the native models)."
+    assigned to all nine materials by nine explicit models.jank calls
+    (a jank loop cannot carry the native models)."
   (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
 

@@ -11,16 +11,13 @@
   - First LoadModel FROM FILE (the OBJ path): it returns a Model that
     binds as an outer-let local exactly like texture-tiling's
     LoadModelFromMesh one - zero wrapper changes.
-  - GetMeshBoundingBox(model.meshes[0]) reads a struct array; kept as
-    a one-line C shim through (cpp/& model) (a struct-array cpp/aget
-    would probably also work per the guide's GlyphInfo probe, but the
-    shim is certain). The material texture write reuses
-    texture-tiling's shim.
+  - GetMeshBoundingBox(model.meshes[0]) is a plain struct-array read:
+    (cpp/aget (.-meshes model) (cpp/int 0)). The material texture write
+    goes through models.jank.
   - Ray-pick selection is proven ground: (.-hit (GetRayCollisionBox
     (GetScreenToWorldRay mouse camera) bounds)) as in picking-3d.
   - Simplification vs the C: the drag&drop model/texture-swap path is
-    dropped (a runtime-replaced Model needs the cpp/raw static
-    pattern; drop_files already demos dropped-file handling)."
+    dropped (drop_files already demos dropped-file handling)."
   (:require [raylib-examples.models :as md])
   (:include "raylib.h"))
 

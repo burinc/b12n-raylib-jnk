@@ -10,15 +10,14 @@
   jank-native notes:
   - FIRST RAW AUDIO STREAM: LoadAudioStream binds as a let-local like
     any create-once native; IsAudioStreamProcessed gates the refill.
-  - The 4096-sample buffer fill (with the oscillator's index/
-    frequency/start-time state) lives in a C shim - UpdateAudioStream
-    needs the float* - returning the possibly-switched frequency;
-    jank threads only the requested frequency and pan.
+  - Oscillator state (sample index, live frequency, the GetTime of the
+    last zero crossing) is a jank atom, written once per refill. The
+    sample buffer stays native because UpdateAudioStream takes a
+    pointer, and the AudioStream is boxed to cross the fn boundary.
   - The waveform plot is jank cpp/sin math, one DrawLineV per column."
   (:require [clojure.string :as string])
   (:include "raylib.h" "math.h"))
 
-;; The oscillator + stream refill (UpdateAudioStream needs the float*).
 (def WIDTH 800)
 (def HEIGHT 450)
 (def SAMPLE-RATE 44100)

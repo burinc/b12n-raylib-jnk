@@ -11,12 +11,11 @@
 
   jank-native notes:
   - First MULTI-RENDER-TARGET framebuffer: the G-buffer (3 color
-    textures + depth renderbuffer, rlActiveDrawBuffers 3) builds into
-    C statics behind id accessors; the depth blit to the default
-    framebuffer and the sampler-unit init (rlGetLocationUniform +
-    SAMPLER2D uniforms) are shims, the rest is direct rlgl.
-  - The debug views draw a compound-literal Texture2D built from a
-    raw GL id - a one-line C shim.
+    textures + depth renderbuffer, rlActiveDrawBuffers 3) is built with
+    direct rlgl calls, its ids held as plain jank ints since GL names are
+    unsigned ints and cross a fn boundary freely.
+  - The debug views draw a Texture2D assembled with cpp/new from a raw
+    GL id.
   - Lights ride the rlights namespace against the deferred shader; the 30
     random cubes are a jank vector of maps drawn with DrawModelEx."
   (:require [raylib-examples.models :as md])

@@ -9,16 +9,17 @@
   Based on raylib/examples/shaders/shaders_lightmap_rendering.c
 
   jank-native notes:
-  - First DEEP MESH EDIT: GenMeshPlane makes no texcoords2, so a
-    verbatim C shim RL_MALLOCs the second UV channel, fills the four
-    corners, uploads it with rlLoadVertexBuffer and wires vertex
-    attribute 5 - all through (cpp/& mesh) on the let-local Mesh.
-  - GenTextureMipmaps must mutate the RenderTexture's OWN texture
-    struct (the mipmaps count feeds SetTextureFilter's trilinear
-    check), so the mipmap+filter pair is an RT-pointer shim; the
-    plain texture's pair uses (cpp/& texture) directly.
-  - Material texture writes reuse the mesh-instancing Material shims
-    (ALBEDO = the atlas, METALNESS = the lightmap's texture)."
+  - First DEEP MESH EDIT: GenMeshPlane makes no texcoords2, so jank
+    MemAllocs the second UV channel, fills the four corners, uploads it
+    with rlLoadVertexBuffer and wires vertex attribute 5 - all through
+    (cpp/& mesh) on the let-local Mesh. Note rlSetVertexAttribute's last
+    argument is an int OFFSET, not a pointer.
+  - GenTextureMipmaps must mutate the RenderTexture's OWN texture struct
+    (the mipmaps count feeds SetTextureFilter's trilinear check), so the
+    mipmap+filter pair runs against the boxed target; the plain
+    texture's pair uses (cpp/& texture) directly.
+  - Material texture writes go through models.jank (ALBEDO = the atlas,
+    METALNESS = the lightmap's texture)."
   (:include "raylib.h" "rlgl.h" "raymath.h"))
 
 (def WIDTH 800)

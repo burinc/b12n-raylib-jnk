@@ -31,32 +31,29 @@ handle it. The ASCII-only restriction is about COMMENTS (the em-dash
   as an outer-let local (pointers inside and all) and draws with
   `cpp/DrawModel` inside the loop. Proof line:
   `VAO: [ID 2] Mesh uploaded successfully to VRAM (GPU)`.
-- **Material field writes need a pointer shim.** The C idiom
+- **Material field writes are `cpp/=`.** The C idiom
   `model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = tex` (and
-  `.shader = s`) has no jank spelling; a two-line C shim taking
-  `(Model* m, Texture2D tex)` does the assignment, called with
-  `(cpp/& model)`, the same address-of pattern as `Image*` /
-  `UpdateCamera` ([cpp-interop-toolbox.md](cpp-interop-toolbox.md)).
+  `.shader = s`) spells directly in jank:
+  `(cpp/= (.-shader (cpp/aget (.-materials model) (cpp/int 0))) s)`.
+  `models.jank` wraps the common ones.
 - `UnloadModel` after the loop, as usual for create-once resources.
 - **`LoadModel` from a FILE works too** (`model_loading.jank`, the castle
   OBJ + its .png diffuse): same shape, just returns a `Model`. Reading
-  `model.meshes[0]` for `GetMeshBoundingBox` stays a one-line shim through
-  `(cpp/& model)` (a struct-array `cpp/aget` would probably also work per
-  the GlyphInfo probe, but the shim is certain).
+  `model.meshes[0]` for `GetMeshBoundingBox` is a plain struct-array read:
+  `(cpp/GetMeshBoundingBox (cpp/aget (.-meshes model) (cpp/int 0)))`.
 - **GLB works too** (`cel_shading.jank`, the old_car_new.glb toon car):
   `MODEL: ... Model basic data (glb) loaded successfully`. Reading a
-  Shader back off the material (`m->materials[0].shader`) is a
-  Shader-returning shim bound to a let-local, like any create-once
-  native.
+  Shader back off the material is `(.-shader (cpp/aget (.-materials m)
+  (cpp/int 0)))`, bound to a let-local like any create-once native.
 - **Animations, deep Mesh edits and bare Materials work too**
   (2026-07-11): `LoadModelAnimations`' `ModelAnimation*` + `int*`
   out-param stay behind C statics with index-based wrappers, and
   `UpdateModelAnimation` runs per frame (`shadowmap_rendering.jank`);
   a `texcoords2` channel can be RL_MALLOC'd, filled and wired to a
   vertex attribute through `(cpp/& mesh)` (`lightmap_rendering.jank`);
-  `LoadMaterialDefault` binds by value with `(cpp/& material)`
-  field-write shims (`mesh_instancing.jank`, which also proves
-  `DrawMeshInstanced` over a C-static Matrix array).
+  `LoadMaterialDefault` binds by value and its fields are written with
+  `cpp/=` (`mesh_instancing.jank`, which also proves `DrawMeshInstanced`
+  over a `cpp/MemAlloc` Matrix array).
 - **Every model format is proven** (2026-07-11): OBJ (`model_loading`),
   GLB (`cel_shading`), IQM incl. separate animation files
   (`loading_iqm`), M3D incl. skeleton access (`loading_m3d`), and VOX
@@ -66,8 +63,8 @@ handle it. The ASCII-only restriction is about COMMENTS (the em-dash
 ## Compute shaders work (GL 4.3 build, 2026-07-11)
 
 `rlgl_compute.jank` proves the whole compute pipeline: compile
-(`rlLoadShader src RL_COMPUTE_SHADER` + `rlLoadShaderProgramCompute`,
-kept in a path-taking C shim), SSBOs (`rlLoadShaderBuffer` with
+(`rlLoadShader src RL_COMPUTE_SHADER` + `rlLoadShaderProgramCompute`),
+SSBOs (`rlLoadShaderBuffer` with
 `cpp/nullptr` data), `rlBindShaderBuffer`, and
 `rlComputeShaderDispatch`, all direct rlgl calls with jank-int ids.
 Prerequisites and patterns:
@@ -88,8 +85,8 @@ Prerequisites and patterns:
   classic ping-pong buffer swap (`ssboA <-> ssboB`) is just `recur`
   with the loop vars exchanged. No native value crosses the loop.
 - A CPU-side staging struct uploaded with `rlUpdateShaderBuffer`
-  (`&struct` + sizeof) stays a `cpp/raw` static behind
-  buffer/count/flush wrappers, like any frame-crossing native state.
+  (`&struct` + sizeof) is a `cpp/MemAlloc` array behind a box, filled with
+  `cpp/aget` / `cpp/=`.
 
 ## rlgl and textures (from the shapes-completing arc)
 
@@ -163,8 +160,8 @@ outer-let local, and drives `BeginMode3D`/`EndMode3D`; `DrawGrid` and
   on an OUTER-let Camera3D, and the mutation
   persists across frames (probe: 100 orbital frames drifted position.x
   from 10.0 to 14.03); see `camera_3d_free.jank`. Struct FIELD writes
-  still have no jank syntax; a one-line pointer shim does them
-  (`jank_cam_retarget`). The older per-frame-rebuild workaround remains
+  are `cpp/=` on the field: `(cpp/= (.-x (.-target c)) (cpp/float v))`.
+  The older per-frame-rebuild workaround remains
   valid and simpler when the camera path is fully jank-driven:
   `billboard_rendering.jank` constructs the whole `cpp/Camera3D` as a
   frame-let local from an accumulated angle, and `DrawBillboard*`

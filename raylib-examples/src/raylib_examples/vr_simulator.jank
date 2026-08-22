@@ -10,15 +10,14 @@
   Based on raylib/examples/core/core_vr_simulator.c (3/4 complexity).
 
   jank-native notes:
-  - The whole VR pipeline is native values jank can't build or carry: a
-    VrDeviceInfo filled with designated-initializer scalar + float[]
-    fields, the VrStereoConfig from LoadVrStereoConfig, the distortion
-    Shader (fed config.leftLensCenter / device.lensDistortionValues
-    float-array pointers straight into SetShaderValue's void*), the
-    HMD-sized RenderTexture and the first-person Camera. So init, the
-    stereo scene render, the distortion blit and cleanup live in one
-    cpp/raw shim over static state; jank owns the window lifecycle, the
-    frame loop, the frame boundaries and DrawFPS."
+  - The whole VR pipeline is native values: a VrDeviceInfo whose scalar
+    and float[] fields are filled with cpp/=, the VrStereoConfig from
+    LoadVrStereoConfig, the distortion Shader (fed
+    config.leftLensCenter / device.lensDistortionValues array pointers
+    straight into SetShaderValue's void*), the HMD-sized RenderTexture
+    and the first-person Camera. Each is boxed where it is created, so
+    init, the stereo render, the distortion blit and cleanup are all
+    jank."
   (:include "raylib.h"))
 
 (def WIDTH 800)

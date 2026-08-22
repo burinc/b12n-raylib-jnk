@@ -10,13 +10,15 @@
   Based on raylib/examples/shaders/shaders_shadowmap_rendering.c
 
   jank-native notes:
-  - FIRST MODEL ANIMATIONS: LoadModelAnimations' ModelAnimation* +
-    int* out-param stay behind C-side statics; jank drives
+  - FIRST MODEL ANIMATIONS: LoadModelAnimations' ModelAnimation* and
+    int* out-param go through a box and (cpp/& n); jank drives
     UpdateModelAnimation by index + frame number each frame.
-  - The depth-ONLY framebuffer (no color attachment) is the
-    depth-writing shim minus the color texture, verbatim.
-  - DrawScene draws two Models - a jank helper cannot take them
-    (rule 2), so the scene stays a C shim called from both passes.
+  - The depth-ONLY framebuffer (no color attachment) is
+    rendertex.jank's load-shadowmap!, the depth target minus the color
+    texture.
+  - DrawScene draws two Models - a jank helper cannot take them bare
+    (rule 2), so both arrive boxed and the same helper serves both
+    passes.
   - The light direction threads as three jank reals, hand-normalized;
     the light's orthographic Camera3D is rebuilt inline each frame
     from them (the per-frame-camera pattern).

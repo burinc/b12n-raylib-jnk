@@ -33,7 +33,7 @@ the native bool is only ever a condition, never a returned branch value
 
 | Trap | Symptom | Fix | Proof |
 |---|---|---|---|
-| `mod`/`quot` return reals | `expected integer found small_real` at an int param, or a broken `nth` | wrap in `(int ...)` | everywhere; `writing_anim.jank` |
+| `mod`/`quot`/`rem` return reals | `expected integer found small_real` at an int param, or a broken `nth` | wrap in `(int ...)` | everywhere; `writing_anim.jank` |
 | `cpp/float` wants a REAL arg | `expected real found small_integer` | `(cpp/float (+ 0.0 n))` | `lines_drawing.jank` boxes `GetMouseX` |
 | `(/ int int)` shape is unreliable | subtle | precompute constants or `(int (quot ...))` | `window_letterbox.jank` uses `(int (/ GAME-H 10))` |
 | `min`/`max` reject a raw C double | `invalid operands to binary expression` deep in math.hpp | box first with `(+ 0.0 x)`, or clamp with `if` | `dashed_line.jank`; isolated to min/max only; `+ - * / < <= =` all take raw doubles (`ellipse_collision.jank`) |

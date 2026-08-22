@@ -9,12 +9,12 @@
 
   jank-native notes:
   - First DrawMeshInstanced + first bare-Material use: the 10k Matrix
-    transform array lives as a C static (640 KB) filled by a shim
-    (random translate x rotate, raymath in C); DrawMeshInstanced is
-    called through a shim that hands over the array pointer.
+    transform array is cpp/MemAlloc (640 KB) filled in jank (random
+    translate x rotate through raymath), and the pointer goes straight
+    to DrawMeshInstanced.
   - LoadMaterialDefault returns a Material by value into a let-local;
-    its .shader / .maps[].color writes are (cpp/& material) shims,
-    exactly like the Model material pattern.
+    its .shader / .maps[].color writes are cpp/= on the field, exactly
+    like the Model material pattern.
   - DrawMesh takes the Mesh, Material and an inline MatrixTranslate
     all by value - direct call."
   (:require [raylib-examples.rlights :as rl]

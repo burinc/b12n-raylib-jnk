@@ -75,6 +75,9 @@ Same rule each time, but the next one never looks like the last:
    `Material &`. Inline the lookup.
 4. **`cpp/=` yields the assigned lvalue.** A fn whose last form is an
    assignment tries to return a native reference. End it in an explicit `nil`.
+5. **A closure counts as a fn boundary.** `dotimes` and `doseq` build one, so
+   a native pointer captured by either arrives as an `object_ref` and
+   `cpp/aget` has no overload for it. `loop`/`recur` is inline and works.
 
 Corollary: a boxed copy **shares the pointer members** of the original.
 `Shader` is `{unsigned int id; int *locs;}`, `Model` holds
@@ -113,7 +116,9 @@ and mid-run reallocation all work.
 ### The `cpp/raw` static this replaces
 
 Earlier ports parked such values in a `cpp/raw` static behind accessor fns.
-Prefer the box; the static carries a trap that cost real debugging time.
+Every one of those has since been replaced by a box; only the four
+callback-blocked examples still hold C state at all. Prefer the box. The
+static carries a trap that cost real debugging time.
 
 **`cpp/raw` statics are duplicated PER JANK FN.** Every jank fn referencing
 the shims gets its OWN copy. A helper fn writing the "same" static writes a
@@ -124,9 +129,8 @@ silently "resets" across fn boundaries, and reading through a zeroed struct's
 pointer field segfaults.
 
 If you must use one, route EVERY read/write through ONE jank fn (in practice
-`-main`), inlining helper logic there. `unicode_ranges.jank` inlines the C's
-`AddCodepointRange` into `-main` for exactly this reason. Pure-jank helpers
-(no shim calls) stay safe to factor out.
+`-main`), inlining helper logic there. Pure-jank helpers (no shim calls) stay
+safe to factor out.
 
 ## Create-once native resources
 

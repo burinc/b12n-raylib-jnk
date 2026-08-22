@@ -8,10 +8,10 @@
   Based on raylib/examples/models/models_loading_m3d.c
 
   jank-native notes:
-  - First M3D format; the usual animation shims.
-  - The C's DrawModelSkeleton helper walks skeleton.bones[] +
-    keyframePoses[frame][] native arrays - it stays a verbatim C shim
-    taking the model, animation index and frame."
+  - First M3D format.
+  - The C's DrawModelSkeleton helper walks skeleton.bones[] and
+    keyframePoses[frame][] with cpp/aget, taking the model and the
+    animation array boxed."
   (:include "raylib.h"))
 
 (def WIDTH 800)

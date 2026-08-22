@@ -10,7 +10,7 @@
   Based on raylib/examples/shaders/shaders_depth_rendering.c
 
   jank-native notes:
-  - Same verbatim rlgl FBO shim pair as depth-writing (a depth
+  - Same rendertex.jank depth target as depth-writing (a depth
     TEXTURE instead of raylib's default renderbuffer); the depth
     texture is read back with (.-depth target) and handed to both
     SetShaderValueTexture and DrawTexture.

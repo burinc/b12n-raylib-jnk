@@ -13,8 +13,9 @@
     struct; here each native result is BOXED into a jank map the
     moment it's read (hit?/dist/point/normal as reals) and the
     closest-hit logic runs over plain jank data, in the C's order.
-  - The per-mesh loop (tower.meshes[m] + tower.transform) stays a
-    RayCollision-returning C shim, first-hit-wins like the C.
+  - The per-mesh loop reads tower.meshes[m] with cpp/aget and keeps the
+    RayCollision inside the let that produced it, boxing the fields out
+    as jank numbers; first-hit-wins like the C.
   - GetRayCollisionQuad/Triangle/Sphere with inline Vector3 args and
     Vector3Barycenter on the native point complete the collision-API
     coverage."

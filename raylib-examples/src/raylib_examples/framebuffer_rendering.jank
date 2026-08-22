@@ -11,11 +11,10 @@
   jank-native notes:
   - Two UpdateCamera((cpp/& cam) mode) cameras at once (FREE observer +
     ORBITAL subject), each an outer-let Camera3D mutated in place.
-  - The C's DrawCameraPrism is example-defined C over raymath matrices
-    (GetCameraMatrix / MatrixPerspective / MatrixInvert) with no jank
-    surface - kept verbatim in a cpp/raw shim taking the camera by
-    pointer (color fixed to GREEN inside; raymath.h is header-only, so
-    including it provides the implementations).
+  - The C's DrawCameraPrism is example-defined maths over raymath
+    (GetCameraMatrix / MatrixPerspective / MatrixInvert). Each matrix
+    stays a let-local feeding the next raymath call in the same scope,
+    so none crosses a fn boundary and the whole thing is jank.
   - Both half-screen RenderTextures are create-once outer-let locals;
     the y-flipped source/dest/crop rects build inline at each
     DrawTexturePro."

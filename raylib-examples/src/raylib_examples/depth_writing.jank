@@ -13,8 +13,8 @@
   - The C builds its custom framebuffer with rlgl calls
     (rlLoadFramebuffer / rlLoadTexture / rlLoadTextureDepth /
     rlFramebufferAttach) and hand-fills the RenderTexture2D struct
-    fields. That stays a verbatim C shim pair (load + unload), with
-    the internal TRACELOG macro swapped for the public TraceLog.
+    fields. That is rendertex.jank's load-depth! / unload-depth!, which
+    returns the target boxed.
   - Everything else is proven ground: UpdateCamera((cpp/& camera)
     CAMERA_ORBITAL) on an outer-let Camera3D, inline cpp/Vector3 draw
     args, and the y-flipped DrawTextureRec blit."

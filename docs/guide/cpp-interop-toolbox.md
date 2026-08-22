@@ -44,68 +44,84 @@ Keep build-mutate-read-unload inside one `let` and carry only the index
 all-native `f64` chain does (see
 [`type-checking-and-coercion.md`](type-checking-and-coercion.md)).
 
-## Pointer arithmetic on a runtime arg needs `cpp/raw`
+## Pointer arithmetic: `cpp/unsafe-cast`
 
-`cpp/cast` uses `convert`, not `reinterpret_cast`, so it cannot turn a
-`void*` into `unsigned char*` for byte math. One shim does it:
+`cpp/cast` uses `convert`, not `reinterpret_cast`, so it cannot turn a `void*`
+into `unsigned char*` for byte math. `cpp/unsafe-cast` can:
 
 ```clojure
-(cpp/raw "static const void* jank_gif_frame_ptr(void* data, int offset) {
-  return (const void*)(((unsigned char*)data) + offset);
-}")
-(cpp/UpdateTexture tex (cpp/jank_gif_frame_ptr (.-data img) (int offset)))
+(cpp/UpdateTexture tex
+  (cpp/unsafe-cast (:* (:const cpp/void))
+    (cpp/+ (cpp/unsafe-cast (:* (:unsigned cpp/char)) (.-data img))
+           (cpp/int offset))))
 ```
 
-`gif_player.jank`. Keep `offset` an `int`: `mod`/`quot` return reals, which
-the shim's `int` param rejects with `expected integer found small_real`.
+`gif_player.jank`. Keep `offset` a native int: `mod`/`quot`/`rem` return reals.
 
-`cpp/raw` globals are also the escape hatch for array APIs: a `float[9]`
-declared in a `cpp/raw` block decays to `float*` when passed straight to
-`(cpp/ImageKernelConvolution (cpp/& img) cpp/jank_sharpen_kernel 9)`
-(`image_kernel.jank`).
+Same pair reaches native arrays. `cpp/MemAlloc` + `cpp/unsafe-cast` gives a
+`float*` that `cpp/aget` and `cpp/=` fill element-wise, which is how
+`image_kernel.jank` builds its convolution kernels and how
+`spectrum_visualizer.jank` holds its FFT buffers. `(cpp/new (:array T n))`
+does not work; this is the way around it, and it costs ergonomics rather than
+capability.
 
-## Shader uniforms: per-type scalar C setters
+## Shader uniforms: `shaders.jank`
 
-`SetShaderValue` wants a `const void*` at native `float[]` data, which jank
-cannot form from a jank vector. Give each uniform type its own C fn that
-builds the array *inside* C:
+`SetShaderValue` wants a `const void*` at native `float[]` data. raylib's
+`Vector2`/`3`/`4` **are** contiguous float arrays, so one can be constructed
+inline as the argument and no staging buffer is needed:
 
-```c
-static void jank_set_vec4(Shader s, int loc, double a, double b, double c, double d) {
-  float v[4] = { (float)a, (float)b, (float)c, (float)d };
-  SetShaderValue(s, loc, v, SHADER_UNIFORM_VEC4);
-}
+```clojure
+(cpp/SetShaderValue (cpp/* s) (int loc)
+                    (cpp/new cpp/Vector4 (cpp/float x) (cpp/float y)
+                                         (cpp/float z) (cpp/float w))
+                    cpp/SHADER_UNIFORM_VEC4)
 ```
 
-One `cpp/` call per uniform, no shared buffer, and the `(float)` cast happens
-in C so you skip the `cpp/float`/`(+ 0.0 …)` dance
-(`rounded_rectangle_shader.jank`, `color_correction.jank`).
+`shaders.jank` wraps that as `set-int!`, `set-float!`, `set-vec2!`/`3!`/`4!`
+and `set-shader-loc!`, taking a boxed `Shader`. Every shader example in the
+repo uses it; none carries a C setter.
 
-- **From a native struct**: don't read `.-x`/`.-y`/`.-z` in jank. Pass
-  `(cpp/& camera)` and read the fields in C (`raymarching.jank`).
-- **Array uniforms** (`SetShaderValueV`) still need a staging buffer: a
-  file-level `static int jank_ui_buf[24]`, an index setter, and a send fn.
-  Fill it with `loop`/`nth`, then send once. All calls must sit in one fn,
-  per the static rule below (`palette_switch.jank`).
-- An older static-staging-buffer approach is still in
-  `texture_outline.jank`, `texture_waves.jank`, `mandelbrot_set.jank`.
+- **From a native struct**, read `.-x`/`.-y`/`.-z` and pass them
+  (`raymarching.jank`).
+- **Array uniforms** (`SetShaderValueV`) fill a `cpp/MemAlloc` array
+  (`palette_switch.jank`).
 - `GetShaderLocation` returns a plain int; `(int (cpp/GetShaderLocation …))`
   boxes it. `LoadShader cpp/nullptr path` takes the default vertex shader.
 
-## Callback-taking APIs: define the callback in `cpp/raw`
+## Callback-taking APIs: the one genuine gap
 
-jank cannot form a C function pointer, but a callback defined inside a
-`cpp/raw` block is ordinary C, and a sibling wrapper attaches it:
+**There is no way to hand a jank fn to a C API that takes a function
+pointer.** Confirmed three ways: the complete set of `cpp/` special forms
+(`box cast delete dsl new raw unbox unsafe-cast value`) has nothing for it,
+the compiler has no such conversion, and the call is rejected outright:
+
+```
+error: No matching call to 'AttachAudioMixedProcessor' function.
+       With argument 0 having type 'jank::runtime::object_ref &'.
+```
+
+This is the only remaining reason any example here still carries `cpp/raw`.
+A callback defined inside a `cpp/raw` block is ordinary C, and a sibling
+wrapper attaches it:
 
 ```c
 static void jank_process_audio(void *buffer, unsigned int frames) { ... }
 static void jank_attach_processor(void) { AttachAudioMixedProcessor(jank_process_audio); }
 ```
 
-Proven for audio-thread DSP (`mixed_processor.jank`), `SetTraceLogCallback`
-(`custom_logging.jank`, installed before `InitWindow`), and raw audio streams
-(`raw_stream.jank`). jank tunes parameters through setters and reads results
-through accessors, never touching the callback thread.
+Four examples need it: `mixed_processor.jank`
+(`AttachAudioMixedProcessor`), `stream_effects.jank`
+(`AttachAudioStreamProcessor`), `stream_callback.jank`
+(`SetAudioStreamCallback`), and `custom_logging.jank`
+(`SetTraceLogCallback`, which is variadic as well, so it is blocked twice
+over). jank tunes parameters through setters and reads results through
+accessors, never touching the callback thread.
+
+**Being pushed from a callback is the blocker, not audio work.**
+`amp_envelope.jank` and `raw_stream.jank` do the same 4096-sample refill in
+pure jank because they pull from the main loop instead. Only the push
+direction needs C.
 
 **Gotcha: a C callback that `printf`s must `fflush(stdout)` itself.** raylib's
 own `TraceLog` flushes; your replacement does not inherit that. stdout is
@@ -136,16 +152,16 @@ and why an accessor cannot be factored out, are in
   `(cpp/aget (.-glyphs font) (cpp/int i))` returns a `GlyphInfo` by value with
   working `.-value`/`.-advanceX` reads. Verified by probe, not yet
   load-bearing in a committed example, so keep the probe habit.
-- **`Vector2 *points` array APIs** (`DrawSplineLinear`, `DrawTriangleStrip`)
-  are unproven, but the write direction is: `codepoints_loading.jank` fills a
-  `cpp/raw` static `int[512]` through a setter shim and hands the pointer to
-  `LoadFontEx`. A `Vector2[]` should work the same way, and `cpp/new` +
-  `cpp/=` are proven. Visual-equivalent workarounds still apply: per-segment
-  `DrawLineEx` (`math_sine_cosine.jank`) or recomputing vertices inline
-  (`triangle_strip.jank`). By-value struct APIs like `DrawLineDashed` are fine.
+- **Native arrays are built with `cpp/MemAlloc` + `cpp/unsafe-cast`**, not
+  `cpp/new`. `codepoints_loading.jank` fills an `int*` that way and hands it
+  to `LoadFontEx`; a `Vector2[]` works the same. Visual-equivalent
+  workarounds still apply where they are simpler: per-segment `DrawLineEx`
+  (`math_sine_cosine.jank`) or recomputing vertices inline
+  (`triangle_strip.jank`).
 - **`Image` pixel manipulation and the `rlgl` API are NOT blocked.** The
   `raylib-sys` package ships `rlgl.h` next to `raylib.h` and the rlgl
   functions are compiled into `libraylib`, so `(:include "raylib.h" "rlgl.h")`
   just works (`rlgl_triangle.jank`).
-- **Mutable C string buffers** (`TextCopy` and friends) are not worth
-  simulating; `text_strings_management` was skipped on those grounds.
+- **Mutable C string buffers** (`TextCopy` and friends) are the subject of
+  `strings_management.jank`, which keeps its C on those grounds rather than
+  simulating them.

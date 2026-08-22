@@ -13,9 +13,9 @@
   - The C recreates its RenderTexture2D on every resize/mode change with a
     size computed from the CURRENT window - a native value that must
     persist across frames but cannot thread through loop/recur (rule 2).
-    NEW pattern: the target lives in a cpp/raw static
-    (jank_resize_target / jank_get_target); each frame re-fetches it into
-    a let-local, which never crosses a jank fn boundary.
+    NEW pattern: the target lives as an opaque box in a jank atom, so
+    the box can be swapped on resize; each frame unboxes it into a
+    let-local, which never crosses a jank fn boundary.
   - The C's six Keep* helpers write through Rectangle* out-params; the
     port computes plain jank maps {:sx .. :dh} instead - pure math, no
     pointers. (The C's KeepHeightCentered[Integer] pair and
