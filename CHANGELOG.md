@@ -41,12 +41,12 @@ example ports that preceded it are in the git history and in
 
 ### Changed
 
-- **`cpp/raw` down from 78 blocks to 6**, across 214 sources. Four are
-  blocked on a real jank gap (a jank fn cannot become a C function pointer,
-  and `custom_logging` is variadic on top of that); `point_rendering` keeps
-  its C deliberately, since porting it would make the CPU path slower than
-  raylib's real cost and misrepresent the comparison the example exists to
-  demonstrate; `input_gamepad` awaits a gamepad to verify against.
+- **`cpp/raw` down from 78 blocks to 5**, across 214 sources, and every
+  example that can be ported has been. Four are blocked on a real jank gap (a
+  jank fn cannot become a C function pointer, and `custom_logging` is variadic
+  on top of that); `point_rendering` keeps its C deliberately, since porting
+  it would make the CPU path slower than raylib's real cost and misrepresent
+  the comparison the example exists to demonstrate.
 - Four examples previously recorded as "measured keeps" were re-examined and
   ported: `screen_buffer`, `spectrum_visualizer`, `animation_blend_custom`
   and `strings_management`. Three had numbers taken against boxed jank
@@ -54,8 +54,9 @@ example ports that preceded it are in the git history and in
   `animation_blend_custom`'s number had never been measured at all, and
   `strings_management`'s stated reason was backwards, since jank strings and
   `const char *` convert both ways.
-- `automation_events`, `text_3d_drawing` and `decals` ported: the last three
-  whole-example C blocks that were only ever a matter of work.
+- `automation_events`, `text_3d_drawing`, `decals` and `input_gamepad`
+  ported: the last whole-example C blocks that were only ever a matter of
+  work. `input_gamepad` was verified on a DualSense.
 
 - **raylib now comes from the official
   [`org.jank-lang.commons/raylib-sys`](https://github.com/jank-lang/commons)

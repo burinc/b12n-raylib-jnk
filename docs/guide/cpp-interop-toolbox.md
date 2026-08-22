@@ -102,7 +102,7 @@ error: No matching call to 'AttachAudioMixedProcessor' function.
 ```
 
 This is the only remaining *limitation* reason any example here carries
-`cpp/raw`: 4 of the 6 blocks left in 214 sources.
+`cpp/raw`: 4 of the 5 blocks left in 214 sources.
 A callback defined inside a `cpp/raw` block is ordinary C, and a sibling
 wrapper attaches it:
 
