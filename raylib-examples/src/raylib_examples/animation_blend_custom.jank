@@ -1,159 +1,185 @@
 (ns raylib-examples.animation-blend-custom
   "raylib [models] example - animation blend custom, ported to jank.
 
-  PER-BONE animation blending: the greenman walks with his legs while
-  his upper body attacks - each bone picks its own blend factor by
-  name (spine/arms/head follow the attack, the rest the walk). SPACE
-  toggles between that split and a uniform 50/50 blend of the two
-  animations. Orbital camera. ESC quits.
+  Two glTF animations blended per bone, with CPU skinning. SPACE toggles
+  between uniform 50/50 blending and a split where the upper body plays
+  the attack and the lower body keeps walking.
   Based on raylib/examples/models/models_animation_blend_custom.c
 
   jank-native notes:
-  - The C's custom UpdateModelAnimationBones (per-bone
-    Vector3Lerp/QuaternionSlerp against the bind pose, then a full
-    CPU-skinning pass re-uploading vertex buffers) and its
-    IsUpperBodyBone name classifier stay verbatim C shims - jank
-    drives them with the two animation indices, wrapped frames and
-    the blend mode.
-  - The skinning shader loads and lands on materials[1] (CPU
-    skinning still runs; the shader covers the GPU-skinning build
-    variant, matching the C)."
-  (:include "raylib.h" "raymath.h" "rlgl.h" "string.h"))
-
-;; The C's per-bone blending + CPU skinning, verbatim (pointer-heavy).
-(cpp/raw "static ModelAnimation *jank_anims = NULL;
-static int jank_anims_count = 0;
-static int jank_load_anims(const char* path) {
-  jank_anims = LoadModelAnimations(path, &jank_anims_count);
-  return jank_anims_count;
-}
-static int jank_anim_keyframes(int i) { return jank_anims[i].keyframeCount; }
-static const char* jank_anim_name(int i) { return jank_anims[i].name; }
-static void jank_model_set_shader1(Model* m, Shader s) { m->materials[1].shader = s; }
-
-static bool jank_is_upper_body_bone(const char *boneName) {
-  if (TextIsEqual(boneName, \"spine\") || TextIsEqual(boneName, \"spine1\") || TextIsEqual(boneName, \"spine2\") ||
-      TextIsEqual(boneName, \"chest\") || TextIsEqual(boneName, \"upperChest\") ||
-      TextIsEqual(boneName, \"neck\") || TextIsEqual(boneName, \"head\") ||
-      TextIsEqual(boneName, \"shoulder\") || TextIsEqual(boneName, \"shoulder_L\") || TextIsEqual(boneName, \"shoulder_R\") ||
-      TextIsEqual(boneName, \"upperArm\") || TextIsEqual(boneName, \"upperArm_L\") || TextIsEqual(boneName, \"upperArm_R\") ||
-      TextIsEqual(boneName, \"lowerArm\") || TextIsEqual(boneName, \"lowerArm_L\") || TextIsEqual(boneName, \"lowerArm_R\") ||
-      TextIsEqual(boneName, \"hand\") || TextIsEqual(boneName, \"hand_L\") || TextIsEqual(boneName, \"hand_R\") ||
-      TextIsEqual(boneName, \"clavicle\") || TextIsEqual(boneName, \"clavicle_L\") || TextIsEqual(boneName, \"clavicle_R\"))
-    return true;
-  if (strstr(boneName, \"spine\") != NULL || strstr(boneName, \"chest\") != NULL ||
-      strstr(boneName, \"neck\") != NULL || strstr(boneName, \"head\") != NULL ||
-      strstr(boneName, \"shoulder\") != NULL || strstr(boneName, \"arm\") != NULL ||
-      strstr(boneName, \"hand\") != NULL || strstr(boneName, \"clavicle\") != NULL)
-    return true;
-  return false;
-}
-
-static void jank_update_anim_bones(Model *model, int i0, int frame0,
-                                   int i1, int frame1, double blendIn, int upperBodyBlend) {
-  ModelAnimation *anim0 = &jank_anims[i0];
-  ModelAnimation *anim1 = &jank_anims[i1];
-  float blend = (float)blendIn;
-  if ((anim0->boneCount != 0) && (anim0->keyframePoses != NULL) &&
-      (anim1->boneCount != 0) && (anim1->keyframePoses != NULL) &&
-      (model->skeleton.boneCount != 0) && (model->skeleton.bindPose != NULL)) {
-    blend = fminf(1.0f, fmaxf(0.0f, blend));
-    if (frame0 >= anim0->keyframeCount) frame0 = anim0->keyframeCount - 1;
-    if (frame1 >= anim1->keyframeCount) frame1 = anim1->keyframeCount - 1;
-    if (frame0 < 0) frame0 = 0;
-    if (frame1 < 0) frame1 = 0;
-
-    int boneCount = model->skeleton.boneCount;
-    if (anim0->boneCount < boneCount) boneCount = anim0->boneCount;
-    if (anim1->boneCount < boneCount) boneCount = anim1->boneCount;
-
-    for (int boneIndex = 0; boneIndex < boneCount; boneIndex++) {
-      float boneBlendFactor = blend;
-      if (upperBodyBlend) {
-        /* upper body follows anim1 (attack), lower body anim0 (walk) */
-        if (jank_is_upper_body_bone(model->skeleton.bones[boneIndex].name))
-          boneBlendFactor = blend;
-        else boneBlendFactor = 1.0f - blend;
-      }
-
-      Transform *bindTransform = &model->skeleton.bindPose[boneIndex];
-      Transform *animTransform0 = &anim0->keyframePoses[frame0][boneIndex];
-      Transform *animTransform1 = &anim1->keyframePoses[frame1][boneIndex];
-
-      Transform blended = { 0 };
-      blended.translation = Vector3Lerp(animTransform0->translation, animTransform1->translation, boneBlendFactor);
-      blended.rotation = QuaternionSlerp(animTransform0->rotation, animTransform1->rotation, boneBlendFactor);
-      blended.scale = Vector3Lerp(animTransform0->scale, animTransform1->scale, boneBlendFactor);
-
-      Matrix bindMatrix = MatrixMultiply(MatrixMultiply(
-          MatrixScale(bindTransform->scale.x, bindTransform->scale.y, bindTransform->scale.z),
-          QuaternionToMatrix(bindTransform->rotation)),
-          MatrixTranslate(bindTransform->translation.x, bindTransform->translation.y, bindTransform->translation.z));
-
-      Matrix blendedMatrix = MatrixMultiply(MatrixMultiply(
-          MatrixScale(blended.scale.x, blended.scale.y, blended.scale.z),
-          QuaternionToMatrix(blended.rotation)),
-          MatrixTranslate(blended.translation.x, blended.translation.y, blended.translation.z));
-
-      model->boneMatrices[boneIndex] = MatrixMultiply(MatrixInvert(bindMatrix), blendedMatrix);
-    }
-
-    /* CPU skinning: rebuild anim vertex/normal buffers + upload */
-    for (int m = 0; m < model->meshCount; m++) {
-      Mesh mesh = model->meshes[m];
-      Vector3 animVertex = { 0 };
-      Vector3 animNormal = { 0 };
-      const int vertexValuesCount = mesh.vertexCount*3;
-      int boneIndex = 0;
-      int boneCounter = 0;
-      float boneWeight = 0.0f;
-      bool bufferUpdateRequired = false;
-
-      if ((mesh.boneWeights == NULL) || (mesh.boneIndices == NULL) ||
-          (mesh.animVertices == NULL) || (mesh.animNormals == NULL)) continue;
-
-      for (int vCounter = 0; vCounter < vertexValuesCount; vCounter += 3) {
-        mesh.animVertices[vCounter] = 0;
-        mesh.animVertices[vCounter + 1] = 0;
-        mesh.animVertices[vCounter + 2] = 0;
-        if (mesh.animNormals != NULL) {
-          mesh.animNormals[vCounter] = 0;
-          mesh.animNormals[vCounter + 1] = 0;
-          mesh.animNormals[vCounter + 2] = 0;
-        }
-
-        for (int j = 0; j < 4; j++, boneCounter++) {
-          boneWeight = mesh.boneWeights[boneCounter];
-          boneIndex = mesh.boneIndices[boneCounter];
-          if (boneWeight == 0.0f) continue;
-          animVertex = (Vector3){ mesh.vertices[vCounter], mesh.vertices[vCounter + 1], mesh.vertices[vCounter + 2] };
-          animVertex = Vector3Transform(animVertex, model->boneMatrices[boneIndex]);
-          mesh.animVertices[vCounter] += animVertex.x*boneWeight;
-          mesh.animVertices[vCounter + 1] += animVertex.y*boneWeight;
-          mesh.animVertices[vCounter + 2] += animVertex.z*boneWeight;
-          bufferUpdateRequired = true;
-
-          if ((mesh.normals != NULL) && (mesh.animNormals != NULL)) {
-            animNormal = (Vector3){ mesh.normals[vCounter], mesh.normals[vCounter + 1], mesh.normals[vCounter + 2] };
-            animNormal = Vector3Transform(animNormal, MatrixTranspose(MatrixInvert(model->boneMatrices[boneIndex])));
-            mesh.animNormals[vCounter] += animNormal.x*boneWeight;
-            mesh.animNormals[vCounter + 1] += animNormal.y*boneWeight;
-            mesh.animNormals[vCounter + 2] += animNormal.z*boneWeight;
-          }
-        }
-      }
-
-      if (bufferUpdateRequired) {
-        rlUpdateVertexBuffer(mesh.vboId[SHADER_LOC_VERTEX_POSITION], mesh.animVertices, mesh.vertexCount*3*sizeof(float), 0);
-        if (mesh.normals != NULL) rlUpdateVertexBuffer(mesh.vboId[SHADER_LOC_VERTEX_NORMAL], mesh.animNormals, mesh.vertexCount*3*sizeof(float), 0);
-      }
-    }
-  }
-}")
+  - Every native value here (Transform, Matrix, Quaternion, Vector3)
+    stays inside the let that produced it and is consumed by the next
+    raymath call in the same scope, so none of them ever crosses a fn
+    boundary. That is what makes the bone loop expressible at all.
+  - The ModelAnimation array and the Model are reached through boxes.
+  - The skinning loop uses cpp/ operators on native ints and doubles.
+    It is small here (196 vertices, and the C's own cost is 0.065 ms a
+    frame) so this is not load-bearing, but the loops are float array
+    walks and native ops are what those are for.
+  - The upper-body bone test keeps BOTH of the C's blocks. They are not
+    redundant: strstr is case-sensitive, so upperChest, upperArm and
+    lowerArm are matched only by the exact-name list. Folding the two
+    together silently drops them."
+  (:require [clojure.string :as string])
+  (:include "raylib.h" "raymath.h" "rlgl.h"))
 
 (def WIDTH 800)
 (def HEIGHT 450)
 (def RES "../jank-raylib-sys/raylib/examples/models/resources/")
+
+(def ^:private UPPER-BODY-NAMES
+  #{"spine" "spine1" "spine2" "chest" "upperChest" "neck" "head"
+    "shoulder" "shoulder_L" "shoulder_R"
+    "upperArm" "upperArm_L" "upperArm_R"
+    "lowerArm" "lowerArm_L" "lowerArm_R"
+    "hand" "hand_L" "hand_R"
+    "clavicle" "clavicle_L" "clavicle_R"})
+
+(def ^:private UPPER-BODY-SUBSTRINGS
+  ["spine" "chest" "neck" "head" "shoulder" "arm" "hand" "clavicle"])
+
+(defn- upper-body-bone?
+  "The C's exact-match list, then its case-sensitive strstr list. Both are
+  needed: upperChest / upperArm / lowerArm match no lowercase substring."
+  [nm]
+  (or (contains? UPPER-BODY-NAMES nm)
+      (boolean (some (fn [s] (string/includes? nm s)) UPPER-BODY-SUBSTRINGS))))
+
+(defn- blend-bones!
+  "Blend each bone's pose between the two animations and write the result
+  into model.boneMatrices."
+  [m-box anims-box i0 frame0 i1 frame1 blend upper?]
+  (let [m (cpp/unbox (:* cpp/Model) m-box)
+        anims (cpp/unbox (:* cpp/ModelAnimation) anims-box)
+        a0 (cpp/aget anims (cpp/int i0))
+        a1 (cpp/aget anims (cpp/int i1))
+        sk (.-skeleton (cpp/* m))
+        bone-count (min (int (+ 0.0 (.-boneCount sk)))
+                        (min (int (+ 0.0 (.-boneCount a0)))
+                             (int (+ 0.0 (.-boneCount a1)))))
+        kf0 (int (+ 0.0 (.-keyframeCount a0)))
+        kf1 (int (+ 0.0 (.-keyframeCount a1)))
+        f0 (max 0 (min frame0 (dec kf0)))
+        f1 (max 0 (min frame1 (dec kf1)))
+        blend (max 0.0 (min 1.0 blend))]
+    (loop [bi 0]
+      (when (< bi bone-count)
+        (let [bf (if upper?
+                   (if (upper-body-bone? (str (.-name (cpp/aget (.-bones sk) (cpp/int bi)))))
+                     blend
+                     (- 1.0 blend))
+                   blend)
+              w (cpp/float bf)
+              bind (cpp/aget (.-bindPose sk) (cpp/int bi))
+              t0 (cpp/aget (cpp/aget (.-keyframePoses a0) (cpp/int f0)) (cpp/int bi))
+              t1 (cpp/aget (cpp/aget (.-keyframePoses a1) (cpp/int f1)) (cpp/int bi))
+              tr (cpp/Vector3Lerp (.-translation t0) (.-translation t1) w)
+              rot (cpp/QuaternionSlerp (.-rotation t0) (.-rotation t1) w)
+              sc (cpp/Vector3Lerp (.-scale t0) (.-scale t1) w)
+              bind-m (cpp/MatrixMultiply
+                      (cpp/MatrixMultiply
+                       (cpp/MatrixScale (.-x (.-scale bind)) (.-y (.-scale bind))
+                                        (.-z (.-scale bind)))
+                       (cpp/QuaternionToMatrix (.-rotation bind)))
+                      (cpp/MatrixTranslate (.-x (.-translation bind))
+                                           (.-y (.-translation bind))
+                                           (.-z (.-translation bind))))
+              blend-m (cpp/MatrixMultiply
+                       (cpp/MatrixMultiply
+                        (cpp/MatrixScale (.-x sc) (.-y sc) (.-z sc))
+                        (cpp/QuaternionToMatrix rot))
+                       (cpp/MatrixTranslate (.-x tr) (.-y tr) (.-z tr)))]
+          (cpp/= (cpp/aget (.-boneMatrices (cpp/* m)) (cpp/int bi))
+                 (cpp/MatrixMultiply (cpp/MatrixInvert bind-m) blend-m)))
+        (recur (inc bi)))))
+  nil)
+
+(defn- skin-mesh!
+  "CPU skinning for one mesh: rebuild the anim vertex and normal buffers
+  from the bone matrices, then upload. Returns true if anything was
+  written, matching the C's bufferUpdateRequired."
+  [m-box mesh-index]
+  (let [m (cpp/unbox (:* cpp/Model) m-box)
+        mesh (cpp/aget (.-meshes (cpp/* m)) (cpp/int mesh-index))
+        bw (.-boneWeights mesh)
+        bidx (.-boneIndices mesh)
+        av (.-animVertices mesh)
+        an (.-animNormals mesh)
+        vs (.-vertices mesh)
+        ns (.-normals mesh)
+        bm (.-boneMatrices (cpp/* m))
+        normals? (cpp/!= ns (cpp/cast (:* cpp/float) cpp/nullptr))]
+    (if (or (cpp/== bw (cpp/cast (:* cpp/float) cpp/nullptr))
+            (cpp/== bidx (cpp/cast (:* (:unsigned cpp/char)) cpp/nullptr))
+            (cpp/== av (cpp/cast (:* cpp/float) cpp/nullptr))
+            (cpp/== an (cpp/cast (:* cpp/float) cpp/nullptr)))
+      false
+      (let [n3 (cpp/* (cpp/int (int (+ 0.0 (.-vertexCount mesh)))) (cpp/int 3))
+            wrote?
+            (loop [v (cpp/int 0) bc (cpp/int 0) wrote false]
+              (if (cpp/< v n3)
+                (do
+                  (cpp/= (cpp/aget av v) (cpp/float 0.0))
+                  (cpp/= (cpp/aget av (cpp/+ v (cpp/int 1))) (cpp/float 0.0))
+                  (cpp/= (cpp/aget av (cpp/+ v (cpp/int 2))) (cpp/float 0.0))
+                  (cpp/= (cpp/aget an v) (cpp/float 0.0))
+                  (cpp/= (cpp/aget an (cpp/+ v (cpp/int 1))) (cpp/float 0.0))
+                  (cpp/= (cpp/aget an (cpp/+ v (cpp/int 2))) (cpp/float 0.0))
+                  (let [w (loop [j (cpp/int 0) wrote wrote]
+                            (if (cpp/< j (cpp/int 4))
+                              (let [k (cpp/+ bc j)
+                                    weight (cpp/aget bw k)]
+                                (if (cpp/== weight (cpp/float 0.0))
+                                  (recur (cpp/+ j (cpp/int 1)) wrote)
+                                  (let [b (cpp/cast cpp/int (cpp/aget bidx k))
+                                        mat (cpp/aget bm b)
+                                        pv (cpp/Vector3Transform
+                                            (cpp/Vector3 (cpp/aget vs v)
+                                                         (cpp/aget vs (cpp/+ v (cpp/int 1)))
+                                                         (cpp/aget vs (cpp/+ v (cpp/int 2))))
+                                            mat)
+                                        ;; the C guards mesh.normals separately from
+                                        ;; animNormals; without this a model with no
+                                        ;; normals would read through a null pointer
+                                        nv (if normals?
+                                             (cpp/Vector3Transform
+                                              (cpp/Vector3 (cpp/aget ns v)
+                                                           (cpp/aget ns (cpp/+ v (cpp/int 1)))
+                                                           (cpp/aget ns (cpp/+ v (cpp/int 2))))
+                                              (cpp/MatrixTranspose (cpp/MatrixInvert mat)))
+                                             (cpp/Vector3 (cpp/float 0.0) (cpp/float 0.0)
+                                                          (cpp/float 0.0)))]
+                                    (cpp/= (cpp/aget av v)
+                                           (cpp/+ (cpp/aget av v) (cpp/* (.-x pv) weight)))
+                                    (cpp/= (cpp/aget av (cpp/+ v (cpp/int 1)))
+                                           (cpp/+ (cpp/aget av (cpp/+ v (cpp/int 1)))
+                                                  (cpp/* (.-y pv) weight)))
+                                    (cpp/= (cpp/aget av (cpp/+ v (cpp/int 2)))
+                                           (cpp/+ (cpp/aget av (cpp/+ v (cpp/int 2)))
+                                                  (cpp/* (.-z pv) weight)))
+                                    (when normals?
+                                      (cpp/= (cpp/aget an v)
+                                             (cpp/+ (cpp/aget an v) (cpp/* (.-x nv) weight)))
+                                      (cpp/= (cpp/aget an (cpp/+ v (cpp/int 1)))
+                                             (cpp/+ (cpp/aget an (cpp/+ v (cpp/int 1)))
+                                                    (cpp/* (.-y nv) weight)))
+                                      (cpp/= (cpp/aget an (cpp/+ v (cpp/int 2)))
+                                             (cpp/+ (cpp/aget an (cpp/+ v (cpp/int 2)))
+                                                    (cpp/* (.-z nv) weight))))
+                                    (recur (cpp/+ j (cpp/int 1)) true))))
+                              wrote))]
+                    (recur (cpp/+ v (cpp/int 3)) (cpp/+ bc (cpp/int 4)) w)))
+                wrote))]
+        (when wrote?
+          (let [bytes (cpp/cast cpp/int (cpp/* n3 (cpp/int 4)))]
+            (cpp/rlUpdateVertexBuffer
+             (cpp/cast cpp/int (cpp/aget (.-vboId mesh) (cpp/int 0)))
+             (cpp/unsafe-cast (:* (:const cpp/void)) av) bytes (cpp/int 0))
+            (when normals?
+              (cpp/rlUpdateVertexBuffer
+               (cpp/cast cpp/int (cpp/aget (.-vboId mesh) (cpp/int 2)))
+               (cpp/unsafe-cast (:* (:const cpp/void)) an) bytes (cpp/int 0)))))
+        wrote?))))
 
 (defn -main [& args]
   (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
@@ -165,16 +191,28 @@ static void jank_update_anim_bones(Model *model, int i0, int frame0,
                              (cpp/float 45.0)
                              cpp/CAMERA_PERSPECTIVE)
         model (cpp/LoadModel (str RES "models/gltf/greenman.glb"))
+        m-box (cpp/box (cpp/& model))
         skinning-shader (cpp/LoadShader (str RES "shaders/glsl330/skinning.vs")
                                         (str RES "shaders/glsl330/skinning.fs"))
-        anim-count (int (cpp/jank_load_anims (str RES "models/gltf/greenman.glb")))
+        count-box (cpp/box (cpp/unsafe-cast (:* cpp/int)
+                                            (cpp/MemAlloc (cpp/cast cpp/uint 4))))
+        anims (cpp/LoadModelAnimations (cpp/cast (:* (:const cpp/char))
+                                                 (str RES "models/gltf/greenman.glb"))
+                                       (cpp/unbox (:* cpp/int) count-box))
+        anims-box (cpp/box anims)
+        anim-count (int (cpp/* (cpp/unbox (:* cpp/int) count-box)))
         ;; 2 = walk/move, 3 = attack (the C's picks, validated)
         idx0 (if (>= 2 anim-count) 0 2)
         idx1 (if (>= 3 anim-count) (if (> anim-count 1) 1 0) 3)
-        keyframes0 (int (cpp/jank_anim_keyframes (int idx0)))
-        keyframes1 (int (cpp/jank_anim_keyframes (int idx1)))]
+        a (cpp/unbox (:* cpp/ModelAnimation) anims-box)
+        keyframes0 (int (+ 0.0 (.-keyframeCount (cpp/aget a (cpp/int idx0)))))
+        keyframes1 (int (+ 0.0 (.-keyframeCount (cpp/aget a (cpp/int idx1)))))
+        name0 (str (.-name (cpp/aget a (cpp/int idx0))))
+        name1 (str (.-name (cpp/aget a (cpp/int idx1))))
+        mesh-count (int (+ 0.0 (.-meshCount model)))]
 
-    (cpp/jank_model_set_shader1 (cpp/& model) skinning-shader)
+    ;; the skinning shader goes on material 1, as the C does
+    (cpp/= (.-shader (cpp/aget (.-materials model) (cpp/int 1))) skinning-shader)
 
     (cpp/SetTargetFPS 60)
 
@@ -191,9 +229,11 @@ static void jank_update_anim_bones(Model *model, int i0, int frame0,
               ;; split mode: attack fully on the upper body; uniform: 50/50
               blend (if upper? 1.0 0.5)]
 
-          (cpp/jank_update_anim_bones (cpp/& model) (int idx0) (int frame0)
-                                      (int idx1) (int frame1) blend
-                                      (if upper? 1 0))
+          (blend-bones! m-box anims-box idx0 frame0 idx1 frame1 blend upper?)
+          (loop [i 0]
+            (when (< i mesh-count)
+              (skin-mesh! m-box i)
+              (recur (inc i))))
 
           (cpp/BeginDrawing)
           (cpp/ClearBackground cpp/RAYWHITE)
@@ -205,8 +245,8 @@ static void jank_update_anim_bones(Model *model, int i0, int frame0,
           (cpp/DrawGrid 10 (cpp/float 1.0))
           (cpp/EndMode3D)
 
-          (cpp/DrawText (str "ANIM 0: " (cpp/jank_anim_name (int idx0))) 10 10 20 cpp/GRAY)
-          (cpp/DrawText (str "ANIM 1: " (cpp/jank_anim_name (int idx1))) 10 40 20 cpp/GRAY)
+          (cpp/DrawText (str "ANIM 0: " name0) 10 10 20 cpp/GRAY)
+          (cpp/DrawText (str "ANIM 1: " name1) 10 40 20 cpp/GRAY)
           (cpp/DrawText (str "[SPACE] Toggle blending mode: "
                              (if upper? "Upper/Lower Body Blending" "Uniform Blending"))
                         10 (- HEIGHT 30) 20 cpp/DARKGRAY)
@@ -214,6 +254,7 @@ static void jank_update_anim_bones(Model *model, int i0, int frame0,
           (cpp/EndDrawing)
           (recur frame0 frame1 upper?))))
 
+    (cpp/UnloadModelAnimations (cpp/unbox (:* cpp/ModelAnimation) anims-box) anim-count)
     (cpp/UnloadModel model)
     (cpp/UnloadShader skinning-shader))
 
