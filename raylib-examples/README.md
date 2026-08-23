@@ -180,6 +180,7 @@ examples actually link, the totals are 217 and `shapes` is complete at 41/41.
 | `random-sequence`   | `core/core_random_sequence`        | colored bars whose heights are a no-repeat permutation from LoadRandomSequence (int* indexed via a cpp/raw shim) |
 | `basic-voxel`       | `models/models_basic_voxel`        | an 8x8x8 beige voxel grid; left-click ray-picks and removes the nearest cube (orbital camera; flat-vector grid; DrawCube) |
 | `rotating-cube`     | `models/models_rotating_cube`      | a textured cube spinning on a tilted axis, drawn with rlgl immediate mode + rotated on the rlgl matrix stack (no Model load) |
+| `clipboard-image`   | `textures/textures_clipboard_image` | CTRL+V pastes clipboard images at the mouse; each Texture2D is boxed to outlive the frame that made it |
 | `clipboard-text`    | `core/core_clipboard_text`         | type + cut/copy/paste against the system clipboard via Get/SetClipboardText (raygui buttons -> CTRL shortcuts) |
 | `undo-redo`         | `core/core_undo_redo`              | a grid player with a 26-slot undo/redo ring buffer + buffer viz; the C's memcpy'd struct array becomes a jank vector of maps (memcmp -> =) |
 | `directory-files`   | `core/core_directory_files`        | a keyboard file browser; the native FilePathList (char** paths) is snapshotted into a jank vector of maps each load (char** indexed via a cpp/raw shim) |

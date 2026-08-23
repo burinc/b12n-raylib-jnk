@@ -1,0 +1,86 @@
+(ns raylib-examples.clipboard-image
+  "raylib [textures] example - clipboard image, ported to jank.
+
+  CTRL+V pastes an image from the system clipboard and drops it at the
+  mouse position; R clears the collection; Q quits. Up to 20 images.
+  Based on raylib/examples/textures/textures_clipboard_image.c
+  (jank-native: the C keeps a fixed TextureCollection[20] of native
+  Texture2D structs. A Texture2D created mid-loop has to outlive the
+  frame that made it, so each one is boxed with cpp/new + cpp/box and
+  held in a jank vector in an atom, alongside its drop position as
+  plain numbers - see docs/guide/native-value-lifetimes.md.)"
+  (:include "raylib.h"))
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def MAX-TEXTURES 20)
+
+;; Each entry is {:tex <boxed Texture2D> :x <real> :y <real>}.
+(defn- clear-textures! [pasted]
+  (doseq [entry @pasted]
+    (cpp/UnloadTexture (cpp/* (cpp/unbox (:* cpp/Texture2D) (:tex entry)))))
+  (reset! pasted [])
+  nil)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [textures] example - clipboard image (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [pasted (atom [])]
+    (loop []
+      (when (cpp/! (cpp/WindowShouldClose))
+
+        ;; R resets the collection
+        (when (cpp/IsKeyPressed cpp/KEY_R)
+          (clear-textures! pasted))
+
+        ;; CTRL+V pastes, while there is room
+        (when (and (cpp/IsKeyDown cpp/KEY_LEFT_CONTROL)
+                   (cpp/IsKeyPressed cpp/KEY_V)
+                   (< (count @pasted) MAX-TEXTURES))
+          (let [img (cpp/GetClipboardImage)]
+            (if (cpp/IsImageValid img)
+              (let [mouse (cpp/GetMousePosition)
+                    mx (+ 0.0 (.-x mouse))
+                    my (+ 0.0 (.-y mouse))]
+                (swap! pasted conj
+                       {:tex (cpp/box (cpp/new cpp/Texture2D (cpp/LoadTextureFromImage img)))
+                        :x mx
+                        :y my})
+                (cpp/UnloadImage img))
+              (println "IMAGE: Could not retrieve image from clipboard"))))
+
+        (cpp/BeginDrawing)
+        (cpp/ClearBackground cpp/RAYWHITE)
+
+        (doseq [entry @pasted]
+          (let [tp (cpp/unbox (:* cpp/Texture2D) (:tex entry))]
+            (when (cpp/IsTextureValid (cpp/* tp))
+              (let [tw (+ 0.0 (int (.-width (cpp/* tp))))
+                    th (+ 0.0 (int (.-height (cpp/* tp))))
+                    x (:x entry)
+                    y (:y entry)]
+                (cpp/DrawTexturePro (cpp/* tp)
+                                    (cpp/Rectangle (cpp/float 0.0) (cpp/float 0.0)
+                                                   (cpp/float tw) (cpp/float th))
+                                    (cpp/Rectangle (cpp/float x) (cpp/float y)
+                                                   (cpp/float tw) (cpp/float th))
+                                    (cpp/Vector2 (cpp/float (* tw 0.5))
+                                                 (cpp/float (* th 0.5)))
+                                    (cpp/float 0.0)
+                                    cpp/WHITE)))))
+
+        (cpp/DrawRectangle 0 0 WIDTH 40 cpp/BLACK)
+        (cpp/DrawText "Clipboard Image - CTRL+V to paste, R to reset, Q to quit"
+                      120 10 20 cpp/LIGHTGRAY)
+
+        (cpp/EndDrawing)
+
+        (when (cpp/! (cpp/IsKeyDown cpp/KEY_Q))
+          (recur))))
+
+    (clear-textures! pasted))
+
+  (cpp/CloseWindow)
+  nil)

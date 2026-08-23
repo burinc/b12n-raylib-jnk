@@ -219,6 +219,7 @@
    {:profile "random-sequence" :cat :core :desc "Colored bars in a no-repeat LoadRandomSequence" :controls "SPACE shuffle, UP/DOWN count, ESC"}
    {:profile "basic-voxel" :cat :models :desc "An 8x8x8 voxel grid; click to ray-pick and remove" :controls "LEFT/RIGHT spin, click remove, R refill, ESC"}
    {:profile "rotating-cube" :cat :models :desc "A textured cube spinning on a tilted axis (rlgl)" :controls "ESC"}
+   {:profile "clipboard-image" :cat :textures :desc "Paste images from the system clipboard" :controls "CTRL+V paste, R reset, Q"}
    {:profile "clipboard-text" :cat :core :desc "Type + cut/copy/paste with the system clipboard" :controls "type, CTRL+X/C/V/R/D, ESC"}
    {:profile "undo-redo" :cat :core :desc "A grid player with a 26-slot undo/redo ring buffer" :controls "ARROWS move, SPACE color, CTRL+Z/Y undo/redo, ESC"}
    {:profile "directory-files" :cat :core :desc "A keyboard file browser over the working directory" :controls "UP/DOWN select, ENTER open dir, BACKSPACE up, ESC"}

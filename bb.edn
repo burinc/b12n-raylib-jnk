@@ -154,6 +154,7 @@
   random-sequence {:doc "▶ Colored bars in a no-repeat LoadRandomSequence" :task (h/run-example! "random-sequence")}
   basic-voxel     {:doc "▶ an 8x8x8 voxel grid; click to ray-pick and remove" :task (h/run-example! "basic-voxel")}
   rotating-cube   {:doc "▶ a textured cube spinning on a tilted axis (rlgl)" :task (h/run-example! "rotating-cube")}
+  clipboard-image {:doc "▶ paste images from the system clipboard with CTRL+V" :task (h/run-example! "clipboard-image")}
   clipboard-text  {:doc "▶ type + cut/copy/paste with the system clipboard" :task (h/run-example! "clipboard-text")}
   undo-redo       {:doc "▶ a grid player with a 26-slot undo/redo ring buffer" :task (h/run-example! "undo-redo")}
   directory-files {:doc "▶ a keyboard file browser: list/enter dirs, filter .png/.c" :task (h/run-example! "directory-files")}

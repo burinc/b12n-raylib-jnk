@@ -133,10 +133,11 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/strings-management.gif" width="80">](../demos/strings-management.gif) | `strings-management` | Drag/slice/shatter/glue text; 1-6 run TextTo* fns |
 | [<img src="../demos/font-sdf.gif" width="80">](../demos/font-sdf.gif) | `font-sdf` | Bitmap vs SDF font scaling, the SDF drawn through a shader |
 
-## textures: images, sprites, render textures (31)
+## textures: images, sprites, render textures (32)
 
 | preview | `bb` name | shows |
 |---|---|---|
+| *(none)* | `clipboard-image` | Paste images from the system clipboard |
 | [<img src="../demos/image-generation.gif" width="80">](../demos/image-generation.gif) | `image-generation` | Nine procedural textures (gradients/noise) |
 | [<img src="../demos/logo-texture.gif" width="80">](../demos/logo-texture.gif) | `logo-texture` | The raylib logo loaded from a PNG file |
 | [<img src="../demos/sprite-animation.gif" width="80">](../demos/sprite-animation.gif) | `sprite-animation` | Scarfy runs: 6-frame spritesheet animation |
@@ -269,16 +270,17 @@ upstream.
 |---|---|---|
 | [<img src="../demos/opaque-boxes.gif" width="80">](../demos/opaque-boxes.gif) | `opaque-boxes` | Native Colors carried across fns in opaque boxes |
 
-## Adding an example: the four touchpoints
+## Adding an example: the five touchpoints
 
 See [`porting-workflow.md`](porting-workflow.md) for the full end-to-end
 process (source of truth, docstring format, the headless smoke test). The
-short version is that a new example touches four places in the same commit:
+short version is that a new example touches five places in the same commit:
 `raylib-examples/project.clj` (a `:profiles` entry), `bb.edn` (a `bb <name>`
 task), `bb/helpers.clj` (a row in the `examples` registry vector, including
-its `:cat`), and `raylib-examples/README.md` (move it from the "not yet
-ported" queue into the ported table). The repo-root `README.md` carries no
-per-example catalog, so it needs no change.
+its `:cat`), `raylib-examples/README.md` (move it from the "not yet
+ported" queue into the ported table), and **this file** (a row in the right
+category table, plus its heading count). `bb check` enforces all five. The
+repo-root `README.md` carries no per-example catalog, so it needs no change.
 
 ## See also
 

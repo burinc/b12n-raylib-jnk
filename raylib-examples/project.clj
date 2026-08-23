@@ -132,6 +132,7 @@
              :random-sequence {:main raylib-examples.random-sequence}
              :basic-voxel     {:main raylib-examples.basic-voxel}
              :rotating-cube   {:main raylib-examples.rotating-cube}
+             :clipboard-image {:main raylib-examples.clipboard-image}
              :clipboard-text  {:main raylib-examples.clipboard-text}
              :undo-redo       {:main raylib-examples.undo-redo}
              :directory-files {:main raylib-examples.directory-files}
