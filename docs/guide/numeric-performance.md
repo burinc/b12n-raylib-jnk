@@ -105,9 +105,19 @@ Break the alias by binding first, or by forcing a copy with `(int x)`.
 
 ## Related
 
-`cpp/aget` yields a **reference**, not a copy. Binding `tr` to `re[i]` and then
-writing `re[i]` changes `tr` underneath. Force a copy with a `cpp/cast` where
-the C would have copied a struct.
+`cpp/aget` yields a **reference**, not a copy: it compiles to the C++ subscript
+operator and the result is bound with `auto &&`, which on a `double *` deduces
+`double &`. Binding `tr` to `re[i]` and then writing `re[i]` changes `tr`
+underneath, so the textbook three-line swap silently degenerates into a copy
+(`a[0]=20 a[1]=20` where you wanted `20 / 10`). This is not a struct-only
+concern; the case that cost the most here was a plain `double *` swap in an FFT
+bit reversal. Force the copy at the binding: both
+`(cpp/cast cpp/double (cpp/aget a i))` and `(cpp/double (cpp/aget a i))` work.
+
+The book states the same rule for member access, "Whenever a member is
+accessed, you will get a reference to it, not a copy"
+(`cpp-interop/native-values.md`), but says nothing about `aget`, which is where
+it is easiest to miss.
 
 Native pointers cannot be captured by a closure: `dotimes` and `doseq` over one
 fail where `loop`/`recur` works. Same rule as
