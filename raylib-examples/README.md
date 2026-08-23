@@ -1,7 +1,7 @@
 # raylib-examples (jank)
 
-[![examples ported](https://img.shields.io/badge/examples_ported-209%2F220-brightgreen)](#porting-progress)
-[![categories complete](https://img.shields.io/badge/complete-shaders,_audio,_text-brightgreen)](#porting-progress)
+[![examples ported](https://img.shields.io/badge/examples_ported-210%2F220-brightgreen)](#porting-progress)
+[![categories complete](https://img.shields.io/badge/complete-shaders,_audio,_text,_textures-brightgreen)](#porting-progress)
 
 Official [raylib](https://www.raylib.com/examples.html) examples ported to
 **jank** (native Clojure). Each example is one `.jank` namespace under
@@ -32,8 +32,9 @@ logical 800x450.
 
 ## Porting progress
 
-**209 / 220** official examples ported so far. The `shaders` (35/35),
-`audio` (11/11) and `text` (16/16) categories are **complete**, and `models`
+**210 / 220** official examples ported so far. The `shaders` (35/35),
+`audio` (11/11), `text` (16/16) and `textures` (32/32) categories are
+**complete**, and `models`
 is at 29/30 (the last one needs a raylib recompile - see below), plus `core`
 (46), `textures` (31), 3D mode opened via `sound-positioning`, the rlgl matrix
 stack in 3D (`rlgl-solar-system`), and font loading (`font-loading`).
@@ -48,7 +49,7 @@ examples actually link, the totals are 217 and `shapes` is complete at 41/41.
 | shapes   | 41 | 43 |
 | core     | 46 | 49 |
 | text     | 16 | 16 |
-| textures | 31 | 32 |
+| textures | 32 | 32 |
 | shaders  | 35 | 35 |
 | models   | 29 | 30 |
 | audio    | 11 | 11 |
