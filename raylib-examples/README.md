@@ -1,6 +1,6 @@
 # raylib-examples (jank)
 
-[![examples ported](https://img.shields.io/badge/examples_ported-211%2F220-brightgreen)](#porting-progress)
+[![examples ported](https://img.shields.io/badge/examples_ported-212%2F220-brightgreen)](#porting-progress)
 [![categories complete](https://img.shields.io/badge/complete-shaders,_audio,_text,_textures-brightgreen)](#porting-progress)
 
 Official [raylib](https://www.raylib.com/examples.html) examples ported to
@@ -32,11 +32,11 @@ logical 800x450.
 
 ## Porting progress
 
-**211 / 220** official examples ported so far. The `shaders` (35/35),
+**212 / 220** official examples ported so far. The `shaders` (35/35),
 `audio` (11/11), `text` (16/16) and `textures` (32/32) categories are
 **complete**, and `models`
 is at 29/30 (the last one needs a raylib recompile - see below), plus `core`
-(46), `textures` (31), 3D mode opened via `sound-positioning`, the rlgl matrix
+(47), `textures` (32), 3D mode opened via `sound-positioning`, the rlgl matrix
 stack in 3D (`rlgl-solar-system`), and font loading (`font-loading`).
 
 The denominator counts upstream raylib at **6.1-dev**, which added three
@@ -47,7 +47,7 @@ examples actually link, the totals are 217 and `shapes` is complete at 41/41.
 | Category | Ported | Total |
 |---|---:|---:|
 | shapes   | 41 | 43 |
-| core     | 46 | 49 |
+| core     | 47 | 49 |
 | text     | 16 | 16 |
 | textures | 32 | 32 |
 | shaders  | 35 | 35 |
@@ -183,6 +183,7 @@ examples actually link, the totals are 217 and `shapes` is complete at 41/41.
 | `rotating-cube`     | `models/models_rotating_cube`      | a textured cube spinning on a tilted axis, drawn with rlgl immediate mode + rotated on the rlgl matrix stack (no Model load) |
 | `clipboard-image`   | `textures/textures_clipboard_image` | CTRL+V pastes clipboard images at the mouse; each Texture2D is boxed to outlive the frame that made it |
 | `embedded-files`    | `others/embedded_files_loading`    | a logo and a sound compiled into the binary as C arrays; Wave/Image built field-by-field with cpp/= since jank has no designated initialisers |
+| `screen-recording`  | `core/core_screen_recording`       | CTRL+R records the window to an animated GIF via the vendored msf_gif single-header encoder |
 | `clipboard-text`    | `core/core_clipboard_text`         | type + cut/copy/paste against the system clipboard via Get/SetClipboardText (raygui buttons -> CTRL shortcuts) |
 | `undo-redo`         | `core/core_undo_redo`              | a grid player with a 26-slot undo/redo ring buffer + buffer viz; the C's memcpy'd struct array becomes a jank vector of maps (memcmp -> =) |
 | `directory-files`   | `core/core_directory_files`        | a keyboard file browser; the native FilePathList (char** paths) is snapshotted into a jank vector of maps each load (char** indexed via a cpp/raw shim) |

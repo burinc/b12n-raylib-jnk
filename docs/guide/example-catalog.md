@@ -15,10 +15,11 @@ bb info            # the grouped cheat-sheet below
 bb run-all [secs]  # every example, N seconds each (unattended)
 ```
 
-## core: window, input, cameras, files (46)
+## core: window, input, cameras, files (47)
 
 | preview | `bb` name | shows |
 |---|---|---|
+| *(none)* | `screen-recording` | Record the window to an animated GIF |
 | [<img src="../demos/input-keys.gif" width="80">](../demos/input-keys.gif) | `input-keys` | Steer a ball with the arrow keys |
 | [<img src="../demos/input-mouse.gif" width="80">](../demos/input-mouse.gif) | `input-mouse` | A ball follows the mouse; click to recolor |
 | [<img src="../demos/input-mouse-wheel.gif" width="80">](../demos/input-mouse-wheel.gif) | `input-mouse-wheel` | Scroll a box with the mouse wheel |

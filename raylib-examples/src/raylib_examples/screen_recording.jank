@@ -1,0 +1,132 @@
+(ns raylib-examples.screen-recording
+  "raylib [core] example - screen recording, ported to jank.
+
+  A sine wave and a bouncing circle, recordable to an animated GIF.
+  CTRL+R starts and stops recording; the file lands next to the binary
+  as screenrecording.gif. Q quits.
+  Based on raylib/examples/core/core_screen_recording.c
+  (jank-native: the GIF encoder is msf_gif, a single-header library
+  vendored in raylib's examples. It needs MSF_GIF_IMPL defined BEFORE
+  the include to emit its implementation, and jank's ns :include can
+  express neither a preprocessor define nor a quoted, working-directory
+  relative path - it only ever emits an angled include. So the cpp/raw
+  below is the whole reason this block exists; there is no missing
+  raylib binding here. See docs/guide/cpp-interop-toolbox.md.
+
+  MsfGifState is a native struct that has to survive across frames.
+  It does not need boxing: one cpp/new before the loop gives a pointer
+  whose let scope covers the entire frame loop.)"
+  (:include "raylib.h" "math.h"))
+
+;; MSF_GIF_IMPL must precede the include, and the path must be quoted to
+;; resolve against the raylib-examples working directory. (:include ...)
+;; can do neither.
+(cpp/raw "#define MSF_GIF_IMPL
+          #include \"../jank-raylib-sys/raylib/examples/core/msf_gif.h\"")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+(def GIF-RECORD-FRAMERATE 5)
+(def MAX-SINEWAVE-POINTS 256)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [core] example - screen recording (jank)")
+  (cpp/SetTargetFPS 60)
+
+  (let [;; sine wave points, computed once, as plain jank numbers
+        sine-points (mapv (fn [i]
+                            {:x (/ (* i (+ 0.0 (cpp/GetScreenWidth))) 180.0)
+                             :y (+ (/ HEIGHT 2.0)
+                                   (* 150.0 (cpp/sin (* (/ (* 2.0 3.141592653589793) 1.5)
+                                                        (/ 1.0 60.0)
+                                                        (+ 0.0 i)))))})
+                          (range MAX-SINEWAVE-POINTS))
+        ;; one allocation, alive for the whole loop, so no box is needed
+        gif-state (cpp/new cpp/MsfGifState)]
+
+    (loop [cx 0.0
+           cy (/ HEIGHT 2.0)
+           t 0.0
+           recording? false
+           gif-frames 0]
+      (if (cpp/! (cpp/WindowShouldClose))
+        (let [nt (+ t (+ 0.0 (cpp/GetFrameTime)))
+              step (/ (+ 0.0 (cpp/GetScreenWidth)) 180.0)
+              nx0 (+ cx step)
+              wrapped? (> nx0 (+ 0.0 WIDTH))
+              nx (if wrapped? 0.0 nx0)
+              ny (if wrapped?
+                   (/ HEIGHT 2.0)
+                   (+ (/ HEIGHT 2.0)
+                      (* 150.0 (cpp/sin (* (/ (* 2.0 3.141592653589793) 1.5) nt)))))
+              nt2 (if wrapped? 0.0 nt)
+
+              ;; CTRL+R toggles recording
+              toggle? (and (cpp/IsKeyDown cpp/KEY_LEFT_CONTROL)
+                           (cpp/IsKeyPressed cpp/KEY_R))
+              rec2 (if toggle? (not recording?) recording?)
+              _ (when toggle?
+                  (if recording?
+                    ;; stop: finish the gif and write it out
+                    (let [result (cpp/msf_gif_end gif-state)
+                          path (str (cpp/GetApplicationDirectory) "screenrecording.gif")]
+                      (cpp/SaveFileData (cpp/cast (:* (:const cpp/char)) path)
+                                        (.-data result)
+                                        (cpp/cast cpp/uint (.-dataSize result)))
+                      (cpp/msf_gif_free result)
+                      (println "Finish animated GIF recording:" path))
+                    ;; start
+                    (do (cpp/msf_gif_begin gif-state
+                                           (cpp/GetRenderWidth)
+                                           (cpp/GetRenderHeight))
+                        (println "Start animated GIF recording"))))
+
+              ;; one captured frame every GIF-RECORD-FRAMERATE frames
+              gf (if rec2 (inc gif-frames) 0)
+              capture? (and rec2 (> gf GIF-RECORD-FRAMERATE))
+              gf2 (if capture? 0 gf)]
+
+          (when capture?
+            (let [im (cpp/LoadImageFromScreen)]
+              (cpp/msf_gif_frame gif-state
+                                 (cpp/unsafe-cast (:* cpp/uint8_t) (.-data im))
+                                 (cpp/int (quot (int (* (/ 1.0 60.0) GIF-RECORD-FRAMERATE 100.0)) 10))
+                                 (cpp/int 16)
+                                 (cpp/int (* 4 (int (.-width im)))))
+              (cpp/UnloadImage im)))
+
+          (cpp/BeginDrawing)
+          (cpp/ClearBackground cpp/RAYWHITE)
+
+          (loop [i 0]
+            (when (< i (dec MAX-SINEWAVE-POINTS))
+              (let [a (nth sine-points i)
+                    b (nth sine-points (inc i))]
+                (cpp/DrawLineV (cpp/Vector2 (cpp/float (:x a)) (cpp/float (:y a)))
+                               (cpp/Vector2 (cpp/float (:x b)) (cpp/float (:y b)))
+                               cpp/MAROON)
+                (cpp/DrawCircleV (cpp/Vector2 (cpp/float (:x a)) (cpp/float (:y a)))
+                                 (cpp/float 3.0) cpp/MAROON))
+              (recur (inc i))))
+
+          (cpp/DrawCircleV (cpp/Vector2 (cpp/float nx) (cpp/float ny))
+                           (cpp/float 30.0) cpp/RED)
+          (cpp/DrawFPS 10 10)
+          (cpp/DrawText (if rec2
+                          "RECORDING - CTRL+R to stop, Q quits"
+                          "CTRL+R to start recording, Q quits")
+                        10 40 20 cpp/DARKGRAY)
+          (cpp/EndDrawing)
+
+          (if (cpp/IsKeyDown cpp/KEY_Q)
+            nil
+            (recur nx ny nt2 rec2 gf2)))
+
+        ;; window closed while still recording: drop the in-progress gif
+        (when recording?
+          (let [result (cpp/msf_gif_end gif-state)]
+            (cpp/msf_gif_free result))))))
+
+  (cpp/CloseWindow)
+  nil)

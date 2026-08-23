@@ -156,6 +156,7 @@
   rotating-cube   {:doc "▶ a textured cube spinning on a tilted axis (rlgl)" :task (h/run-example! "rotating-cube")}
   clipboard-image {:doc "▶ paste images from the system clipboard with CTRL+V" :task (h/run-example! "clipboard-image")}
   embedded-files  {:doc "▶ a logo and a sound compiled into the binary as C arrays" :task (h/run-example! "embedded-files")}
+  screen-recording {:doc "▶ record the window to an animated GIF with CTRL+R" :task (h/run-example! "screen-recording")}
   clipboard-text  {:doc "▶ type + cut/copy/paste with the system clipboard" :task (h/run-example! "clipboard-text")}
   undo-redo       {:doc "▶ a grid player with a 26-slot undo/redo ring buffer" :task (h/run-example! "undo-redo")}
   directory-files {:doc "▶ a keyboard file browser: list/enter dirs, filter .png/.c" :task (h/run-example! "directory-files")}
