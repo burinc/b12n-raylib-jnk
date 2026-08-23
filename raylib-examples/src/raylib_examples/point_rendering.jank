@@ -130,6 +130,13 @@ static void jank_draw_points_old(int numPoints) {
           (cpp/DrawText "UP - Increase points" 10 40 20 cpp/WHITE)
           (cpp/DrawText "DOWN - Decrease points" 10 70 20 cpp/WHITE)
           (cpp/DrawText "SPACE - Drawing function" 10 100 20 cpp/WHITE)
+          ;; The label keeps parity with the upstream C example's on-screen
+          ;; text, but raylib 6.0 REMOVED DrawModelPoints/DrawModelPointsEx
+          ;; (absent from both the 6.0 header and the shipped dylib). The C
+          ;; example only builds because it forward-declares them itself. The
+          ;; shim above does the equivalent directly - rlEnablePointMode +
+          ;; DrawModel + rlDisablePointMode - which is what the removed
+          ;; function wrapped. Do not "fix" this label into a call.
           (if gpu?
             (cpp/DrawText "Using: DrawModelPoints()" 10 130 20 cpp/GREEN)
             (cpp/DrawText "Using: DrawPoint3D()" 10 130 20 cpp/RED))
