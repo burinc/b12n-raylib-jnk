@@ -1,7 +1,7 @@
 # raylib-examples (jank)
 
-[![examples ported](https://img.shields.io/badge/examples_ported-209%2F217-brightgreen)](#porting-progress)
-[![categories complete](https://img.shields.io/badge/complete-shapes,_shaders,_audio,_text-brightgreen)](#porting-progress)
+[![examples ported](https://img.shields.io/badge/examples_ported-209%2F220-brightgreen)](#porting-progress)
+[![categories complete](https://img.shields.io/badge/complete-shaders,_audio,_text-brightgreen)](#porting-progress)
 
 Official [raylib](https://www.raylib.com/examples.html) examples ported to
 **jank** (native Clojure). Each example is one `.jank` namespace under
@@ -20,7 +20,9 @@ lein with-profile +<name> run --disable-sandbox
 
 Ports follow the **definitive C sources** in
 [`raysan5/raylib`](https://github.com/raysan5/raylib) (`examples/<category>/`),
-not any intermediate binding. For the jank/C++ interop constraints that shape
+not any intermediate binding. Those sources are **6.1-dev**; the examples here
+link **raylib 6.0** (from the published `org.jank-lang.commons/raylib-sys`
+package), so a handful of 6.1-only functions are not yet reachable. For the jank/C++ interop constraints that shape
 these ports, see
 [`docs/guide/native-value-lifetimes.md`](../docs/guide/native-value-lifetimes.md).
 One deliberate deviation: every example sets `FLAG_WINDOW_HIGHDPI`, so
@@ -30,24 +32,27 @@ logical 800x450.
 
 ## Porting progress
 
-**209 / 217** official examples ported so far. The `shapes` (41/41),
-`shaders` (35/35), `audio` (11/11) and `text` (16/16) categories are
-**complete**, and `models` is at 29/30
-(the last one needs a raylib recompile - see below), plus `core` (46),
-`textures` (31), 3D mode opened via `sound-positioning`,
-the rlgl matrix stack in 3D (`rlgl-solar-system`), and font loading
-(`font-loading`).
+**209 / 220** official examples ported so far. The `shaders` (35/35),
+`audio` (11/11) and `text` (16/16) categories are **complete**, and `models`
+is at 29/30 (the last one needs a raylib recompile - see below), plus `core`
+(46), `textures` (31), 3D mode opened via `sound-positioning`, the rlgl matrix
+stack in 3D (`rlgl-solar-system`), and font loading (`font-loading`).
+
+The denominator counts upstream raylib at **6.1-dev**, which added three
+examples this repo has not ported: `shapes_outlines_thickness`,
+`shapes_polygon_lines` and `others/gl_scissor_shapes`. Against the 6.0 the
+examples actually link, the totals are 217 and `shapes` is complete at 41/41.
 
 | Category | Ported | Total |
 |---|---:|---:|
-| shapes   | 41 | 41 |
+| shapes   | 41 | 43 |
 | core     | 46 | 49 |
 | text     | 16 | 16 |
 | textures | 31 | 32 |
 | shaders  | 35 | 35 |
 | models   | 29 | 30 |
 | audio    | 11 | 11 |
-| others   |  0 |  3 |
+| others   |  0 |  4 |
 
 ## Ported ✅
 
@@ -265,13 +270,24 @@ the rlgl matrix stack in 3D (`rlgl-solar-system`), and font loading
 
 ## Not yet ported
 
-### shapes, complete! 🎉
+### shapes, 41/43
 
-All 41 `shapes` examples are ported: the pure-raylib ones directly, the
-raygui-marked ones with keyboard controls
+All 41 `shapes` examples that exist in raylib 6.0 are ported: the pure-raylib
+ones directly, the raygui-marked ones with keyboard controls
 (`docs/guide/raygui-to-keyboard.md`), the RenderTexture ones via
 `LoadRenderTexture`, and the rlgl ones via a direct
 `(:include "rlgl.h")` (no wrapper changes were needed).
+
+Upstream 6.1-dev has since added two more, neither ported:
+`shapes_outlines_thickness` and `shapes_polygon_lines`. Both are ordinary
+2D drawing and should be straightforward, but check their APIs against the
+6.0 this project links before starting (see `AGENTS.md`, porting workflow
+step 1).
+
+### others, 0/4
+
+Untouched. 6.1-dev adds `gl_scissor_shapes` to the three that were already
+there.
 
 ### core, 2D-friendly candidates (portable now)
 
