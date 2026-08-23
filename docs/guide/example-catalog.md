@@ -260,6 +260,12 @@ bb run-all [secs]  # every example, N seconds each (unattended)
 | [<img src="../demos/amp-envelope.gif" width="80">](../demos/amp-envelope.gif) | `amp-envelope` | An ADSR envelope on a tone, with a live shape graph |
 | [<img src="../demos/spectrum-visualizer.gif" width="80">](../demos/spectrum-visualizer.gif) | `spectrum-visualizer` | A live FFT spectrum of the music through a shader |
 
+## others: embedded data, GL interop, standalone rlgl (1)
+
+| preview | `bb` name | shows |
+|---|---|---|
+| *(none)* | `embedded-files` | A logo and a sound compiled into the binary as C arrays |
+
 ## interop: jank/C++ mechanics (1)
 
 Not raylib ports. These demonstrate the language boundary itself, and are

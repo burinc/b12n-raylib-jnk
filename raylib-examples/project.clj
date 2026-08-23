@@ -133,6 +133,7 @@
              :basic-voxel     {:main raylib-examples.basic-voxel}
              :rotating-cube   {:main raylib-examples.rotating-cube}
              :clipboard-image {:main raylib-examples.clipboard-image}
+             :embedded-files  {:main raylib-examples.embedded-files}
              :clipboard-text  {:main raylib-examples.clipboard-text}
              :undo-redo       {:main raylib-examples.undo-redo}
              :directory-files {:main raylib-examples.directory-files}

@@ -1,0 +1,81 @@
+(ns raylib-examples.embedded-files
+  "raylib [others] example - embedded files loading, ported to jank.
+
+  A logo and a sound compiled INTO the binary as C arrays rather than
+  read from disk. SPACE plays the sound, Q quits.
+  Based on raylib/examples/others/embedded_files_loading.c
+  (jank-native: the C builds Wave and Image with designated initialisers,
+  which jank has no syntax for. Both are allocated zeroed with a no-arg
+  cpp/new - that is the C's = {0} - and each field is then written with
+  cpp/=. Their #define constants and static arrays are then ordinary
+  cpp/ symbols.
+
+  The cpp/raw below is NOT a workaround for a missing raylib binding, it
+  is the only way to include a project-relative header. jank's ns :include
+  always emits an ANGLED include, so a path relative to the working
+  directory is never found; clang's own diagnostic says to use quotes
+  instead, which :include cannot express. An absolute path in :include
+  does work, but is not something to commit. See
+  docs/guide/cpp-interop-toolbox.md.)"
+  (:include "raylib.h"))
+
+;; The two generated data headers, quoted so they resolve relative to the
+;; raylib-examples working directory. See the docstring: (:include ...) cannot
+;; express this, because it only emits angled includes.
+(cpp/raw "#include \"../jank-raylib-sys/raylib/examples/others/resources/audio_data.h\"
+          #include \"../jank-raylib-sys/raylib/examples/others/resources/image_data.h\"")
+
+(def WIDTH 800)
+(def HEIGHT 450)
+
+(defn -main [& args]
+  (cpp/SetConfigFlags cpp/FLAG_WINDOW_HIGHDPI) ;; scale on HiDPI monitors
+  (cpp/InitWindow WIDTH HEIGHT "raylib [others] example - embedded files loading (jank)")
+  (cpp/InitAudioDevice)
+
+  ;; Wave in RAM, straight out of audio_data.h. Same as (LoadWave "sound.wav"),
+  ;; except the bytes live in the binary's .data segment and must NOT be freed.
+  (let [wave (cpp/new cpp/Wave)]
+    (cpp/= (.-data (cpp/* wave)) (cpp/unsafe-cast (:* cpp/void) cpp/AUDIO_DATA))
+    (cpp/= (.-frameCount (cpp/* wave)) (cpp/cast cpp/uint cpp/AUDIO_FRAME_COUNT))
+    (cpp/= (.-sampleRate (cpp/* wave)) (cpp/cast cpp/uint cpp/AUDIO_SAMPLE_RATE))
+    (cpp/= (.-sampleSize (cpp/* wave)) (cpp/cast cpp/uint cpp/AUDIO_SAMPLE_SIZE))
+    (cpp/= (.-channels (cpp/* wave)) (cpp/cast cpp/uint cpp/AUDIO_CHANNELS))
+
+    ;; Image in RAM, straight out of image_data.h.
+    (let [image (cpp/new cpp/Image)]
+      (cpp/= (.-data (cpp/* image)) (cpp/unsafe-cast (:* cpp/void) cpp/IMAGE_DATA))
+      (cpp/= (.-width (cpp/* image)) (cpp/int cpp/IMAGE_WIDTH))
+      (cpp/= (.-height (cpp/* image)) (cpp/int cpp/IMAGE_HEIGHT))
+      (cpp/= (.-format (cpp/* image)) (cpp/int cpp/IMAGE_FORMAT))
+      (cpp/= (.-mipmaps (cpp/* image)) (cpp/int 1))
+
+      (let [sound (cpp/LoadSoundFromWave (cpp/* wave))
+            tex (cpp/LoadTextureFromImage (cpp/* image))
+            tw (int (+ 0.0 (.-width tex)))]
+        (cpp/SetTargetFPS 60)
+
+        (loop []
+          (when (cpp/! (cpp/WindowShouldClose))
+            (when (cpp/IsKeyPressed cpp/KEY_SPACE)
+              (cpp/PlaySound sound))
+
+            (cpp/BeginDrawing)
+            (cpp/ClearBackground cpp/RAYWHITE)
+            (cpp/DrawTexture tex (- (quot WIDTH 2) (quot tw 2)) 40 cpp/WHITE)
+            (cpp/DrawText "raylib logo and sound loaded from header files"
+                          150 320 20 cpp/LIGHTGRAY)
+            (cpp/DrawText "Press SPACE to PLAY the sound!  Q quits."
+                          220 370 20 cpp/LIGHTGRAY)
+            (cpp/EndDrawing)
+
+            (when (cpp/! (cpp/IsKeyDown cpp/KEY_Q))
+              (recur))))
+
+        ;; The Wave/Image bytes are in .data and are deliberately never freed.
+        (cpp/UnloadSound sound)
+        (cpp/UnloadTexture tex))))
+
+  (cpp/CloseAudioDevice)
+  (cpp/CloseWindow)
+  nil)

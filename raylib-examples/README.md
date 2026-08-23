@@ -1,6 +1,6 @@
 # raylib-examples (jank)
 
-[![examples ported](https://img.shields.io/badge/examples_ported-210%2F220-brightgreen)](#porting-progress)
+[![examples ported](https://img.shields.io/badge/examples_ported-211%2F220-brightgreen)](#porting-progress)
 [![categories complete](https://img.shields.io/badge/complete-shaders,_audio,_text,_textures-brightgreen)](#porting-progress)
 
 Official [raylib](https://www.raylib.com/examples.html) examples ported to
@@ -32,7 +32,7 @@ logical 800x450.
 
 ## Porting progress
 
-**210 / 220** official examples ported so far. The `shaders` (35/35),
+**211 / 220** official examples ported so far. The `shaders` (35/35),
 `audio` (11/11), `text` (16/16) and `textures` (32/32) categories are
 **complete**, and `models`
 is at 29/30 (the last one needs a raylib recompile - see below), plus `core`
@@ -53,7 +53,7 @@ examples actually link, the totals are 217 and `shapes` is complete at 41/41.
 | shaders  | 35 | 35 |
 | models   | 29 | 30 |
 | audio    | 11 | 11 |
-| others   |  0 |  4 |
+| others   |  1 |  4 |
 
 ## Ported ✅
 
@@ -182,6 +182,7 @@ examples actually link, the totals are 217 and `shapes` is complete at 41/41.
 | `basic-voxel`       | `models/models_basic_voxel`        | an 8x8x8 beige voxel grid; left-click ray-picks and removes the nearest cube (orbital camera; flat-vector grid; DrawCube) |
 | `rotating-cube`     | `models/models_rotating_cube`      | a textured cube spinning on a tilted axis, drawn with rlgl immediate mode + rotated on the rlgl matrix stack (no Model load) |
 | `clipboard-image`   | `textures/textures_clipboard_image` | CTRL+V pastes clipboard images at the mouse; each Texture2D is boxed to outlive the frame that made it |
+| `embedded-files`    | `others/embedded_files_loading`    | a logo and a sound compiled into the binary as C arrays; Wave/Image built field-by-field with cpp/= since jank has no designated initialisers |
 | `clipboard-text`    | `core/core_clipboard_text`         | type + cut/copy/paste against the system clipboard via Get/SetClipboardText (raygui buttons -> CTRL shortcuts) |
 | `undo-redo`         | `core/core_undo_redo`              | a grid player with a 26-slot undo/redo ring buffer + buffer viz; the C's memcpy'd struct array becomes a jank vector of maps (memcmp -> =) |
 | `directory-files`   | `core/core_directory_files`        | a keyboard file browser; the native FilePathList (char** paths) is snapshotted into a jank vector of maps each load (char** indexed via a cpp/raw shim) |
