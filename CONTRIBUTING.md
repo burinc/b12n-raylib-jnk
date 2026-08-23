@@ -155,7 +155,8 @@ value genuinely needs to outlive the fn that made it, jank's opaque boxes
 `bb opaque-boxes` for a worked example.
 
 The rest of [`docs/guide/`](docs/guide/index.md) covers the C-interop toolbox,
-int-vs-real coercion (`mod`/`quot` return reals; `cpp/float` wants a real),
+int-vs-real coercion (`mod`/`rem` return reals, `quot` does not; `cpp/float`
+wants a real),
 and which raylib APIs are reachable today.
 
 ### Helper signatures

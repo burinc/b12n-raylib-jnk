@@ -56,7 +56,8 @@ into `unsigned char*` for byte math. `cpp/unsafe-cast` can:
            (cpp/int offset))))
 ```
 
-`gif_player.jank`. Keep `offset` a native int: `mod`/`quot`/`rem` return reals.
+`gif_player.jank`. Keep `offset` a native int: `mod` and `rem` return reals
+(`quot` returns integers).
 
 Same pair reaches native arrays. `cpp/MemAlloc` + `cpp/unsafe-cast` gives a
 `float*` that `cpp/aget` and `cpp/=` fill element-wise, which is how

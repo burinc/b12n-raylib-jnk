@@ -119,6 +119,14 @@ accessed, you will get a reference to it, not a copy"
 (`cpp-interop/native-values.md`), but says nothing about `aget`, which is where
 it is easiest to miss.
 
-Native pointers cannot be captured by a closure: `dotimes` and `doseq` over one
-fail where `loop`/`recur` works. Same rule as
+A native value with no trait conversion cannot enter a jank collection, so a
+`doseq` over a seq of them fails with `There is no implicit conversion from
+'<T>' to 'jank::runtime::object_ref'`. Same rule as
 [`native-value-lifetimes.md`](native-value-lifetimes.md).
+
+This page previously said "native pointers cannot be captured by a closure, so
+`dotimes`/`doseq` over one fail where `loop`/`recur` works". That was wrong on
+both counts and was corrected on 2026-08-23: a `dotimes` indexing through a
+native pointer works, and so does a real closure
+(`(mapv (fn [i] (cpp/aget p (cpp/int i))) ...)`). The constraint is the
+collection boundary, not closure capture.
