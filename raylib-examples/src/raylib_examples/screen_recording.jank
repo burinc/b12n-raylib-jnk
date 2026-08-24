@@ -7,22 +7,26 @@
   Based on raylib/examples/core/core_screen_recording.c
   (jank-native: the GIF encoder is msf_gif, a single-header library
   vendored in raylib's examples. It needs MSF_GIF_IMPL defined BEFORE
-  the include to emit its implementation, and jank's ns :include can
-  express neither a preprocessor define nor a quoted, working-directory
-  relative path - it only ever emits an angled include. So the cpp/raw
-  below is the whole reason this block exists; there is no missing
-  raylib binding here. See docs/guide/cpp-interop-toolbox.md.
+  the include to emit its implementation. jank's ns :include CAN express
+  the quoted path - a ./ prefix emits a quoted include - but it cannot
+  express a preprocessor define, and an ns :include is always emitted
+  before any top-level form. So the define stays in a cpp/raw, and the
+  header is then pulled in with a top-level (include ...) call, which is
+  the same macro the ns :include clause uses. There is no missing raylib
+  binding here. See docs/guide/cpp-interop-toolbox.md.
 
   MsfGifState is a native struct that has to survive across frames.
   It does not need boxing: one cpp/new before the loop gives a pointer
   whose let scope covers the entire frame loop.)"
   (:include "raylib.h" "math.h"))
 
-;; MSF_GIF_IMPL must precede the include, and the path must be quoted to
-;; resolve against the raylib-examples working directory. (:include ...)
-;; can do neither.
-(cpp/raw "#define MSF_GIF_IMPL
-          #include \"../jank-raylib-sys/raylib/examples/core/msf_gif.h\"")
+;; MSF_GIF_IMPL must precede the include, which an ns :include clause cannot
+;; do - so the define is the one thing left in cpp/raw. The header itself is
+;; an ordinary (include ...) call; the ./ prefix is what makes jank emit a
+;; QUOTED include, so the path resolves against the raylib-examples working
+;; directory. A bare ../ prefix would still be emitted angled and not found.
+(cpp/raw "#define MSF_GIF_IMPL")
+(include "./../jank-raylib-sys/raylib/examples/core/msf_gif.h")
 
 (def WIDTH 800)
 (def HEIGHT 450)

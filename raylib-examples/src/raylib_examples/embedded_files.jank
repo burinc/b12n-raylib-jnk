@@ -10,20 +10,15 @@
   cpp/=. Their #define constants and static arrays are then ordinary
   cpp/ symbols.
 
-  The cpp/raw below is NOT a workaround for a missing raylib binding, it
-  is the only way to include a project-relative header. jank's ns :include
-  always emits an ANGLED include, so a path relative to the working
-  directory is never found; clang's own diagnostic says to use quotes
-  instead, which :include cannot express. An absolute path in :include
-  does work, but is not something to commit. See
+  The two generated data headers come in through ordinary :include. A
+  path starting with ./ makes jank emit a QUOTED include instead of an
+  angled one, so it resolves against the raylib-examples working
+  directory. Note the ./ is load-bearing even though the path then goes
+  up: a bare ../ prefix is still emitted angled and is not found. See
   docs/guide/cpp-interop-toolbox.md.)"
-  (:include "raylib.h"))
-
-;; The two generated data headers, quoted so they resolve relative to the
-;; raylib-examples working directory. See the docstring: (:include ...) cannot
-;; express this, because it only emits angled includes.
-(cpp/raw "#include \"../jank-raylib-sys/raylib/examples/others/resources/audio_data.h\"
-          #include \"../jank-raylib-sys/raylib/examples/others/resources/image_data.h\"")
+  (:include "raylib.h"
+            "./../jank-raylib-sys/raylib/examples/others/resources/audio_data.h"
+            "./../jank-raylib-sys/raylib/examples/others/resources/image_data.h"))
 
 (def WIDTH 800)
 (def HEIGHT 450)

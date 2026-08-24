@@ -103,7 +103,10 @@ error: No matching call to 'AttachAudioMixedProcessor' function.
 ```
 
 This is the only remaining *limitation* reason any example here carries
-`cpp/raw`: 4 of the 5 blocks left in 214 sources.
+`cpp/raw`: 4 of the 6 blocks left in 217 sources. Of the other two,
+`screen_recording.jank` needs a preprocessor define (see the `:include`
+section below) and `point_rendering.jank` keeps its generator in C on
+performance grounds, not because jank cannot express it.
 A callback defined inside a `cpp/raw` block is ordinary C, and a sibling
 wrapper attaches it:
 
@@ -144,6 +147,45 @@ holding structs (a jank map does that).
 the same way. The boundary rules that shape these helpers, boxing, `cpp/=`,
 and why an accessor cannot be factored out, are in
 [`native-value-lifetimes.md`](native-value-lifetimes.md#the-four-faces-of-one-boundary-rule).
+
+## `:include` can emit a quoted include: prefix the path with `./`
+
+`(:include "foo.h")` emits `#include <foo.h>`, so a header that lives
+relative to the working directory is not found and clang says so:
+
+```
+error: 'inc/probe_data.h' file not found with <angled> include; use "quotes" instead
+```
+
+**A path starting with `./` switches jank to a quoted include.** The rule is a
+literal two-character prefix test in `clojure.core/include`, so it is exact:
+
+| `:include` argument | emitted | resolves |
+|---|---|---|
+| `"raylib.h"` | `#include <raylib.h>` | yes, system/`-I` path |
+| `"inc/data.h"` | `#include <inc/data.h>` | **no** |
+| `"./inc/data.h"` | `#include "./inc/data.h"` | yes |
+| `"../up/data.h"` | `#include <../up/data.h>` | **no** - `../` is not `./` |
+| `"./../up/data.h"` | `#include "./../up/data.h"` | yes |
+
+The fourth row is the trap: a relative path that goes *up* still needs the
+`./` in front of the `../`, which reads like a typo and is not. That is the
+form `embedded_files.jank` uses to pull in its two generated data headers,
+and it is why that example carries no `cpp/raw` at all.
+
+**A preprocessor define before an include still needs `cpp/raw`.** There is no
+`:define` clause, and an `ns` `:include` is always emitted ahead of any
+top-level form, so the define cannot be made to land first. The workaround
+keeps only the define in `cpp/raw` and pulls the header with a top-level
+`(include ...)` call - the same macro the `ns` clause expands to:
+
+```clojure
+(cpp/raw "#define MSF_GIF_IMPL")
+(include "./../jank-raylib-sys/raylib/examples/core/msf_gif.h")
+```
+
+`screen_recording.jank` does exactly this for the single-header msf_gif
+encoder, which is the pattern for any `#define X_IMPLEMENTATION` library.
 
 ## Known-blocked constructs
 

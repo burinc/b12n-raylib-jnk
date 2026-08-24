@@ -33,8 +33,54 @@ Two intuitions this kills:
   measured, an order of magnitude below one boxed arithmetic operation.
   Interop is the fast path, not the slow one.
 
-It is boxing. An empty loop costs ~810 ns an iteration because `(inc i)` and
-`(< i n)` allocate.
+It is boxing. An empty loop costs a fixed amount an iteration because
+`(inc i)` and `(< i n)` allocate.
+
+> **Re-measurement note (2026-08-25).** The ~810 ns figure in the table above
+> did not reproduce at the same `-O2` on either jank binary on this box - the
+> 2026-07-15 jank-0.1-alpha build or the Homebrew jank 0.1 release. An empty
+> boxed `loop`/`recur` whose bound is a `def` var measures **37 ns** an
+> iteration over 100 x 12000 iterations on both, and **51 ns cold / 44 ns
+> warm** for a single 12000-iteration run - tens of ns, not hundreds. Our
+> own re-run of this probe on a later jank build, recorded in
+> [issue #4](https://github.com/burinc/jank/issues/4), reported 14.5 ns for
+> the same row - the same order of magnitude. The original harness could not
+> be reconstructed, so the table is left as recorded rather than silently
+> rewritten, but **treat the boxed floor as tens of ns an iteration**. The
+> `cpp/aget` and `cpp/cos` rows were not re-measured. The *shape* of the
+> finding - boxing dominates, interop is the fast path - is unchanged; only
+> the magnitude is smaller, which makes the "when it matters" thresholds
+> below conservative rather than wrong.
+
+## Unboxed loop locals: the init is not enough
+
+jank does support unboxed `loop` locals, and they are unboxed by
+**initialising them unboxed**: `(loop [i (cpp/int 0)] ...)`.
+
+The trap is that this buys nothing on its own. Unboxedness does not propagate
+through ordinary Clojure operators - `(inc i)` and `(< i n)` box an unboxed
+local straight back up, so the loop costs what a fully boxed loop costs. Three
+1,000,000-iteration accumulator loops with the bound read from a `def` var, so
+the optimiser cannot fold them:
+
+| loop | alpha | 0.1 |
+|---|---|---|
+| `[i 0 acc 0]`, `inc` / `<` / `+` | 41.9 | 33.2 |
+| `[i (cpp/int 0) acc (cpp/int 0)]`, still `inc` / `<` / `+` | 42.4 | 31.9 |
+| `[i (cpp/int 0) acc (cpp/int 0)]`, `cpp/+` / `cpp/<` throughout | eliminated | eliminated |
+
+ns per iteration, on the 2026-07-15 alpha and the Homebrew 0.1 release.
+
+The middle row is the point: an unboxed init with boxed operators is a
+rounding error away from the fully boxed loop - on 0.1 it even measures
+marginally faster, which is the same statement about noise. The third row
+cannot be quoted as a per-iteration cost at all: at `-O2` a genuinely
+unboxed loop is closed-formed away by the optimiser, which is itself the
+evidence that nothing in it allocates.
+
+**So the rule is not "unbox the init", it is "use `cpp/` operators
+throughout".** The recipe below already does this; the init is necessary but
+not sufficient.
 
 ## When it matters
 

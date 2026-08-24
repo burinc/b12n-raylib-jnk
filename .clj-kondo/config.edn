@@ -17,6 +17,13 @@
   ;; clj-kondo only knows Clojure's ns options.
   :unknown-ns-option {:level :off}
 
+  ;; That same :include clause is backed by clojure.core/include, a real jank
+  ;; macro that can also be called at top level - screen_recording.jank does,
+  ;; because a #define has to precede its header and an ns :include is always
+  ;; emitted first. clj-kondo has no jank core, so the call reads as an
+  ;; unresolved symbol.
+  :unresolved-symbol {:exclude [include]}
+
   ;; Every example's -main takes [& args] whether or not it reads them, so
   ;; this fires 213 times.
   ;;

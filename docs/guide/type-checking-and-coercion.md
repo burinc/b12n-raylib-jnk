@@ -8,15 +8,36 @@
 
 ## if/cond branch type-checking
 
-jank type-checks every `if` branch. `cond`/`case` expand with an implicit
-trailing `nil`, which clashes with a native value type:
-`Mismatched 'if' branch types 'Color' and 'nil'`.
+jank type-checks every `if` branch: both branches must have the same type, a
+common type, or a trait conversion. There is no universal base class in the
+native world the way `Object` is on the JVM, so two unrelated native types
+have nothing to unify to.
+
+**`if` itself is not the problem - the implicit `nil` branch is.** A
+two-branch `if` whose arms are both the same native type works, including for
+a struct with no trait conversion:
+
+```clojure
+(let [b (if flag (cpp/timespec) (cpp/timespec))] ...)   ; fine
+(let [b (when flag (cpp/timespec))] ...)                ; Mismatched 'if' branch types
+```
+
+`when` fails because its false arm is `nil`. This is why picking a native
+value is written as hand-nested `if`s where every branch ends in a concrete
+value: `(if on-text? cpp/RED cpp/DARKGRAY)` as a call argument is fine
+(`input_box.jank`, `bullet_hell.jank`).
+
+**`cond` cannot yield a non-convertible native value even with `:else`.**
+This is worth stating because `:else` looks like it should close the gap. It
+does not: `(cond a x :else y)` expands to `(if a x (if :else y nil))`, so the
+trailing `nil` survives and the same mismatch fires. Verified against a
+`cpp/timespec` on both the 2026-07-15 jank-0.1-alpha build and the Homebrew
+jank 0.1 release. `case` has the same shape.
 
 - `cond` returning **jank** values (maps, keywords, strings, vectors) is
-  fine: state machines and `[x vx]`-vector returns all work.
-- Picking a **native** value needs hand-nested `if`s where every branch ends
-  in a concrete value: `(if on-text? cpp/RED cpp/DARKGRAY)` as a call
-  argument is fine (`input_box.jank`, `bullet_hell.jank`).
+  fine: state machines and `[x vx]`-vector returns all work. The clash is
+  only for native `cpp/` values with no trait conversion; a trait-convertible
+  scalar like `cpp/int` survives `when`/`cond` without complaint.
 
 **`and`/`or` are `if`s too, and a native struct-field bool clashes with a jank
 bool.** `(and native-bool jank-bool)` expands to
