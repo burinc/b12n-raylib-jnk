@@ -102,6 +102,12 @@ error: No matching call to 'AttachAudioMixedProcessor' function.
        With argument 0 having type 'jank::runtime::object_ref &'.
 ```
 
+jank's author has since confirmed this is a known gap with a planned shape:
+a separate `cpp/fn` special form for building C++ functions and closures,
+explicitly **not** support for passing vars or boxed jank fns
+([issue #3](https://github.com/burinc/jank/issues/3)). So the four shims below
+are waiting on a feature, not on a workaround anyone has missed.
+
 This is the only remaining *limitation* reason any example here carries
 `cpp/raw`: 4 of the 6 blocks left in 217 sources. Of the other two,
 `screen_recording.jank` needs a preprocessor define (see the `:include`
@@ -145,7 +151,7 @@ holding structs (a jank map does that).
 `rlights.jank` is the result: no header, no `cpp/raw`, nothing to install.
 `shaders.jank` and `models.jank` cover shader uniforms and material binding
 the same way. The boundary rules that shape these helpers, boxing, `cpp/=`,
-and why an accessor cannot be factored out, are in
+and why an accessor cannot be factored out as a fn (though a macro can), are in
 [`native-value-lifetimes.md`](native-value-lifetimes.md#the-four-faces-of-one-boundary-rule).
 
 ## `:include` can emit a quoted include: prefix the path with `./`

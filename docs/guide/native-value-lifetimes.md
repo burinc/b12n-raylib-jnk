@@ -69,10 +69,11 @@ Same rule each time, but the next one never looks like the last:
    jank fn and the native call inside rejects it. Box it.
 2. **Boxing cannot be wrapped in a fn.** `(defn box-it [s] (cpp/box (cpp/new cpp/Shader s)))`
    fails identically: by the time the body runs `s` is already an
-   `object_ref`. Box at the `let` that produced the value.
+   `object_ref`. Box at the `let` that produced the value, or use a macro
+   (see below).
 3. **A native value cannot be returned**, so you cannot factor out an
-   accessor: `(defn- material [m i] (cpp/aget (.-materials m) i))` returns a
-   `Material &`. Inline the lookup.
+   accessor *as a fn*: `(defn- material [m i] (cpp/aget (.-materials m) i))`
+   returns a `Material &`. Inline the lookup, or use a macro (see below).
 4. **`cpp/=` yields the assigned lvalue.** A fn whose last form is an
    assignment tries to return a native reference. End it in an explicit `nil`.
 5. **A closure counts as a fn boundary.** `dotimes` and `doseq` build one, so
@@ -83,6 +84,36 @@ Same rule each time, but the next one never looks like the last:
    and `cpp/+` have no overload for that. Box the pointer, or keep the whole
    loop in one fn. `spectrum_visualizer.jank` boxes its FFT arrays,
    `text_3d_drawing.jank` its `const char *`, `decals.jank` its mesh arrays.
+
+### The escape hatch: a macro is not a fn boundary
+
+Every face above is about a **fn** boundary. A macro has none - it expands at
+the call site, where the value is still native - so the two "cannot be
+factored out" faces can be factored out after all, just not as `defn`:
+
+```clojure
+;; face 2, as a macro: works
+(defmacro box-timespec [v] `(cpp/box (cpp/new cpp/timespec ~v)))
+
+;; face 3, as a macro: works
+(defmacro sec-of [p] `(~'.-tv_sec (cpp/* ~p)))
+```
+
+Both round-trip correctly (verified on the 2026-07-15 jank-0.1-alpha build
+and the Homebrew jank 0.1 release), and it is what jank's author suggests for
+face 2 in [issue #15](https://github.com/burinc/jank/issues/15).
+
+**One gotcha, and it is not obvious.** A member-access symbol has to be
+unquote-quoted as `~'.-tv_sec`. Plain syntax quote namespace-qualifies it into
+`your-ns/.-tv_sec` and the macro dies with `Unable to resolve symbol`, which
+reads like the macro approach itself failed rather than a quoting slip. The
+`cpp/`-prefixed symbols in face 2 are already qualified, so they need no such
+care - which is exactly why face 3 is the one that trips you.
+
+This is a real option, not a recommendation to go rewrite working code: an
+inline `cpp/aget` is clearer than a macro that hides one. Reach for the macro
+when the same boxing or accessor is repeated enough that the duplication is
+the bigger cost.
 
 Corollary: a boxed copy **shares the pointer members** of the original.
 `Shader` is `{unsigned int id; int *locs;}`, `Model` holds
