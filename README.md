@@ -1,9 +1,9 @@
 # b12n-raylib-jnk
 
-[![examples ported](https://img.shields.io/badge/examples_ported-209%2F217-brightgreen)](raylib-examples/README.md#porting-progress)
-[![categories complete](https://img.shields.io/badge/complete-shapes,_shaders,_audio,_text-brightgreen)](raylib-examples/README.md#porting-progress)
+[![examples ported](https://img.shields.io/badge/examples_ported-212%2F220-brightgreen)](raylib-examples/README.md#porting-progress)
+[![categories complete](https://img.shields.io/badge/complete-shaders,_audio,_text,_textures-brightgreen)](raylib-examples/README.md#porting-progress)
 
-209 official [raylib](https://www.raylib.com/examples.html) examples ported to
+212 official [raylib](https://www.raylib.com/examples.html) examples ported to
 **[jank](https://jank-lang.org)**, a native Clojure dialect that compiles to
 native code via C++/LLVM, not the JVM. Each example is one `.jank` namespace
 under `raylib-examples/src/raylib_examples/`; a Leiningen profile picks which

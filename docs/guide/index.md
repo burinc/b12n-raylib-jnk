@@ -1,6 +1,6 @@
 # b12n-raylib-jnk Guide
 
-User-facing documentation for `b12n-raylib-jnk`: 209 [raylib](https://github.com/raysan5/raylib)
+User-facing documentation for `b12n-raylib-jnk`: 212 [raylib](https://github.com/raysan5/raylib)
 examples ported to **[jank](https://jank-lang.org)**, a native Clojure dialect
 (C++/LLVM), not the JVM. Each page below covers one interop pattern or raylib
 API surface, citing the example file that proves it.
@@ -8,7 +8,7 @@ API surface, citing the example file that proves it.
 ## Why this exists
 
 jank is young, and almost nothing has been written about using it against a
-real C library at this scale. Porting 209 raylib examples surfaced a set of
+real C library at this scale. Porting 212 raylib examples surfaced a set of
 interop rules that are not obvious from jank's own documentation and that
 cost real debugging time to find. Each page here is one of those rules,
 written up with the committed example that proves it, so the next person
@@ -16,7 +16,7 @@ does not have to rediscover it by bisecting a failing draw loop.
 
 ## What b12n-raylib-jnk is
 
-209 of the official raylib examples (shapes, core, text, textures, shaders,
+212 of the official raylib examples (shapes, core, text, textures, shaders,
 models, and audio), each a small jank namespace under
 `raylib-examples/src/raylib_examples/`, each calling raylib's C API directly
 through `(:include "raylib.h")`.
@@ -64,7 +64,7 @@ misrepresent the CPU-versus-GPU comparison the example exists to show.
 
 Nothing about jank's C++ interop is raylib-specific: `(:include "header.h")`
 and `cpp/` reach any C/C++ library. This repo just happens to exercise it
-against one real, struct-heavy graphics API across 209 examples.
+against one real, struct-heavy graphics API across 212 examples.
 
 ## Capability pages
 
@@ -103,7 +103,7 @@ against one real, struct-heavy graphics API across 209 examples.
 - [`porting-workflow.md`](porting-workflow.md): the end-to-end process for
   porting one example: source of truth, file layout, the five-place
   registration, the headless smoke test.
-- [`example-catalog.md`](example-catalog.md): a tour of all 209 examples
+- [`example-catalog.md`](example-catalog.md): a tour of all 212 examples
   grouped by raylib category, and how to add one (now with a preview GIF
   per recorded example; see [`docs/demos/README.md`](../demos/README.md)
   for the full gallery).

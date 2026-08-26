@@ -3,7 +3,7 @@
 > **Cast and type semantics live in the jank book**:
 > [Casting between native types](https://book.jank-lang.org/cpp-interop/cast.html)
 > and [Working with native types](https://book.jank-lang.org/cpp-interop/native-types.html).
-> Below are the coercion traps 209 raylib ports actually hit, each naming
+> Below are the coercion traps 212 raylib ports actually hit, each naming
 > the example that proves it.
 
 ## if/cond branch type-checking

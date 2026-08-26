@@ -1,4 +1,4 @@
-# The example catalog: 209 raylib demos in jank
+# The example catalog: 212 raylib demos in jank
 
 A map of the whole suite. Each example is one namespace under
 `raylib-examples/src/raylib_examples/`, runnable by a friendly `bb <name>`
