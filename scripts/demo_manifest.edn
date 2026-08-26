@@ -91,7 +91,24 @@
   "rectangle-advanced"  {:warmup 25}
   "fog-of-war"          {:warmup 60}
   "billboard-rendering" {:warmup 25}
-  "waving-cubes"        {:warmup 60}
+  "waving-cubes"        {:warmup 120}
+  ;; clipboard-image takes the defaults and records a blank RAYWHITE window,
+  ;; because CTRL+V never fires. TRIED AND FAILED, do not repeat: a PNG was
+  ;; loaded onto the system clipboard first (osascript -e 'set the clipboard to
+  ;; (read (POSIX file "<abs>.png") as «class PNGf»)', confirmed via
+  ;; 'clipboard info'), then a timeline of [:move x y] + [:key "control + v"]
+  ;; pairs. :key does take a chord and :move does reposition the cursor, but
+  ;; the take still came out empty.
+  ;;
+  ;; This is not a chord problem. Synthetic input does not actuate a
+  ;; raylib/GLFW window at all - not clicks, and not keys either
+  ;; (b12n-cgevent#1 and #6). Measured in the sibling jlt suite:
+  ;; orthographic-projection has no self-animation and prints its own state,
+  ;; and its 17-frame take reads "PERSPECTIVE (SPACE to toggle)" in both the
+  ;; first and last frame despite a [[3.0 :key "space"]] timeline. Anything
+  ;; here that waits for input records as a still; only self-animating
+  ;; examples record usefully. See b12n-screen-grab#9 for why a ✓ and a
+  ;; healthy frame count do not contradict this.
   "tiled-drawing"       {:warmup 25}
   "cellular-automata"   {:warmup 60}
   "textured-curve"      {:warmup 25}

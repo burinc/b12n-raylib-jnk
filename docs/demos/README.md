@@ -76,6 +76,12 @@ Log detected mouse/touch gestures
 
 ![input-gestures](input-gestures.gif)
 
+### window-letterbox
+
+A fixed 640x480 game letterboxed on resize
+
+![window-letterbox](window-letterbox.gif)
+
 ### camera-2d-split-screen
 
 Two players, two cameras, split screen
@@ -124,6 +130,12 @@ An on-screen D-pad moving a player circle
 
 ![input-virtual-controls](input-virtual-controls.gif)
 
+### window-flags
+
+Toggle window state flags live with a bouncing ball
+
+![window-flags](window-flags.gif)
+
 ### render-texture
 
 A ball bouncing inside a rotated off-screen render texture
@@ -159,6 +171,12 @@ A HighDPI overlay: grid, monitor/DPI info, crosshair
 Colored bars in a no-repeat LoadRandomSequence
 
 ![random-sequence](random-sequence.gif)
+
+### screen-recording
+
+Record the window to an animated GIF
+
+![screen-recording](screen-recording.gif)
 
 ### clipboard-text
 
@@ -790,6 +808,12 @@ An animated GIF streamed frame-by-frame to a texture
 
 ![gif-player](gif-player.gif)
 
+### clipboard-image
+
+Paste images from the system clipboard
+
+![clipboard-image](clipboard-image.gif)
+
 ### framebuffer-rendering
 
 An observer camera watching a subject camera + frustum
@@ -1253,4 +1277,10 @@ A live FFT spectrum of the music through a shader
 Native Colors carried across fns in opaque boxes
 
 ![opaque-boxes](opaque-boxes.gif)
+
+### embedded-files
+
+A logo and a sound compiled into the binary as C arrays
+
+![embedded-files](embedded-files.gif)
 
