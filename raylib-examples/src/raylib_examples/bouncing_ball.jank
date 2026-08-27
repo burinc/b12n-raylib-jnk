@@ -1,3 +1,4 @@
+;; #region ns-form
 (ns raylib-examples.bouncing-ball
   "raylib [shapes] example - bouncing ball, ported to jank.
 
@@ -5,6 +6,7 @@
   Controls: SPACE pause/resume, G toggle gravity, Q quit.
   Based on raylib/examples/shapes/shapes_bouncing_ball.c"
   (:include "raylib.h"))
+;; #endregion
 
 (def WIDTH 800)
 (def HEIGHT 450)
@@ -42,10 +44,12 @@
             fsy (if (or hit-bottom? hit-top?) (* nsy -0.95) nsy)
             frames (inc frames)]
 
+;; #region draw-circle-call
         (cpp/BeginDrawing)
         (cpp/ClearBackground cpp/RAYWHITE)
 
         (cpp/DrawCircle (int fx) (int fy) (cpp/float BALL-RADIUS) cpp/MAROON)
+;; #endregion
 
         (cpp/DrawText "PRESS SPACE to PAUSE - G toggles GRAVITY - Q quits"
                       10 (- HEIGHT 25) 20 cpp/LIGHTGRAY)
