@@ -1,5 +1,6 @@
 # b12n-raylib-jnk
 
+[![CI](https://github.com/burinc/b12n-raylib-jnk/actions/workflows/ci.yml/badge.svg)](https://github.com/burinc/b12n-raylib-jnk/actions/workflows/ci.yml)
 [![examples ported](https://img.shields.io/badge/examples_ported-212%2F220-brightgreen)](raylib-examples/README.md#porting-progress)
 [![categories complete](https://img.shields.io/badge/complete-shaders,_audio,_text,_textures-brightgreen)](raylib-examples/README.md#porting-progress)
 
