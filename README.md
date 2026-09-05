@@ -131,8 +131,8 @@ stands in for CI here, and the four places a new example has to be registered.
 
 ## License
 
-[zlib](LICENSE), the same license as raylib itself, so the original terms
-carry through the ports rather than being replaced by something stricter.
-
-Every file is under that license. [`NOTICE`](NOTICE) records every
-attribution and what was altered in each.
+[EPL 2.0](LICENSE), matching jolt and the rest of the fleet. It was zlib until
+2026-09-05. EPL 2.0 relicenses nothing that arrived under another licence:
+raylib and its examples remain zlib, and the ports stay derived works of them,
+so those terms carry through. [`NOTICE`](NOTICE) records every attribution and
+what was altered in each.

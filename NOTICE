@@ -1,26 +1,28 @@
 Third-party attribution
 =======================
 
-This project is released under the zlib License; see LICENSE. That is the
-same license raylib itself uses, chosen deliberately so that the original
-terms carry through the example ports rather than being replaced by
-something stricter.
+This project is licensed under the Eclipse Public License 2.0; see LICENSE. It
+was zlib until 2026-09-05, chosen to match raylib itself. EPL 2.0 relicenses
+nothing that arrived under another licence: the whole is EPL 2.0 and each part
+below keeps what it came with. raylib and its examples remain zlib, which is
+permissive and imposes no condition EPL 2.0 conflicts with, so the combination
+distributes cleanly as long as their notices travel with it. That is what this
+file is for.
 
-Every file here is under that license. An earlier version carved out two
-MPL 2.0 files inherited from a vendored -sys wrapper; that wrapper is gone,
-replaced by the official org.jank-lang.commons/raylib-sys package, so the
-carve-out went with it.
+Two obligations survive the licence change and are easy to lose: zlib asks that
+the origin not be misrepresented, and that altered versions be plainly marked.
+The example ports and rlights.h below satisfy the marking in their docstrings
+and header comment, and they still have to.
 
-zlib asks two things of an altered version: that the origin not be
-misrepresented, and that the alteration be plainly marked. This file is that
-marking.
-
+An earlier version carved out two MPL 2.0 files inherited from a vendored -sys
+wrapper; that wrapper is gone, replaced by the official
+org.jank-lang.commons/raylib-sys package, so the carve-out went with it.
 
 raylib
 ------
   Copyright (c) 2013-2026 Ramon Santamaria (@raysan5)
   https://github.com/raysan5/raylib
-  Licensed under the zlib/libpng license (the same license as this project).
+  Licensed under the zlib/libpng license.
 
   raylib is not copied into this repository, and is no longer built here.
   The library comes from org.jank-lang.commons/raylib-sys on Clojars, which
@@ -31,11 +33,10 @@ raylib
   that 101 of the examples load from raylib/examples/*/resources/, which the
   published jar does not carry. Nothing in it is compiled or patched.
 
-
 raylib examples
 ---------------
   Copyright (c) 2013-2026 Ramon Santamaria (@raysan5) and contributors
-  Licensed under the zlib/libpng license (the same license as this project).
+  Licensed under the zlib/libpng license.
 
   The example programs under raylib-examples/src/raylib_examples/ are ports
   of raylib's own example programs to jank. They are altered versions: the
@@ -48,12 +49,11 @@ raylib examples
   One deliberate behavioural deviation from the originals, applied uniformly:
   every example sets FLAG_WINDOW_HIGHDPI.
 
-
 rlights.h
 ---------
   Copyright (c) 2017-2024 Victor Fisac (@victorfisac) and
                           Ramon Santamaria (@raysan5)
-  Licensed under the zlib/libpng license (the same license as this project).
+  Licensed under the zlib/libpng license.
 
   jank-raylib-sys/include/jank_rlights.h is an altered version of raylib's
   examples/shaders/rlights.h. CreateLight and UpdateLightValues are kept
@@ -61,7 +61,6 @@ rlights.h
   scalar wrappers and per-type uniform setters are new work, needed because
   jank functions can neither take nor return native values. The file's own
   header comment carries the same attribution.
-
 
 lein-jank-playground
 --------------------
@@ -74,7 +73,6 @@ lein-jank-playground
   replaced by the official org.jank-lang.commons/raylib-sys package and its
   inlined cmake build helper by that package's own. Recorded here because the
   project started from that work.
-
 
 jank
 ----
